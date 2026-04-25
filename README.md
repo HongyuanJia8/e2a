@@ -389,6 +389,14 @@ The Next.js dashboard ships as a static export, so its config is inlined at buil
 | `NEXT_PUBLIC_FEEDBACK_EMAIL` | Address shown on the feedback form. Empty hides the "or email us at …" line. |
 | `NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION` | Google Search Console token. Only emitted into `<head>` when set, so forks don't inherit upstream's property. |
 
+### Scaling and limitations
+
+**Single-instance for now.** The server keeps several pieces of state in-process: the WebSocket hub for local-mode agents, per-IP/per-agent rate limiters, and background workers for HITL expiration, webhook retry, and cleanup. Running two replicas behind a load balancer today would split WebSocket clients across pods and fire each background worker twice, leading to duplicated emails on HITL TTL expiry. **Vertical scaling is fine; horizontal scaling needs additional work** (advisory locks or leader election for the workers, sticky sessions or a shared pub/sub for the WebSocket hub).
+
+**Dashboard auth is Google OAuth only.** [`internal/auth/auth.go`](internal/auth/auth.go) imports `golang.org/x/oauth2/google` directly and the config exposes `google_client_id` / `google_client_secret`. Teams running GitHub OAuth, Microsoft Entra, Okta, or generic OIDC need to add a provider in that package. The CLI and SDKs authenticate with API keys, which are provider-agnostic.
+
+**Otherwise infra-agnostic.** The Go binary runs on any container host (Docker, Podman, k8s, ECS, Fly, Cloud Run, …). Storage is plain Postgres 14+ — managed (RDS, Cloud SQL, Neon, Supabase) or self-managed. Email goes out via standard SMTP, not a vendor SDK. Attachments live in Postgres rows, so there's no S3/GCS dependency. No queue, no Redis, no separate worker process. Secrets are read from env vars, so any secret manager that injects env at start time works.
+
 ## Security
 
 - **Identity** — agent registration requires DNS TXT verification of domain ownership (custom domains)
