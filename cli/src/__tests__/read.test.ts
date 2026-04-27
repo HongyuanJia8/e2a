@@ -65,8 +65,9 @@ describe("read", () => {
       messageId: "msg_123",
       sender: "alice@example.com",
       recipient: "bot@agents.e2a.dev",
-      subject: "Hello",
+      to: ["bot@agents.e2a.dev"],
       cc: [],
+      subject: "Hello",
       textBody: "Hi there!",
     });
 
@@ -79,6 +80,48 @@ describe("read", () => {
     expect(mockStdout).toHaveBeenCalledWith("Date: 2025-01-15T10:30:00Z\n");
     expect(mockStdout).toHaveBeenCalledWith("Subject: Hello\n");
     expect(mockStdout).toHaveBeenCalledWith("Hi there!\n");
+    // Sole-recipient case: no Also-To or Cc lines emitted.
+    const writes: string[] = mockStdout.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(writes.some((w: string) => w.startsWith("Also-To:"))).toBe(false);
+    expect(writes.some((w: string) => w.startsWith("Cc:"))).toBe(false);
+  });
+
+  it("prints Also-To and Cc when the message had other recipients", async () => {
+    mockGetMessage.mockResolvedValue({});
+    mockParse.mockResolvedValue({
+      messageId: "msg_group",
+      sender: "alice@example.com",
+      recipient: "bot-a@agents.e2a.dev",
+      // Server-emitted To: header has the agent itself plus another bot.
+      to: ["bot-a@agents.e2a.dev", "bot-b@agents.e2a.dev"],
+      cc: ["watcher@example.com"],
+      subject: "Group",
+      textBody: "",
+    });
+
+    await read("msg_group", undefined);
+
+    expect(mockStdout).toHaveBeenCalledWith("Also-To: bot-b@agents.e2a.dev\n");
+    expect(mockStdout).toHaveBeenCalledWith("Cc: watcher@example.com\n");
+  });
+
+  it("prints Also-To when the agent was Bcc'd (not in the To: header)", async () => {
+    mockGetMessage.mockResolvedValue({});
+    mockParse.mockResolvedValue({
+      messageId: "msg_bcc",
+      sender: "alice@example.com",
+      recipient: "bot-bcc@agents.e2a.dev",
+      to: ["bot-a@agents.e2a.dev", "bot-b@agents.e2a.dev"],
+      cc: [],
+      subject: "BCC",
+      textBody: "",
+    });
+
+    await read("msg_bcc", undefined);
+
+    expect(mockStdout).toHaveBeenCalledWith(
+      "Also-To: bot-a@agents.e2a.dev, bot-b@agents.e2a.dev\n",
+    );
   });
 
   it("shows 'unknown' when receivedAt is null", async () => {
@@ -95,8 +138,9 @@ describe("read", () => {
       messageId: "msg_456",
       sender: "bob@example.com",
       recipient: "bot@agents.e2a.dev",
-      subject: "Test",
+      to: ["bot@agents.e2a.dev"],
       cc: [],
+      subject: "Test",
       textBody: "",
     });
 

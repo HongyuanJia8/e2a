@@ -19,6 +19,13 @@ export async function read(messageId: string | undefined, from: string | undefin
   process.stdout.write(`Message ID: ${email.messageId}\n`);
   process.stdout.write(`From: ${email.sender}\n`);
   process.stdout.write(`To: ${email.recipient}\n`);
+  // Other addresses from the original To: header (the message may have been
+  // addressed to several agents at once; this row is one of those fan-outs).
+  const recipientLower = email.recipient.toLowerCase();
+  const otherTo = email.to.filter((a) => a.toLowerCase() !== recipientLower);
+  if (otherTo.length > 0) {
+    process.stdout.write(`Also-To: ${otherTo.join(", ")}\n`);
+  }
   if (email.cc.length > 0) {
     process.stdout.write(`Cc: ${email.cc.join(", ")}\n`);
   }
