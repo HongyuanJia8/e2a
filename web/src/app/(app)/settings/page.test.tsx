@@ -1,6 +1,13 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import SettingsPage from "./page";
 
+// jsdom doesn't provide navigator.clipboard. The signing-secret Copy
+// button calls writeText, so we install a jest mock once at module
+// level so individual tests can assert on it.
+const writeText = jest.fn(async () => {});
+Object.assign(navigator, { clipboard: { writeText } });
+beforeEach(() => writeText.mockClear());
+
 // Mock next/link to plain anchors so we don't need a router in jsdom.
 jest.mock("next/link", () => {
   return function MockLink({ href, children, ...rest }: { href: string; children: React.ReactNode; [k: string]: unknown }) {
@@ -86,14 +93,18 @@ function errResp(text: string, status: number): MockResponse {
 }
 
 describe("Settings — Signing secrets section", () => {
+  // The list endpoint now returns the full plaintext `secret` so the
+  // dashboard can offer a Show/Hide toggle. Fixtures include both
+  // prefix and full secret for that reason.
   const defaultSecret = {
     id: "wsec_default0001",
     name: "default",
+    secret: "abcd1234efgh".repeat(6).slice(0, 64),
     secret_prefix: "abcd1234efgh",
     created_at: "2026-04-15T10:00:00Z",
   };
 
-  it("lists existing secrets without exposing plaintext", async () => {
+  it("lists existing secrets with the prefix hidden by default", async () => {
     global.fetch = makeFetchMock({
       "/api/v1/users/me/signing-secrets": () => jsonResp({ secrets: [defaultSecret] }),
     }) as unknown as typeof fetch;
@@ -102,11 +113,48 @@ describe("Settings — Signing secrets section", () => {
     await waitFor(() => {
       expect(screen.getByText("default")).toBeInTheDocument();
     });
-    // Prefix is shown with a trailing ellipsis.
+    // Prefix is shown with a trailing ellipsis until the user clicks Show.
     expect(screen.getByText("abcd1234efgh…")).toBeInTheDocument();
-    // Critical: nothing in the rendered DOM should contain a 32+ char
-    // hex blob (the full plaintext form). The mock never returns one.
-    expect(document.body.innerHTML).not.toMatch(/[a-f0-9]{32,}/i);
+    expect(screen.queryByText(defaultSecret.secret)).not.toBeInTheDocument();
+  });
+
+  it("toggles the full secret on Show / Hide", async () => {
+    global.fetch = makeFetchMock({
+      "/api/v1/users/me/signing-secrets": () => jsonResp({ secrets: [defaultSecret] }),
+    }) as unknown as typeof fetch;
+
+    render(<SettingsPage />);
+    await waitFor(() => expect(screen.getByText("default")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /^show$/i }));
+    expect(screen.getByText(defaultSecret.secret)).toBeInTheDocument();
+    expect(screen.queryByText("abcd1234efgh…")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^hide$/i }));
+    expect(screen.queryByText(defaultSecret.secret)).not.toBeInTheDocument();
+    expect(screen.getByText("abcd1234efgh…")).toBeInTheDocument();
+  });
+
+  it("copies the full plaintext to the clipboard and flips the Copy label", async () => {
+    global.fetch = makeFetchMock({
+      "/api/v1/users/me/signing-secrets": () => jsonResp({ secrets: [defaultSecret] }),
+    }) as unknown as typeof fetch;
+
+    render(<SettingsPage />);
+    await waitFor(() => expect(screen.getByText("default")).toBeInTheDocument());
+
+    // Copy is only rendered once the row is revealed — that's the
+    // point of the feature, you can't copy what you haven't disclosed.
+    expect(screen.queryByRole("button", { name: /^copy$/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^show$/i }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^copy$/i }));
+    expect(writeText).toHaveBeenCalledWith(defaultSecret.secret);
+    // The handler is async (await writeText) so the "Copied" flip is
+    // applied on the next microtask — waitFor lets jsdom flush it.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^copied$/i })).toBeInTheDocument();
+    });
   });
 
   it("disables Delete when only one secret exists", async () => {
@@ -120,7 +168,7 @@ describe("Settings — Signing secrets section", () => {
     expect(delBtn).toBeDisabled();
   });
 
-  it("creates a new secret and shows the plaintext exactly once, then hides it on dismiss", async () => {
+  it("creates a new secret, shows the plaintext in the banner, and hides the banner on dismiss", async () => {
     const created = {
       id: "wsec_new0002",
       name: "rolling",
@@ -133,7 +181,10 @@ describe("Settings — Signing secrets section", () => {
       "GET /api/v1/users/me/signing-secrets": () => {
         listCallCount++;
         if (listCallCount === 1) return jsonResp({ secrets: [defaultSecret] });
-        return jsonResp({ secrets: [defaultSecret, { ...created, secret: undefined }] });
+        // Second list reflects the row added by POST. The row carries
+        // `secret` because it's the reveal source for Show — we just
+        // start collapsed so the plaintext isn't in the rendered DOM.
+        return jsonResp({ secrets: [defaultSecret, created] });
       },
       "POST /api/v1/users/me/signing-secrets": () => jsonResp(created, 201),
     }) as unknown as typeof fetch;
@@ -145,16 +196,18 @@ describe("Settings — Signing secrets section", () => {
     fireEvent.change(screen.getByPlaceholderText(/rolling-2026/i), { target: { value: "rolling" } });
     fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
 
-    // The plaintext is now in a readonly input with the warning banner.
+    // The plaintext appears in a readonly input inside the new-secret banner.
     await waitFor(() => {
-      expect(screen.getByText(/Save this secret now/i)).toBeInTheDocument();
+      expect(screen.getByText(/new signing secret created/i)).toBeInTheDocument();
     });
     const plaintextInput = screen.getByLabelText(/plaintext signing secret/i) as HTMLInputElement;
     expect(plaintextInput.value).toBe(created.secret);
 
-    // After dismiss, the plaintext disappears from the rendered DOM.
+    // After dismiss the banner is gone. The plaintext still lives in
+    // the table row state (so Show works) but is not in the rendered
+    // DOM because the row starts collapsed.
     fireEvent.click(screen.getByRole("button", { name: /^dismiss$/i }));
-    expect(screen.queryByText(/save this secret now/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/new signing secret created/i)).not.toBeInTheDocument();
     expect(document.body.innerHTML).not.toContain(created.secret);
   });
 
@@ -177,7 +230,7 @@ describe("Settings — Signing secrets section", () => {
   });
 
   it("DELETEs the right id when confirming a row delete", async () => {
-    const second = { ...defaultSecret, id: "wsec_other", name: "other", secret_prefix: "1111" };
+    const second = { ...defaultSecret, id: "wsec_other", name: "other", secret: "1111".repeat(16), secret_prefix: "1111" };
     const deletedIDs: string[] = [];
     global.fetch = makeFetchMock({
       "GET /api/v1/users/me/signing-secrets": () => jsonResp({ secrets: [defaultSecret, second] }),
@@ -202,7 +255,7 @@ describe("Settings — Signing secrets section", () => {
   });
 
   it("surfaces a 'cannot delete the last' error inline", async () => {
-    const second = { ...defaultSecret, id: "wsec_other", name: "other", secret_prefix: "1111" };
+    const second = { ...defaultSecret, id: "wsec_other", name: "other", secret: "1111".repeat(16), secret_prefix: "1111" };
     global.fetch = makeFetchMock({
       "GET /api/v1/users/me/signing-secrets": () => jsonResp({ secrets: [defaultSecret, second] }),
       [`DELETE /api/v1/users/me/signing-secrets/${encodeURIComponent("wsec_other")}`]: () =>
