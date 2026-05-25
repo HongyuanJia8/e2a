@@ -10,10 +10,25 @@ import type {
 import type {
   DashboardAgent,
   ActivityEntry,
+  InboundMessageDetail,
+  ListMessagesResponse,
   PendingMessageSummary,
   PendingMessageDetail,
   PendingAttachment,
 } from "../types";
+
+/** Thrown by `request` on any non-2xx HTTP response. Carries the raw
+ *  status code so callers can branch on 404 vs 500 vs 401 (the
+ *  messages focus page uses this to distinguish "fall back to inbound
+ *  endpoint" from "surface the real server error"). */
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -23,7 +38,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || `Request failed (${res.status})`);
+    throw new ApiError(text || `Request failed (${res.status})`, res.status);
   }
   // Successful mutation endpoints may return no body.
   if (res.status === 204) return undefined as T;
@@ -107,11 +122,74 @@ export async function deleteAgent(email: string): Promise<void> {
   });
 }
 
-// ── Agent activity ──────────────────────────────────────
+// Fires a synthetic "Test email from e2a" send to the agent's own
+// address — exercises outbound SMTP + inbound delivery + webhook (or
+// WebSocket for local agents). Used by the dashboard card's Test
+// button. Routes through `request<T>` so 4xx/5xx surface as `ApiError`
+// with the server's body text, consistent with every other mutation.
+export async function sendAgentTestEmail(
+  email: string,
+): Promise<{ status: string; message_id: string }> {
+  return request(
+    "/api/v1/agents/" + encodeURIComponent(email) + "/test",
+    { method: "POST" },
+  );
+}
 
+// ── Agent activity (deprecated) ─────────────────────────
+
+/**
+ * @deprecated No web client reads this anymore. The dashboard agent
+ * card used to expand an inline ActivityPanel that called this helper;
+ * that panel was removed in favor of the threaded inbox at
+ * `/dashboard/agents/messages`. The backend endpoint
+ * `/api/dashboard/agents/{email}/activity` is also ready for deletion
+ * — keep this helper around for one release in case external tooling
+ * imported it via tree-shaken builds, then remove the helper + the
+ * endpoint together in a follow-up.
+ */
 export async function getAgentActivity(email: string): Promise<ActivityEntry[]> {
   return request<ActivityEntry[]>(
     "/api/dashboard/agents/" + encodeURIComponent(email) + "/activity",
+  );
+}
+
+// Dashboard inbox + SDK polling share this endpoint. SDK callers pass
+// `direction=inbound` (the default); the dashboard inbox passes
+// `direction=all` to fetch mixed inbound+outbound newest-first.
+export async function listAgentMessages(
+  email: string,
+  opts: {
+    direction?: "all" | "inbound" | "outbound";
+    status?: "all" | "unread" | "read";
+    pageSize?: number;
+    token?: string;
+  } = {},
+): Promise<ListMessagesResponse> {
+  const params = new URLSearchParams();
+  if (opts.direction) params.set("direction", opts.direction);
+  if (opts.status) params.set("status", opts.status);
+  if (opts.pageSize) params.set("page_size", String(opts.pageSize));
+  if (opts.token) params.set("token", opts.token);
+  const qs = params.toString();
+  return request<ListMessagesResponse>(
+    "/api/v1/agents/" + encodeURIComponent(email) + "/messages" + (qs ? "?" + qs : ""),
+  );
+}
+
+// Inbound focus-page payload. Note: the server flips inbox_status from
+// "unread" to "read" as a side effect of this GET. The focus page
+// always wants this; if a future consumer needs to preview without
+// marking, add `?mark_read=false` to the backend.
+export async function getInboundMessage(
+  email: string,
+  id: string,
+): Promise<InboundMessageDetail> {
+  return request<InboundMessageDetail>(
+    "/api/v1/agents/" +
+      encodeURIComponent(email) +
+      "/messages/" +
+      encodeURIComponent(id),
   );
 }
 

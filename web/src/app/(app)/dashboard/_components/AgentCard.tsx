@@ -1,14 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import Link from "next/link";
 import type { DashboardAgent } from "../../../components/types";
-import { AgentModeSwitcher } from "./AgentModeSwitcher";
-import { WebhookEditor } from "./WebhookEditor";
-import { HITLEditor } from "./HITLEditor";
 import { ConnectInstructions } from "./ConnectInstructions";
-import { ActivityPanel } from "./ActivityPanel";
 import { Chip } from "../../../components/loft/Chip";
 import { Dot } from "../../../components/loft/Dot";
+import { sendAgentTestEmail } from "../../../components/onboarding/api";
 import { AGENTS_DOMAIN } from "../../../../lib/site";
 
 function isSharedDomain(email: string): boolean {
@@ -17,12 +15,8 @@ function isSharedDomain(email: string): boolean {
 
 export function AgentCard({
   agent,
-  onDelete,
-  onUpdate,
 }: {
   agent: DashboardAgent;
-  onDelete: () => void;
-  onUpdate: () => void;
 }) {
   const [showConnect, setShowConnect] = useState(false);
   const [testState, setTestState] = useState<"idle" | "sending" | "sent">("idle");
@@ -45,27 +39,41 @@ export function AgentCard({
           doesn't get squeezed by the action buttons. */}
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
         <div className="min-w-0 flex-1">
-          {/* Email + badges */}
+          {/* Email + badges. Email is a link to the per-agent Messages view
+              (Activity log) so clicking the agent's address from the
+              dashboard lands on the debug surface for that agent. */}
           <div className="flex items-center gap-2 mb-2 flex-wrap">
             {agent.name && (
-              <span
-                className="text-[14px] font-semibold"
+              <Link
+                href={`/dashboard/agents/messages?email=${encodeURIComponent(agent.email)}`}
+                className="text-[14px] font-semibold hover:underline"
                 style={{ color: "var(--fg)" }}
               >
                 {agent.name}
-              </span>
+              </Link>
             )}
-            <code
-              className="font-mono text-[13px] px-2 py-0.5 break-all"
+            <Link
+              href={`/dashboard/agents/messages?email=${encodeURIComponent(agent.email)}`}
+              className="hover:underline"
               style={{
-                background: "var(--bg-elev)",
-                border: "1px solid var(--border-sub)",
-                borderRadius: "var(--r-sm)",
-                color: "var(--fg)",
+                textDecoration: "none",
+                display: "inline-block",
               }}
             >
-              {agent.email}
-            </code>
+              {/* Keep the email wrapped in a real <code> so screen
+                  readers announce it as code, not generic link text. */}
+              <code
+                className="font-mono text-[13px] px-2 py-0.5 break-all"
+                style={{
+                  background: "var(--bg-elev)",
+                  border: "1px solid var(--border-sub)",
+                  borderRadius: "var(--r-sm)",
+                  color: "var(--fg)",
+                }}
+              >
+                {agent.email}
+              </code>
+            </Link>
             <Chip tone={agent.domain_verified ? "success" : "warn"}>
               <Dot tone={agent.domain_verified ? "success" : "warn"} />
               {agent.domain_verified ? "Verified" : "Unverified"}
@@ -91,17 +99,11 @@ export function AgentCard({
             {new Date(agent.created_at).toLocaleDateString()}
           </p>
 
-          {/* Mode switcher */}
-          <div className="mt-2">
-            <AgentModeSwitcher
-              email={agent.email}
-              currentMode={agent.agent_mode}
-              onSwitched={onUpdate}
-            />
-          </div>
         </div>
 
-        {/* Actions */}
+        {/* Actions: Test + Connect. Edits (mode, webhook URL, HITL,
+            delete) live on the per-agent Settings page; the bottom
+            CTA bar wires that destination. */}
         <div className="flex gap-2 shrink-0 md:ml-4 flex-wrap">
           {agent.domain_verified && (
             <>
@@ -110,20 +112,13 @@ export function AgentCard({
                   setTestError("");
                   setTestState("sending");
                   try {
-                    const res = await fetch(`/api/v1/agents/${encodeURIComponent(agent.email)}/test`, {
-                      method: "POST",
-                      credentials: "include",
-                    });
-                    if (res.ok) {
-                      setTestState("sent");
-                      setTimeout(() => setTestState("idle"), 3000);
-                    } else {
-                      const msg = await res.text();
-                      setTestError(msg || `Failed (${res.status})`);
-                      setTestState("idle");
-                    }
-                  } catch {
-                    setTestError("Network error");
+                    await sendAgentTestEmail(agent.email);
+                    setTestState("sent");
+                    setTimeout(() => setTestState("idle"), 3000);
+                  } catch (err) {
+                    setTestError(
+                      err instanceof Error ? err.message : "Network error",
+                    );
                     setTestState("idle");
                   }
                 }}
@@ -165,7 +160,6 @@ export function AgentCard({
               </button>
             </>
           )}
-          <OverflowMenu onDelete={onDelete} />
         </div>
         {testError && (
           <p
@@ -177,31 +171,8 @@ export function AgentCard({
         )}
       </div>
 
-      {/* Cloud: webhook editor */}
-      {isCloud && (
-        <div className="mt-3">
-          <WebhookEditor
-            email={agent.email}
-            currentUrl={agent.webhook_url}
-            onUpdated={onUpdate}
-          />
-        </div>
-      )}
-
-      {/* HITL approval settings — visible for every agent, any mode */}
-      {agent.domain_verified && (
-        <div className="mt-3">
-          <HITLEditor
-            email={agent.email}
-            enabled={agent.hitl_enabled}
-            ttlSeconds={agent.hitl_ttl_seconds}
-            expirationAction={agent.hitl_expiration_action}
-            onUpdated={onUpdate}
-          />
-        </div>
-      )}
-
-      {/* Connect instructions */}
+      {/* Connect instructions — inline on the card because they're a
+          first-mile onboarding affordance, not ongoing config. */}
       {showConnect && (
         <div className="mt-3 border-t border-border pt-4">
           <ConnectInstructions mode={isLocal ? "local" : "cloud"} />
@@ -241,9 +212,27 @@ export function AgentCard({
         />
       </div>
 
-      {/* Activity (subordinate) */}
-      <div className="mt-3">
-        <ActivityPanel email={agent.email} />
+      {/* Bottom CTA bar — the two canonical entry points into the
+          per-agent surface. Name + email chip also link to "Open inbox →"
+          so there are multiple discoverable paths to the same place. */}
+      <div
+        className="mt-3 pt-3 flex items-center gap-4 flex-wrap"
+        style={{ borderTop: "1px solid var(--border-sub)" }}
+      >
+        <Link
+          href={`/dashboard/agents/messages?email=${encodeURIComponent(agent.email)}`}
+          className="inline-flex items-center gap-1 text-[13px] font-medium hover:underline"
+          style={{ color: "var(--accent-strong)" }}
+        >
+          Open inbox <span aria-hidden>→</span>
+        </Link>
+        <Link
+          href={`/dashboard/agents/settings?email=${encodeURIComponent(agent.email)}`}
+          className="inline-flex items-center gap-1 text-[13px] hover:underline"
+          style={{ color: "var(--fg-muted)" }}
+        >
+          Settings
+        </Link>
       </div>
     </div>
   );
@@ -299,78 +288,7 @@ function AgentStat({
   );
 }
 
-// OverflowMenu collapses destructive actions (currently just Delete)
-// behind a kebab button to match the mock's Test / Connect / ⋯
-// action triad. Closes on Escape, click-outside, or option click.
-//
-// Today the menu only has Delete. Future additions (e.g. Rotate
-// webhook URL, Export activity CSV) slot in here without expanding
-// the visible button row.
-function OverflowMenu({ onDelete }: { onDelete: () => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        aria-label="More actions"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        className="text-[16px] leading-none px-2.5 py-1.5 transition"
-        style={{
-          background: open ? "var(--bg-elev)" : "transparent",
-          color: "var(--fg-muted)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--r-md)",
-          // No inline minHeight — the global tap-target rule
-          // (globals.css) gives this button 44px on phone widths.
-        }}
-      >
-        ⋯
-      </button>
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 mt-1 z-10 min-w-[140px] py-1"
-          style={{
-            background: "var(--bg-panel)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--r-md)",
-            boxShadow: "0 4px 18px rgba(0,0,0,0.08)",
-          }}
-        >
-          <button
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              onDelete();
-            }}
-            className="block w-full text-left px-3 py-2 text-[12px] transition"
-            style={{ color: "var(--danger-strong)" }}
-          >
-            Delete agent
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
+// Delete moved to /dashboard/agents/settings → Danger zone, so the
+// agent card no longer needs an overflow menu. Future per-agent
+// quick-actions (e.g. Export activity CSV) would slot back in here
+// or, more likely, into Settings.

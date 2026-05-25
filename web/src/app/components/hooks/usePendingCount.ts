@@ -1,35 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+// Sidebar's pending-count badge. Thin wrapper around SWR's
+// `usePendingMessages` query — kept as a hook for two reasons:
+//
+//   1. Callers only need the count, not the list, so we project once
+//      here instead of at every call site.
+//   2. SWR's `data === undefined` (first fetch in flight or hard
+//      error) maps to `null` for back-compat with the old hook's
+//      contract — callers can distinguish "unknown" from "zero".
+//
+// Refresh wiring (focus / reconnect / dedup) lives in SWRProvider's
+// config, not here. Mutation sites that drop the count (approve,
+// reject) call `invalidatePendingList()` from lib/swrKeys.ts.
+
+import useSWR from "swr";
 import { listPendingMessages } from "../onboarding/api";
+import { pendingMessagesKey } from "../../../lib/swrKeys";
 
-// usePendingCount returns the number of HITL pending_approval messages
-// owned by the current user. Polls every 30s so the sidebar badge stays
-// roughly fresh without the user needing to reload. Returns null while
-// the first fetch is in flight and on error, so callers can distinguish
-// "unknown" from "zero" and decide how to render.
 export function usePendingCount(): number | null {
-  const [count, setCount] = useState<number | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const load = async () => {
-      try {
-        const msgs = await listPendingMessages();
-        if (!cancelled) setCount(msgs.length);
-      } catch {
-        if (!cancelled) setCount(null);
-      }
-    };
-
-    load();
-    const id = setInterval(load, 30_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, []);
-
-  return count;
+  const { data, error } = useSWR(pendingMessagesKey, () => listPendingMessages());
+  if (error) return null;
+  return data ? data.length : null;
 }
