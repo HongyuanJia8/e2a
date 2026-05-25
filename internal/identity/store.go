@@ -1207,25 +1207,38 @@ type SendResult struct {
 //
 // Ownership is enforced by the agent -> user join. Messages owned by
 // another user return ErrMessageNotFound. Messages whose status is not
-// 'pending_approval' return ErrNotPendingApproval.
+// 'pending_approval' return ErrNotPendingApproval. If another worker is
+// already mid-send for this message (rare; only possible after the
+// approval row lock was released without status changing — e.g. a
+// pool drop mid-send), this returns ErrSendInProgress.
 //
 // Concurrency / failure mode notes:
 //
-//   - The row-level FOR UPDATE lock is held for the duration of the send
-//     callback. In practice that is bounded by outbound.SMTPRelay's per-
-//     attempt deadline (2min) plus its internal retry backoff (1s/5s/15s)
-//     — worst case ~6.5min of lock on this single row. Other rows are
-//     unaffected; deadlock is not possible because only one row is ever
-//     locked per call.
+//   - The row-level FOR NO KEY UPDATE lock is held on the messages row
+//     for the duration of the send callback. In practice that is
+//     bounded by outbound.SMTPRelay's per-attempt deadline (2min) plus
+//     its internal retry backoff (1s/5s/15s) — worst case ~6.5min of
+//     lock on this single row. Other rows are unaffected; deadlock is
+//     not possible because only one row is ever locked per call.
 //
-//   - There is a narrow crash window where send() may succeed at SES but
-//     the subsequent UPDATE or Commit fails (DB connection drop, pool
-//     exhaustion). The transaction rolls back, the row stays pending, and
-//     a retry — by the same reviewer or the expiration worker — would
-//     re-send to SES. Eliminating this requires SES-side idempotency keys
-//     or a separate "send attempts" table; deferred for v1. Callers that
-//     see both a successful send callback and a subsequent error from
-//     this function should log both rather than silently retry.
+//     Why NO KEY UPDATE rather than the stricter FOR UPDATE: the
+//     send_attempts INSERT below runs on a SEPARATE pool connection
+//     and needs a KEY SHARE lock on this messages row for FK
+//     enforcement. FOR UPDATE blocks KEY SHARE; FOR NO KEY UPDATE
+//     allows it. The downgrade is safe because nothing in this
+//     codebase mutates messages.id (the only key column) after
+//     creation — all UPDATEs touch non-key columns, which NO KEY
+//     UPDATE serializes against itself exactly like FOR UPDATE.
+//
+//   - The old crash window where send() succeeded at SES but the
+//     subsequent UPDATE/Commit failed (DB blip, pool exhaustion) is now
+//     closed by the send_attempts table. Around send() we run two small
+//     auxiliary transactions that outlive the surrounding approval
+//     transaction: ClaimSendAttempt before send(), MarkSendSucceeded
+//     (or MarkSendFailed) after. If the approval tx rolls back AFTER
+//     send() succeeded, the next retry of ApproveAndSend reads
+//     send_attempts.status='sent', reuses the recorded SendResult, and
+//     skips the upstream send entirely.
 func (s *Store) ApproveAndSend(
 	ctx context.Context,
 	messageID, userID string,
@@ -1271,7 +1284,7 @@ func (s *Store) ApproveAndSend(
 		 FROM messages m
 		 JOIN agent_identities a ON a.id = m.agent_id
 		 WHERE m.id = $1 AND m.direction = 'outbound'
-		 FOR UPDATE OF m`,
+		 FOR NO KEY UPDATE OF m`,
 		messageID,
 	).Scan(
 		&m.ID, &m.AgentID, &m.Direction, &m.Sender, &m.Recipient, &m.Subject,
@@ -1313,9 +1326,42 @@ func (s *Store) ApproveAndSend(
 
 	editedByReviewer := edits.Apply(&m)
 
-	result, err := send(&m)
+	// Exactly-once gate around the upstream send. Runs OUTSIDE the
+	// approval transaction so its outcome survives an approval-tx
+	// rollback — that's the whole point of send_attempts.
+	claim, err := s.ClaimSendAttempt(ctx, messageID)
 	if err != nil {
 		return nil, err
+	}
+
+	var result SendResult
+	switch claim.Outcome {
+	case SendAttemptAcquired:
+		result, err = send(&m)
+		if err != nil {
+			// Mark failed in a separate tx so the next retry can
+			// take over. Best-effort: log if the mark itself fails,
+			// don't shadow the original send error.
+			if markErr := s.MarkSendFailed(ctx, messageID, err.Error()); markErr != nil {
+				log.Printf("[approve] MarkSendFailed for %s: %v", messageID, markErr)
+			}
+			return nil, err
+		}
+		if markErr := s.MarkSendSucceeded(ctx, messageID, result); markErr != nil {
+			// The upstream send DID succeed; failing to record it
+			// only weakens the exactly-once guarantee for the next
+			// retry (it would re-send). Log loudly and proceed —
+			// the approval tx below still finalizes the message
+			// row from this attempt.
+			log.Printf("[approve] MarkSendSucceeded for %s: %v (next retry may re-send)", messageID, markErr)
+		}
+	case SendAttemptAlreadySent:
+		// A prior approval-tx attempt succeeded at SES but its
+		// surrounding tx rolled back. Reuse the recorded result and
+		// skip the upstream send.
+		result = claim.Sent
+	case SendAttemptInFlight:
+		return nil, ErrSendInProgress
 	}
 
 	_, err = tx.Exec(txCtx,
@@ -1448,18 +1494,36 @@ func (s *Store) ListExpiredPending(ctx context.Context, limit int) ([]Expiration
 
 // ExpireApproveAndSend is the worker-side counterpart to ApproveAndSend:
 // no user ownership check (the caller is the expiration worker, which is
-// system-scoped), SELECT ... FOR UPDATE SKIP LOCKED so concurrent workers
-// don't race for the same row, and the terminal status is
+// system-scoped), SELECT ... FOR NO KEY UPDATE SKIP LOCKED so concurrent
+// workers don't race for the same row, and the terminal status is
 // 'expired_approved' instead of 'sent'. On send failure the transaction
 // rolls back; the worker should then call ExpireReject to move the row
 // to a final state so the row doesn't get picked up on every sweep.
 //
-// Same concurrency / crash-window notes as ApproveAndSend apply: the
-// row-level lock is held for the duration of the send callback (bounded
-// by SMTPRelay timeouts), and a crash between SES acceptance and
-// commit can leave a pending row that would re-send on the next sweep.
+// Exactly-once guarantee: like ApproveAndSend, this method runs the
+// send() callback under a send_attempts gate so a crash between SES
+// acceptance and the surrounding tx commit does NOT cause the next
+// worker poll to re-send. ClaimSendAttempt / MarkSendSucceeded /
+// MarkSendFailed run in separate small transactions that outlive the
+// approval tx; on retry, an AlreadySent verdict reuses the cached
+// SendResult and skips the upstream send entirely. Without this, the
+// polling-loop nature of the worker would guarantee a re-send on any
+// commit failure — strictly worse than the human-approval path,
+// where a re-send needs an explicit click.
+//
 // SKIP LOCKED means multiple app instances can run the worker without
-// contending on the same row.
+// contending on the same row. The row-level FOR NO KEY UPDATE lock on
+// messages is held for the duration of the send callback (bounded by
+// SMTPRelay timeouts); FOR NO KEY UPDATE rather than FOR UPDATE so
+// the send_attempts INSERT in a separate connection can acquire its
+// KEY SHARE lock for FK enforcement — see ApproveAndSend's docstring
+// for the full rationale.
+//
+// If a concurrent worker is mid-send for the same row (the
+// send_attempts row is 'attempting' and not yet stale), returns
+// ErrSendInProgress. The worker loop should treat this like
+// ErrNotPendingApproval — skip silently and let the next poll handle
+// it.
 func (s *Store) ExpireApproveAndSend(
 	ctx context.Context,
 	messageID string,
@@ -1499,7 +1563,7 @@ func (s *Store) ExpireApproveAndSend(
 		   AND direction = 'outbound'
 		   AND status = 'pending_approval'
 		   AND approval_expires_at < now()
-		 FOR UPDATE SKIP LOCKED`,
+		 FOR NO KEY UPDATE SKIP LOCKED`,
 		messageID,
 	).Scan(
 		&m.ID, &m.AgentID, &m.Direction, &m.Sender, &m.Recipient, &m.Subject,
@@ -1535,9 +1599,35 @@ func (s *Store) ExpireApproveAndSend(
 		m.AttachmentsJSON = json.RawMessage(attachments)
 	}
 
-	result, err := send(&m)
+	// Exactly-once gate, identical to ApproveAndSend's bracket. Runs
+	// OUTSIDE this approval tx so the SES outcome survives an approval
+	// tx rollback. See ApproveAndSend's docstring for the full
+	// rationale.
+	claim, err := s.ClaimSendAttempt(ctx, messageID)
 	if err != nil {
 		return nil, err
+	}
+
+	var result SendResult
+	switch claim.Outcome {
+	case SendAttemptAcquired:
+		result, err = send(&m)
+		if err != nil {
+			if markErr := s.MarkSendFailed(ctx, messageID, err.Error()); markErr != nil {
+				log.Printf("[expire] MarkSendFailed for %s: %v", messageID, markErr)
+			}
+			return nil, err
+		}
+		if markErr := s.MarkSendSucceeded(ctx, messageID, result); markErr != nil {
+			log.Printf("[expire] MarkSendSucceeded for %s: %v (next worker poll may re-send)", messageID, markErr)
+		}
+	case SendAttemptAlreadySent:
+		// A prior auto-approve attempt succeeded at SES but its
+		// approval tx rolled back. Reuse the recorded result and
+		// skip the upstream send.
+		result = claim.Sent
+	case SendAttemptInFlight:
+		return nil, ErrSendInProgress
 	}
 
 	_, err = tx.Exec(txCtx,
