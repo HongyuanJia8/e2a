@@ -177,14 +177,14 @@ describe("E2AApi", () => {
     });
   });
 
-  it("listPendingMessages GETs /api/v1/messages with the filter", async () => {
+  it("listPendingMessages GETs /api/v1/pending", async () => {
     globalThis.fetch = mockFetch(200, {
       messages: [{ id: "msg_p1", agent_id: "bot@test.dev", subject: "held" }],
     });
     const res = await api.listPendingMessages();
     expect(res.messages).toHaveLength(1);
     const url = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-    expect(url).toBe(`${BASE}/api/v1/messages?status=pending_approval`);
+    expect(url).toBe(`${BASE}/api/v1/pending`);
   });
 
   it("getPendingMessage encodes the id and returns the detail", async () => {
@@ -207,10 +207,10 @@ describe("E2AApi", () => {
       provider_message_id: "<ses@amazonses.com>",
       edited: false,
     });
-    const res = await api.approveMessage("msg_x");
+    const res = await api.approveMessage("bot@example.com", "msg_x");
     expect(res.status).toBe("sent");
     const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(call[0]).toBe(`${BASE}/api/v1/messages/msg_x/approve`);
+    expect(call[0]).toBe(`${BASE}/api/v1/agents/bot%40example.com/messages/msg_x/approve`);
     expect(call[1].method).toBe("POST");
     expect(JSON.parse(call[1].body)).toEqual({});
   });
@@ -221,7 +221,7 @@ describe("E2AApi", () => {
       message_id: "msg_x",
       edited: true,
     });
-    await api.approveMessage("msg_x", {
+    await api.approveMessage("bot@example.com", "msg_x", {
       subject: "edited",
       to: ["bob@example.com"],
     });
@@ -237,7 +237,7 @@ describe("E2AApi", () => {
       message_id: "msg_x",
       rejection_reason: "bad tone",
     });
-    const res = await api.rejectMessage("msg_x", "bad tone");
+    const res = await api.rejectMessage("bot@example.com", "msg_x", "bad tone");
     expect(res.status).toBe("rejected");
     const body = JSON.parse(
       (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body,
@@ -247,7 +247,7 @@ describe("E2AApi", () => {
 
   it("rejectMessage defaults to an empty reason when omitted", async () => {
     globalThis.fetch = mockFetch(200, { status: "rejected", message_id: "msg_x" });
-    await api.rejectMessage("msg_x");
+    await api.rejectMessage("bot@example.com", "msg_x");
     const body = JSON.parse(
       (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body,
     );
