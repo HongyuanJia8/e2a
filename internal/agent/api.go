@@ -23,12 +23,12 @@ import (
 	"github.com/Mnexa-AI/e2a/internal/dkim"
 	"github.com/Mnexa-AI/e2a/internal/hitlnotify"
 	"github.com/Mnexa-AI/e2a/internal/idempotency"
-	"github.com/Mnexa-AI/e2a/internal/telemetry"
 	"github.com/Mnexa-AI/e2a/internal/identity"
 	"github.com/Mnexa-AI/e2a/internal/limits"
 	"github.com/Mnexa-AI/e2a/internal/oauth"
 	"github.com/Mnexa-AI/e2a/internal/outbound"
 	"github.com/Mnexa-AI/e2a/internal/ratelimit"
+	"github.com/Mnexa-AI/e2a/internal/telemetry"
 	"github.com/Mnexa-AI/e2a/internal/usage"
 	"github.com/Mnexa-AI/e2a/internal/webhook"
 	"github.com/Mnexa-AI/e2a/internal/webhookpub"
@@ -161,36 +161,36 @@ func validateSlug(slug string) error {
 }
 
 type API struct {
-	store          *identity.Store
-	sender         *outbound.Sender
-	smtpRelay      *outbound.SMTPRelay
-	userAuth       *auth.UserAuth
-	usage          usage.UsageTracker
-	smtpDomain     string
-	fromDomain     string
+	store      *identity.Store
+	sender     *outbound.Sender
+	smtpRelay  *outbound.SMTPRelay
+	userAuth   *auth.UserAuth
+	usage      usage.UsageTracker
+	smtpDomain string
+	fromDomain string
 	// sharedDomain enables slug-based agent registration when non-empty.
 	// See config.Config.SharedDomain for the rationale.
-	sharedDomain   string
+	sharedDomain string
 	// publicURL is the externally visible base URL of the API. Surfaced
 	// via GET /api/v1/info so CLI/SDK clients can populate absolute
 	// links without each user configuring it. Empty when the operator
 	// hasn't set http.public_url.
-	publicURL      string
-	production     bool
-	sendLimit      *ratelimit.Limiter
-	regLimit       *ratelimit.Limiter
-	pollLimit      *ratelimit.Limiter
-	feedbackLimit  *ratelimit.Limiter
-	dcrLimit       *ratelimit.Limiter // OAuth Dynamic Client Registration — anonymous endpoint, per-IP
-	approvalSigner *approvaltoken.Signer  // optional; if nil, magic-link endpoints return 404
-	notifier       *hitlnotify.Notifier   // optional; if nil, holdForApproval doesn't send notification email
-	oauthProvider  fosite.OAuth2Provider  // optional; if nil, /api/oauth/* endpoints return 404
-	oauthStorage   *oauth.Storage         // optional; consent handler needs Pool() for cross-package tx
-	idempotency    *idempotency.Store     // optional; when nil, Idempotency-Key header is ignored
-	enforcer       limits.Enforcer        // optional; when nil, all limit checks are skipped (effectively unlimited)
-	usageStore     *usage.Store           // optional; needed by handleGetMyLimits to surface current counts
-	internalAPISecret string              // optional; when empty, /api/internal/* endpoints return 503
-	billingHookURL string                 // optional; when set, handleDeleteUserData POSTs an HMAC-signed user-deleted notice here (sidecar's /api/internal/billing/cancel)
+	publicURL         string
+	production        bool
+	sendLimit         *ratelimit.Limiter
+	regLimit          *ratelimit.Limiter
+	pollLimit         *ratelimit.Limiter
+	feedbackLimit     *ratelimit.Limiter
+	dcrLimit          *ratelimit.Limiter    // OAuth Dynamic Client Registration — anonymous endpoint, per-IP
+	approvalSigner    *approvaltoken.Signer // optional; if nil, magic-link endpoints return 404
+	notifier          *hitlnotify.Notifier  // optional; if nil, holdForApproval doesn't send notification email
+	oauthProvider     fosite.OAuth2Provider // optional; if nil, /api/oauth/* endpoints return 404
+	oauthStorage      *oauth.Storage        // optional; consent handler needs Pool() for cross-package tx
+	idempotency       *idempotency.Store    // optional; when nil, Idempotency-Key header is ignored
+	enforcer          limits.Enforcer       // optional; when nil, all limit checks are skipped (effectively unlimited)
+	usageStore        *usage.Store          // optional; needed by handleGetMyLimits to surface current counts
+	internalAPISecret string                // optional; when empty, /api/internal/* endpoints return 503
+	billingHookURL    string                // optional; when set, handleDeleteUserData POSTs an HMAC-signed user-deleted notice here (sidecar's /api/internal/billing/cancel)
 	// subscriberStore powers the slice-2 webhooks-as-a-resource
 	// /webhooks/{id}/test and /webhooks/{id}/deliveries endpoints.
 	// Optional — when nil, those endpoints return 404 (the rest of
@@ -672,6 +672,14 @@ func stripBearerScheme(h string) string {
 //
 // If no Authorization header is present, falls back to the session
 // cookie used by the web dashboard.
+// AuthenticateUser is the exported seam over authenticateUser so the v1
+// httpapi layer (internal/httpapi) reuses the exact same credential-
+// resolution path (API key, OAuth bearer, session cookie) instead of
+// forking a second one. There is one place credentials are checked.
+func (a *API) AuthenticateUser(r *http.Request) (*identity.User, error) {
+	return a.authenticateUser(r)
+}
+
 func (a *API) authenticateUser(r *http.Request) (*identity.User, error) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader != "" {
@@ -1343,6 +1351,22 @@ type dnsRecordCheck struct {
 //     "{selector}._domainkey.{domain}" and matches the stored public
 //     key. Domains without a stored keypair report "deferred" — these
 //     are pre-migration rows that the next claim would key.
+//
+// DNSRecordCheck is the exported diagnostic from CheckDomainRecords.
+type DNSRecordCheck struct {
+	TXTFound bool
+	MX       string
+	SPF      string
+	DKIM     string
+}
+
+// CheckDomainRecords is the exported seam over checkDomainRecords so the v1
+// httpapi layer reuses the exact DNS-probe logic for domain verification.
+func CheckDomainRecords(domain, smtpDomain, verificationToken, dkimSelector, dkimPublicKey string, production bool) DNSRecordCheck {
+	c := checkDomainRecords(domain, smtpDomain, verificationToken, dkimSelector, dkimPublicKey, production)
+	return DNSRecordCheck{TXTFound: c.TXTFound, MX: c.MX, SPF: c.SPF, DKIM: c.DKIM}
+}
+
 func checkDomainRecords(domain, smtpDomain, verificationToken, dkimSelector, dkimPublicKey string, production bool) dnsRecordCheck {
 	if !production {
 		dkimState := "deferred"
@@ -1699,20 +1723,29 @@ func (a *API) domainInfoFromRecord(d *identity.Domain) DomainInfo {
 //
 // replyToEmailMessageID is the inbound Message-ID being replied to, or "".
 // msgType is one of "send", "reply", "test", or "forward".
-func (a *API) holdForApproval(w http.ResponseWriter, r *http.Request, agent *identity.AgentIdentity, req outbound.SendRequest, msgType, replyToEmailMessageID string) {
+// errHoldAttachments is returned by HoldForApprovalCore when the attachments
+// fail to serialize, so callers can map it to the same 500 the legacy handler
+// produced ("failed to serialize attachments") vs the create-failure 500.
+var errHoldAttachments = errors.New("failed to serialize attachments")
+
+// HoldForApprovalCore is the HTTP-free core of the HITL hold: it persists the
+// pending outbound message, fires the async reviewer notification, and
+// publishes the pending-approval event, returning the held message. Both the
+// legacy handler and the v1 httpapi layer call it so there is exactly one
+// hold-and-notify path (api-v1-redesign — outbound extraction).
+func (a *API) HoldForApprovalCore(ctx context.Context, agent *identity.AgentIdentity, req outbound.SendRequest, msgType, replyToEmailMessageID string) (*identity.Message, error) {
 	var attachmentsJSON []byte
 	if len(req.Attachments) > 0 {
 		b, err := json.Marshal(req.Attachments)
 		if err != nil {
 			log.Printf("[api] hitl: marshal attachments: %v", err)
-			http.Error(w, "failed to serialize attachments", http.StatusInternalServerError)
-			return
+			return nil, errHoldAttachments
 		}
 		attachmentsJSON = b
 	}
 
 	msg, err := a.store.CreatePendingOutboundMessage(
-		r.Context(), agent.ID,
+		ctx, agent.ID,
 		req.To, req.CC, req.BCC,
 		req.Subject, req.Body, req.HTMLBody,
 		attachmentsJSON,
@@ -1721,8 +1754,7 @@ func (a *API) holdForApproval(w http.ResponseWriter, r *http.Request, agent *ide
 	)
 	if err != nil {
 		log.Printf("[api] hitl: create pending message: agent=%s err=%v", agent.ID, err)
-		http.Error(w, "failed to hold message for approval", http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 
 	slug, _, _ := strings.Cut(agent.EmailAddress(), "@")
@@ -1730,12 +1762,27 @@ func (a *API) holdForApproval(w http.ResponseWriter, r *http.Request, agent *ide
 		msg.ID, msgType, agent.EmailAddress(), req.To, slug, req.ConversationID, req.Subject, msg.ApprovalExpiresAt.Format(time.RFC3339))
 
 	// Fire the reviewer notification asynchronously. Failures are logged
-	// inside the notifier and must never block the 202 response — the
-	// pending row is already persisted and the expiration worker will
-	// finalize it even if every notification email bounces.
-	a.notifier.NotifyPendingApprovalAsync(msg, agent)
+	// inside the notifier and must never block the response — the pending
+	// row is already persisted and the expiration worker will finalize it
+	// even if every notification email bounces.
+	if a.notifier != nil {
+		a.notifier.NotifyPendingApprovalAsync(msg, agent)
+	}
 
-	a.publishPendingApproval(r.Context(), a.buildPendingApprovalEvent(agent, msg, req, msgType), msg.ID)
+	a.publishPendingApproval(ctx, a.buildPendingApprovalEvent(agent, msg, req, msgType), msg.ID)
+	return msg, nil
+}
+
+func (a *API) holdForApproval(w http.ResponseWriter, r *http.Request, agent *identity.AgentIdentity, req outbound.SendRequest, msgType, replyToEmailMessageID string) {
+	msg, err := a.HoldForApprovalCore(r.Context(), agent, req, msgType, replyToEmailMessageID)
+	if err != nil {
+		if errors.Is(err, errHoldAttachments) {
+			http.Error(w, "failed to serialize attachments", http.StatusInternalServerError)
+			return
+		}
+		http.Error(w, "failed to hold message for approval", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
@@ -1744,6 +1791,117 @@ func (a *API) holdForApproval(w http.ResponseWriter, r *http.Request, agent *ide
 		"message_id":          msg.ID,
 		"approval_expires_at": msg.ApprovalExpiresAt,
 	})
+}
+
+// OutboundResult is the HTTP-free outcome of DeliverOutbound.
+type OutboundResult struct {
+	Held              bool
+	PendingMessageID  string
+	ApprovalExpiresAt *time.Time
+	MessageID         string // provider/loopback id when sent
+	Method            string // "smtp" | "loopback"
+}
+
+// OutboundError carries an HTTP status + message so both the legacy handler
+// (http.Error) and the v1 httpapi layer (error envelope) render it
+// consistently. Code is the machine-branchable code the v1 layer uses.
+type OutboundError struct {
+	Status int
+	Code   string
+	Msg    string
+}
+
+func (e *OutboundError) Error() string { return e.Msg }
+
+// DeliverOutbound is the shared send/reply/forward delivery tail, HTTP-free:
+// HITL hold (HoldForApprovalCore), else self-send loopback, else SES send +
+// record outbound + publish sent event. The caller has already authed,
+// resolved + ownership-checked the agent, rate-limited, domain-verified, run
+// the message-send cap, and built the SendRequest with its final Subject /
+// ConversationID. Both the legacy handlers and the v1 layer call this so the
+// live delivery path exists exactly once (api-v1-redesign — outbound
+// extraction). On a nil-error return the side effect has committed, so the
+// idempotency key must be Completed (cached), never Released.
+func (a *API) DeliverOutbound(ctx context.Context, user *identity.User, agent *identity.AgentIdentity, req outbound.SendRequest, msgType, replyToEmailMessageID string) (*OutboundResult, *OutboundError) {
+	if agent.HITLEnabled {
+		msg, err := a.HoldForApprovalCore(ctx, agent, req, msgType, replyToEmailMessageID)
+		if err != nil {
+			if errors.Is(err, errHoldAttachments) {
+				return nil, &OutboundError{http.StatusInternalServerError, "internal_error", "failed to serialize attachments"}
+			}
+			return nil, &OutboundError{http.StatusInternalServerError, "internal_error", "failed to hold message for approval"}
+		}
+		return &OutboundResult{Held: true, PendingMessageID: msg.ID, ApprovalExpiresAt: msg.ApprovalExpiresAt}, nil
+	}
+
+	// Record usage (side-effect only — never block on quota; the cap
+	// pre-check is the gate).
+	if _, err := a.usage.RecordAndCheck(ctx, user.ID, agent.ID, agent.Domain, "outbound"); err != nil {
+		log.Printf("[api] usage recording error: %v", err)
+	}
+
+	if isSelfSend(req, agent.EmailAddress()) {
+		providerID, err := a.performSelfSend(ctx, agent, req, msgType)
+		if err != nil {
+			log.Printf("[api] self-send failed: agent=%s error=%v", agent.EmailAddress(), err)
+			return nil, &OutboundError{http.StatusInternalServerError, "internal_error", "self-send failed"}
+		}
+		slug, _, _ := strings.Cut(agent.EmailAddress(), "@")
+		log.Printf("[mail] dir=outbound type=%s method=loopback from=%s to=%s slug=%s conv_id=%s subject=%q provider_id=%s", msgType, agent.EmailAddress(), agent.EmailAddress(), slug, req.ConversationID, req.Subject, providerID)
+		return &OutboundResult{MessageID: providerID, Method: "loopback"}, nil
+	}
+
+	result, err := a.sender.Send(agent, req)
+	if err != nil {
+		if outbound.IsValidationError(err) {
+			return nil, &OutboundError{http.StatusBadRequest, "invalid_request", err.Error()}
+		}
+		log.Printf("[api] send failed: agent=%s to=%v error=%v", agent.Domain, req.To, err)
+		return nil, &OutboundError{http.StatusInternalServerError, "internal_error", fmt.Sprintf("send failed: %v", err)}
+	}
+	outMsg, err := a.store.CreateOutboundMessage(ctx, agent.ID, result.To, result.CC, result.BCC, req.Subject, msgType, result.Method, result.MessageID, req.ConversationID)
+	if err != nil {
+		log.Printf("[api] failed to record outbound message: %v", err)
+	}
+	slug, _, _ := strings.Cut(agent.EmailAddress(), "@")
+	if outMsg != nil {
+		log.Printf("[mail:%s] dir=outbound type=%s from=%s to=%v slug=%s conv_id=%s subject=%q", outMsg.ID, msgType, agent.EmailAddress(), result.To, slug, req.ConversationID, req.Subject)
+	}
+	a.publishSent(ctx, a.buildSentEvent(agent, outMsg, result, req, msgType), outMsg)
+	return &OutboundResult{MessageID: result.MessageID, Method: result.Method}, nil
+}
+
+// SendTestCore composes and sends (or HITL-holds) a platform test email to
+// the agent's own address. HTTP-free; shared by the legacy handler and the v1
+// layer. The caller has already authed, resolved + owned the agent,
+// domain-verified, and run the message-send cap.
+func (a *API) SendTestCore(ctx context.Context, agent *identity.AgentIdentity) (*OutboundResult, *OutboundError) {
+	envelopeFrom := fmt.Sprintf("noreply@%s", a.fromDomain)
+	headerFrom := fmt.Sprintf("%q <%s>", "e2a", envelopeFrom)
+	to := []string{agent.EmailAddress()}
+	subject := "Test email from e2a"
+	body := fmt.Sprintf("This is a test email for %s.\n\nYour agent is set up and ready to receive emails.", agent.EmailAddress())
+
+	if agent.HITLEnabled {
+		msg, err := a.HoldForApprovalCore(ctx, agent, outbound.SendRequest{To: to, Subject: subject, Body: body}, "test", "")
+		if err != nil {
+			return nil, &OutboundError{http.StatusInternalServerError, "internal_error", "failed to hold message for approval"}
+		}
+		return &OutboundResult{Held: true, PendingMessageID: msg.ID, ApprovalExpiresAt: msg.ApprovalExpiresAt}, nil
+	}
+
+	message, err := outbound.ComposeMessage(headerFrom, to, nil, subject, body, "text/plain", "", nil, a.fromDomain, "", "")
+	if err != nil {
+		log.Printf("[api] compose test email failed: %v", err)
+		return nil, &OutboundError{http.StatusInternalServerError, "internal_error", "failed to compose test email"}
+	}
+	messageID, err := a.smtpRelay.Send(envelopeFrom, to, message)
+	if err != nil {
+		log.Printf("[api] send test email failed: %v", err)
+		return nil, &OutboundError{http.StatusInternalServerError, "internal_error", fmt.Sprintf("failed to send test email: %v", err)}
+	}
+	log.Printf("[api] test email sent to %s (message_id=%s)", agent.EmailAddress(), messageID)
+	return &OutboundResult{MessageID: messageID, Method: "smtp"}, nil
 }
 
 // --- Send Email ---
@@ -1871,81 +2029,26 @@ func (a *API) handleSendEmail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	selfSend := isSelfSend(req, agent.EmailAddress())
-
-	// HITL applies to self-sends too — the gate is "did a human
-	// review this outbound message" regardless of recipient. The
-	// approval-finalize path (see hitl_api.go / hitl_magic_api.go)
-	// detects the self-send shape on the held message and routes
-	// the delivery through the loopback short-circuit instead of
-	// outbound.Sender, which would otherwise strip the agent's own
-	// address from the recipient list and error.
-	if agent.HITLEnabled {
-		a.holdForApproval(w, r, agent, req, "send", "")
+	// Deliver via the shared HTTP-free core (HITL hold / self-send / SES).
+	result, derr := a.DeliverOutbound(r.Context(), user, agent, req, "send", "")
+	if derr != nil {
+		http.Error(w, derr.Msg, derr.Status)
 		return
 	}
-
-	// Record usage (side-effect only — never block on quota; the
-	// pre-check above is the gate. RecordAndCheck stays "record" because
-	// it also fires from background workers (hitlworker, magic-link
-	// approval) where a pre-check has already happened upstream.)
-	if _, err := a.usage.RecordAndCheck(r.Context(), user.ID, agent.ID, agent.Domain, "outbound"); err != nil {
-		log.Printf("[api] usage recording error: %v", err)
-	}
-
-	if selfSend {
-		providerID, err := a.performSelfSend(r.Context(), agent, req, "send")
-		if err != nil {
-			log.Printf("[api] self-send failed: agent=%s error=%v", agent.EmailAddress(), err)
-			http.Error(w, "self-send failed", http.StatusInternalServerError)
-			return
-		}
-		// Loopback row writes are irreversible from the caller's
-		// perspective (the inbox row is now visible). Lock the
-		// idempotency key in so a late 5xx from logging / response
-		// flushing doesn't release it and let a retry double-write.
-		markSideEffectCommitted(w)
-		slug, _, _ := strings.Cut(agent.EmailAddress(), "@")
-		log.Printf("[mail] dir=outbound type=send method=loopback from=%s to=%s slug=%s conv_id=%s subject=%q provider_id=%s", agent.EmailAddress(), agent.EmailAddress(), slug, req.ConversationID, req.Subject, providerID)
+	if result.Held {
 		w.Header().Set("Content-Type", "application/json")
-		writeJSON(w, map[string]string{
-			"status":     "sent",
-			"message_id": providerID,
-			"method":     "loopback",
+		w.WriteHeader(http.StatusAccepted)
+		writeJSON(w, map[string]interface{}{
+			"status":              "pending_approval",
+			"message_id":          result.PendingMessageID,
+			"approval_expires_at": result.ApprovalExpiresAt,
 		})
 		return
 	}
-
-	result, err := a.sender.Send(agent, req)
-	if err != nil {
-		if outbound.IsValidationError(err) {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		log.Printf("[api] send failed: agent=%s to=%v error=%v", agent.Domain, req.To, err)
-		http.Error(w, fmt.Sprintf("send failed: %v", err), http.StatusInternalServerError)
-		return
-	}
-	// Upstream send accepted — past this point, any handler-side
-	// failure must NOT release the idempotency key (retrying would
-	// double-send to SES). markSideEffectCommitted flips finalize's
-	// policy to "cache the response no matter what status code we
-	// end up writing".
+	// Side effect committed (loopback row / SES handoff) — lock the
+	// idempotency key so a late 5xx can't release it and let a retry
+	// double-write.
 	markSideEffectCommitted(w)
-
-	// Record outbound message with canonicalized recipients from result
-	outMsg, err := a.store.CreateOutboundMessage(r.Context(), agent.ID, result.To, result.CC, result.BCC, req.Subject, "send", result.Method, result.MessageID, req.ConversationID)
-	if err != nil {
-		log.Printf("[api] failed to record outbound message: %v", err)
-	}
-
-	slug, _, _ := strings.Cut(agent.EmailAddress(), "@")
-	if outMsg != nil {
-		log.Printf("[mail:%s] dir=outbound type=send from=%s to=%v slug=%s conv_id=%s subject=%q", outMsg.ID, agent.EmailAddress(), result.To, slug, req.ConversationID, req.Subject)
-	}
-
-	a.publishSent(r.Context(), a.buildSentEvent(agent, outMsg, result, req, "send"), outMsg)
-
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, map[string]string{
 		"status":     "sent",
@@ -2001,41 +2104,25 @@ func (a *API) handleSendTestEmail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	envelopeFrom := fmt.Sprintf("noreply@%s", a.fromDomain)
-	headerFrom := fmt.Sprintf("%q <%s>", "e2a", envelopeFrom)
-	to := []string{agent.EmailAddress()}
-	subject := "Test email from e2a"
-	body := fmt.Sprintf("This is a test email for %s.\n\nYour agent is set up and ready to receive emails.", agent.EmailAddress())
-
-	if agent.HITLEnabled {
-		a.holdForApproval(w, r, agent, outbound.SendRequest{
-			To:      to,
-			Subject: subject,
-			Body:    body,
-		}, "test", "")
+	result, derr := a.SendTestCore(r.Context(), agent)
+	if derr != nil {
+		http.Error(w, derr.Msg, derr.Status)
 		return
 	}
-
-	message, err := outbound.ComposeMessage(headerFrom, to, nil, subject, body, "text/plain", "", nil, a.fromDomain, "", "")
-	if err != nil {
-		log.Printf("[api] compose test email failed: %v", err)
-		http.Error(w, "failed to compose test email", http.StatusInternalServerError)
+	if result.Held {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		writeJSON(w, map[string]interface{}{
+			"status":              "pending_approval",
+			"message_id":          result.PendingMessageID,
+			"approval_expires_at": result.ApprovalExpiresAt,
+		})
 		return
 	}
-
-	messageID, err := a.smtpRelay.Send(envelopeFrom, to, message)
-	if err != nil {
-		log.Printf("[api] send test email failed: %v", err)
-		http.Error(w, fmt.Sprintf("failed to send test email: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	log.Printf("[api] test email sent to %s (message_id=%s)", agent.EmailAddress(), messageID)
-
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, map[string]string{
 		"status":     "sent",
-		"message_id": messageID,
+		"message_id": result.MessageID,
 	})
 }
 
@@ -3312,9 +3399,9 @@ func (a *API) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, DeploymentInfo{
-		SharedDomain:             a.sharedDomain,
-		SlugRegistrationEnabled:  a.sharedDomain != "",
-		PublicURL:                a.publicURL,
+		SharedDomain:            a.sharedDomain,
+		SlugRegistrationEnabled: a.sharedDomain != "",
+		PublicURL:               a.publicURL,
 	})
 }
 
@@ -3544,6 +3631,10 @@ func normalizeAndValidateLabelList(raw []string, op string) ([]string, error) {
 // suitable for surfacing to the caller. Empty slices are not an error
 // here — handlers already enforce "at least one recipient" separately
 // with a more specific message.
+// ValidateRecipients is the exported seam over validateRecipients so the v1
+// httpapi layer reuses the same RFC 5322 recipient check.
+func ValidateRecipients(groups ...[]string) error { return validateRecipients(groups...) }
+
 func validateRecipients(groups ...[]string) error {
 	for _, group := range groups {
 		for _, addr := range group {
@@ -3570,6 +3661,14 @@ func validateRecipients(groups ...[]string) error {
 // Returns the ASCII-normalized form on success so callers can persist
 // the canonical wire-format (e.g. "xn--e1afmkfd.xn--p1ai" for
 // "пример.рф") instead of the raw input.
+// ValidateDomain is the exported seam over validateDomain so the v1 httpapi
+// layer reuses the exact IDN/punycode normalization + label-length checks
+// instead of replicating the security-relevant parsing. Returns the
+// normalized (Punycode) form.
+func ValidateDomain(domain string) (string, error) {
+	return validateDomain(domain)
+}
+
 func validateDomain(domain string) (string, error) {
 	if domain == "" {
 		return "", errors.New("domain is required")
