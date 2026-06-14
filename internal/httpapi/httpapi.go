@@ -103,9 +103,21 @@ type Deps struct {
 	Idempotency IdemStore
 
 	// outbound (the shared live delivery path extracted from agent.API)
-	DeliverOutbound    func(ctx context.Context, user *identity.User, ag *identity.AgentIdentity, req outbound.SendRequest, msgType, replyToEmailMessageID string) (*agent.OutboundResult, *agent.OutboundError)
-	SendTest           func(ctx context.Context, ag *identity.AgentIdentity) (*agent.OutboundResult, *agent.OutboundError)
+	DeliverOutbound func(ctx context.Context, user *identity.User, ag *identity.AgentIdentity, req outbound.SendRequest, msgType, replyToEmailMessageID string) (*agent.OutboundResult, *agent.OutboundError)
+	SendTest        func(ctx context.Context, ag *identity.AgentIdentity) (*agent.OutboundResult, *agent.OutboundError)
+	// HITL approve/reject (the held-draft decision)
+	ApprovePending     func(ctx context.Context, userID, messageID, expectedAgentEmail string, ovr agent.ApproveOverrides) (*identity.Message, *agent.OutboundError)
+	RejectPending      func(ctx context.Context, userID, messageID, expectedAgentEmail, reason string) (*identity.Message, *agent.OutboundError)
 	EnforceMessageSend func(ctx context.Context, userID string) error
+	// SendLimit is the per-agent outbound rate limiter (mirrors
+	// sendLimit.AllowWithRetryAfter; key = agent id). Optional.
+	SendLimit func(key string) (ok bool, retryAfter time.Duration)
+	// PollLimit is the per-user read limiter (key = user id) and RegLimit is
+	// the per-IP agent-registration limiter (key = client ip). Both return
+	// the IETF RateLimit snapshot so the middleware can set the headers.
+	// Optional — nil disables that limiter on the /v1 surface.
+	PollLimit RateSnapshot
+	RegLimit  RateSnapshot
 	// GetInboundMessage loads an inbound message for reply/forward.
 	GetInboundMessage func(ctx context.Context, messageID string) (*identity.Message, error)
 
@@ -148,6 +160,11 @@ type Deps struct {
 	// legacy /api/v1/info while we are in the consistency-only slice).
 	SharedDomain string
 	PublicURL    string
+
+	// WSHandle serves the WebSocket upgrade for an agent address (the real-
+	// time inbound transport). Injected so httpapi need not depend on the ws
+	// package; the real one is ws.Handler.ServeWithEmail.
+	WSHandle func(w http.ResponseWriter, r *http.Request, address string)
 
 	// Legacy is the existing gorilla/mux handler. The chi root falls back
 	// to it for every route not yet ported onto Huma (the strangler), so
@@ -202,7 +219,19 @@ func New(deps Deps) *Server {
 	api := humachi.New(root, config)
 
 	s := &Server{Router: root, API: api, deps: deps}
+	// Rate limiting runs as Huma middleware so it can stamp the IETF
+	// RateLimit-* headers on the response and short-circuit a 429 before the
+	// handler. Registered once; applies to every operation.
+	api.UseMiddleware(s.rateLimit)
 	s.registerOperations()
+
+	// WebSocket transport — registered directly on chi (not Huma; it's a raw
+	// upgrade, not a JSON operation). First-class /v1 inbound transport.
+	if deps.WSHandle != nil {
+		root.Get("/v1/agents/{address}/ws", func(w http.ResponseWriter, r *http.Request) {
+			deps.WSHandle(w, r, chi.URLParam(r, "address"))
+		})
+	}
 
 	if deps.Legacy != nil {
 		root.NotFound(deps.Legacy.ServeHTTP)
@@ -237,6 +266,7 @@ func (s *Server) registerOperations() {
 	s.registerEvents()
 	s.registerAccount()
 	s.registerOutbound()
+	s.registerHITL()
 }
 
 // reqCtxKey carries the raw *http.Request through to Huma handlers so they
@@ -265,6 +295,11 @@ func RequestFromContext(ctx context.Context) *http.Request {
 // requireUser authenticates the caller or returns a 401 envelope carrying
 // the machine-branchable "unauthorized" code.
 func (s *Server) requireUser(ctx context.Context) (*identity.User, error) {
+	// The rate-limit middleware may have already authenticated this request
+	// on the read path; reuse that principal instead of hitting auth twice.
+	if u := userFromContext(ctx); u != nil {
+		return u, nil
+	}
 	r := RequestFromContext(ctx)
 	if r == nil || s.deps.Authenticator == nil {
 		return nil, NewError(http.StatusInternalServerError, "internal_error", "authentication unavailable")
