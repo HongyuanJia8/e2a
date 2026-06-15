@@ -6,6 +6,7 @@ import (
 	crand "crypto/rand"
 	"crypto/tls"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"log"
 	"mime"
@@ -227,11 +228,16 @@ func (s *session) Data(r io.Reader) error {
 	return s.deliverMessages(ctx, senderEmail, body)
 }
 
-// deliverMessages runs SPF/DKIM checks and delivers to agents via webhook.
+// deliverMessages runs SPF/DKIM/DMARC checks and delivers to agents via webhook.
 func (s *session) deliverMessages(ctx context.Context, senderEmail string, body []byte) error {
-	// Run SPF/DKIM checks on the inbound message
-	domainAuth := emailauth.Check(s.remoteIP, senderEmail, body)
-	log.Printf("[%s] [%s] domain auth from %s: %s", s.id, senderEmail, s.remoteIP, domainAuth.Summary())
+	// Authenticate against the TRUE SMTP envelope MAIL FROM (s.from), not the
+	// display senderEmail (which prefers the From header). SPF is an
+	// envelope-identity check (RFC 7208), and DMARC alignment must compare the
+	// real envelope domain against the From-header domain — passing the
+	// From-derived senderEmail here would make SPF-alignment a tautology
+	// (adversarial review F5). DKIM + From extraction come from the body.
+	domainAuth := emailauth.Check(s.remoteIP, extractEmail(s.from), body)
+	log.Printf("[%s] [%s] domain auth from %s (envelope %s): %s", s.id, senderEmail, s.remoteIP, s.from, domainAuth.Summary())
 
 	delivered := 0
 	for _, rcpt := range s.recipients {
@@ -366,6 +372,13 @@ func (s *session) deliverToAgent(ctx context.Context, agent *identity.AgentIdent
 	//       in-process publisher.Publish goroutine fires post-commit.
 	//       Preserves pre-design behavior so deployments that haven't
 	//       wired the outbox don't regress.
+	// Structured inbound auth verdict {spf,dkim,dmarc} persisted alongside the
+	// signed X-E2A-Auth-* blob (decision 9 / Slice 4b-2) — the trust primitive
+	// surfaced on the message and enforced on by the Slice 7 inbound policy.
+	// SPF can't be recomputed at read (the connecting IP isn't stored), so store
+	// it now. Best-effort marshal: a failure just omits the verdict.
+	authVerdictJSON, _ := json.Marshal(domainAuth)
+
 	var inboundMsg *identity.Message
 	var err error
 	if s.relay.outbox != nil {
@@ -374,7 +387,7 @@ func (s *session) deliverToAgent(ctx context.Context, agent *identity.AgentIdent
 			inboundMsg, txErr = s.relay.store.CreateInboundMessageInTx(
 				ctx, tx, messageID, agent.ID, displaySender, rcpt,
 				s.inboundMsgID, s.inboundSubject, conversationID,
-				deliveryStatus, body, authHeaders,
+				deliveryStatus, body, authHeaders, authVerdictJSON,
 				s.inboundThreadInfo.To, s.inboundThreadInfo.CC, s.inboundThreadInfo.ReplyTo,
 			)
 			if txErr != nil {
@@ -386,7 +399,7 @@ func (s *session) deliverToAgent(ctx context.Context, agent *identity.AgentIdent
 		inboundMsg, err = s.relay.store.CreateInboundMessage(
 			ctx, messageID, agent.ID, displaySender, rcpt,
 			s.inboundMsgID, s.inboundSubject, conversationID,
-			deliveryStatus, body, authHeaders,
+			deliveryStatus, body, authHeaders, authVerdictJSON,
 			s.inboundThreadInfo.To, s.inboundThreadInfo.CC, s.inboundThreadInfo.ReplyTo,
 		)
 	}
