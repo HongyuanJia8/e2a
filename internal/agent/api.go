@@ -189,9 +189,10 @@ type API struct {
 	subscriberStore *webhook.SubscriberStore
 
 	// publisher routes email.sent / email.pending_approval /
-	// email.approved / email.rejected events to the new webhooks
-	// resource. Optional — when nil, the trigger sites silently skip
-	// the publish step (the legacy webhook_url path is unaffected).
+	// email.approved / email.rejected events to the webhooks
+	// resource — the sole push path since the legacy per-agent
+	// webhook_url was removed in slice 3. Optional — when nil, the
+	// trigger sites silently skip the publish step.
 	publisher webhookpub.Publisher
 	// outbox is the slice-4 transactional publisher for outbound
 	// events. When wired AND its FeatureFlag is enabled, post-side-
@@ -605,7 +606,7 @@ func (a *API) RegisterRoutes(r *mux.Router) {
 	}
 }
 
-// RegisterWSRoute registers the WebSocket endpoint for local-mode agents.
+// RegisterWSRoute registers the WebSocket live-tail endpoint, open to any agent.
 func (a *API) RegisterWSRoute(r *mux.Router, handle http.HandlerFunc) {
 	r.HandleFunc("/api/v1/agents/{email}/ws", handle)
 }
