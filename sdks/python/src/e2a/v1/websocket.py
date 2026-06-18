@@ -1,24 +1,16 @@
-"""Notification-only WebSocket listener for e2a v1.
+"""Notification-only WebSocket stream for e2a /v1.
 
-Connects to ``/api/v1/agents/{email}/ws`` and yields lightweight
-:class:`WSNotification` objects — one per inbound message. The protocol
-is server-to-client only; the client never sends application frames.
+Connects to ``/v1/agents/{address}/ws`` and yields lightweight
+:class:`WSNotification` objects — one per inbound message. The protocol is
+server-to-client only; the client never sends application frames.
 
-The notification carries metadata (message_id, sender, subject, etc.).
-Callers fetch the full body via REST when they want it::
+The notification carries metadata (message_id, sender, subject, …). Fetch the
+full body via REST when you want it::
 
-    async for notif in client.listen():
-        if notif.subject.startswith("URGENT"):
-            email = await client.get_message(notif.message_id)
-            # ... act on the full email
-        # else: drop the notification, no REST round-trip happened
+    async for notif in client.listen("bot@agents.e2a.dev"):
+        email = await client.messages.get(notif.recipient, notif.message_id)
 
-This matches the server's design — the WS frame is intentionally small,
-and the REST fetch (which marks the message read) stays explicit.
-
-Requires ``websockets``::
-
-    pip install e2a[ws]
+Requires ``websockets`` (``pip install e2a[ws]``).
 """
 
 from __future__ import annotations
@@ -27,22 +19,71 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, AsyncIterator, Optional
+from typing import AsyncIterator, Optional
 from urllib.parse import quote, urlencode, urlparse, urlunparse
 
-if TYPE_CHECKING:
-    from e2a.v1.async_client import AsyncE2AClient
+from .errors import E2AAuthError, E2AError, E2APermissionError
+
+__all__ = ["WSNotification", "WSStream"]
 
 logger = logging.getLogger("e2a.v1.websocket")
+
+
+def _handshake_status(exc: BaseException) -> Optional[int]:
+    """Return the HTTP status of a rejected WebSocket handshake, if any.
+
+    The ``websockets`` library rejects a bad handshake with ``InvalidStatus``
+    (modern; status on ``exc.response.status_code``) or the deprecated
+    ``InvalidStatusCode`` (status on ``exc.status_code``). We probe both so this
+    works across library versions without importing version-specific symbols.
+    """
+    resp = getattr(exc, "response", None)
+    status = getattr(resp, "status_code", None)
+    if isinstance(status, int):
+        return status
+    status = getattr(exc, "status_code", None)  # deprecated InvalidStatusCode
+    if isinstance(status, int):
+        return status
+    return None
+
+
+def _fatal_error_for_status(status: int, exc: BaseException) -> Optional[E2AError]:
+    """Map a fatal (non-retryable) handshake status to a typed E2AError.
+
+    Auth/permission and other 4xx handshake rejections are caller/credential
+    bugs that will never succeed on retry, so we surface them instead of
+    looping. 5xx and everything else stays transient.
+    """
+    if status == 401:
+        return E2AAuthError(
+            code="unauthorized",
+            message=f"WebSocket handshake rejected: HTTP {status}",
+            status=status,
+            retryable=False,
+        )
+    if status == 403:
+        return E2APermissionError(
+            code="forbidden",
+            message=f"WebSocket handshake rejected: HTTP {status}",
+            status=status,
+            retryable=False,
+        )
+    if 400 <= status < 500:
+        return E2AError(
+            code="ws_handshake_rejected",
+            message=f"WebSocket handshake rejected: HTTP {status}",
+            status=status,
+            retryable=False,
+        )
+    return None
 
 
 @dataclass
 class WSNotification:
     """Lightweight notification pushed over the WebSocket on new inbound mail.
 
-    Mirrors the wire shape sent by the server. ``from_`` is spelled with a
-    trailing underscore to avoid Python's reserved word, matching the
-    convention used elsewhere in the SDK (e.g. :attr:`MessageDetail.from_`).
+    ``from_`` is spelled with a trailing underscore to avoid Python's reserved
+    word, matching the convention used elsewhere in the SDK.
     """
 
     message_id: str
@@ -54,10 +95,6 @@ class WSNotification:
 
     @classmethod
     def from_payload(cls, payload: dict) -> "WSNotification":
-        """Build a notification from the raw dict pushed by the server.
-
-        Tolerates older payload shapes that used ``to`` instead of ``recipient``.
-        """
         return cls(
             message_id=payload.get("message_id", ""),
             from_=payload.get("from", ""),
@@ -69,76 +106,90 @@ class WSNotification:
 
 
 def _build_ws_url(base_url: str, agent_email: str, api_key: str) -> str:
-    """Build the versioned WebSocket URL from the HTTP base URL."""
+    """Build the versioned WebSocket URL from the HTTP base URL.
+
+    Note: auth is passed as a ``?token=`` query parameter, which can land in
+    server/proxy access logs (a logged-credential limitation). A header- or
+    ticket-based handshake is planned to replace it.
+    """
     parsed = urlparse(base_url)
     scheme = "wss" if parsed.scheme == "https" else "ws"
-    path = f"/api/v1/agents/{quote(agent_email, safe='')}/ws"
+    path = f"/v1/agents/{quote(agent_email, safe='')}/ws"
     query = urlencode({"token": api_key})
     return urlunparse((scheme, parsed.netloc, path, "", query, ""))
 
 
-async def listen(
-    client: AsyncE2AClient,
-    agent_email: Optional[str] = None,
-    reconnect: bool = True,
-    max_backoff: float = 30.0,
-) -> AsyncIterator[WSNotification]:
-    """Connect to e2a's v1 WebSocket and yield :class:`WSNotification` objects.
+class WSStream:
+    """Async-iterable notification stream returned by ``client.listen(address)``.
 
-    Each notification is the lightweight metadata frame the server pushes —
-    no body, no REST round-trip. Call ``await client.get_message(notif.message_id)``
-    when you actually want the full email.
+    Iterate it directly::
+
+        async for notif in client.listen("bot@agents.e2a.dev"):
+            ...
 
     Reconnects with exponential backoff (1s → ``max_backoff``) by default.
-    The protocol is server-to-client only; no ACK frames are sent.
     """
-    email = agent_email or client.agent_email
-    if not email:
-        raise ValueError(
-            "agent_email is required. Pass it to listen() or set it on the client."
-        )
 
-    try:
-        import websockets  # noqa: F401
-    except ImportError:
-        raise ImportError(
-            "The 'websockets' package is required for listen(). "
-            "Install it with: pip install e2a[ws]"
-        )
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        agent_email: str,
+        base_url: str,
+        reconnect: bool = True,
+        max_backoff: float = 30.0,
+    ) -> None:
+        self._url = _build_ws_url(base_url, agent_email, api_key)
+        self._email = agent_email
+        self._reconnect = reconnect
+        self._max_backoff = max_backoff
 
-    ws_url = _build_ws_url(client.api.base_url, email, client.api.api_key)
-    backoff = 1.0
+    def __aiter__(self) -> AsyncIterator[WSNotification]:
+        return self._stream()
 
-    while True:
+    async def _stream(self) -> AsyncIterator[WSNotification]:
         try:
-            async for notif in _connect_and_stream(ws_url, email):
-                yield notif
-                backoff = 1.0  # Reset on successful message
-        except Exception as exc:
-            logger.warning("WebSocket disconnected: %s", exc)
+            import websockets  # noqa: F401
+        except ImportError:  # pragma: no cover - optional dep
+            raise ImportError(
+                "The 'websockets' package is required for listen(). "
+                "Install it with: pip install e2a[ws]"
+            )
 
-        if not reconnect:
-            break
+        backoff = 1.0
+        while True:
+            try:
+                async for notif in _connect_and_stream(self._url, self._email):
+                    yield notif
+                    backoff = 1.0  # reset on a successful message
+            except E2AError:
+                # Already-typed fatal errors (e.g. raised below) propagate.
+                raise
+            except Exception as exc:  # noqa: BLE001
+                # A fatal handshake rejection (auth/permission/4xx) will never
+                # succeed on retry — surface it and stop instead of looping.
+                status = _handshake_status(exc)
+                if status is not None:
+                    fatal = _fatal_error_for_status(status, exc)
+                    if fatal is not None:
+                        fatal.__cause__ = exc
+                        raise fatal
+                # Transient/network failure — log and reconnect.
+                logger.warning("WebSocket disconnected: %s", exc)
 
-        logger.info("Reconnecting in %.1fs...", backoff)
-        await asyncio.sleep(backoff)
-        backoff = min(backoff * 2, max_backoff)
+            if not self._reconnect:
+                return
+            logger.info("Reconnecting in %.1fs...", backoff)
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, self._max_backoff)
 
 
-async def _connect_and_stream(
-    ws_url: str,
-    agent_email: str,
-) -> AsyncIterator[WSNotification]:
-    """Connect once and yield notifications until disconnect.
-
-    Does NOT send any frames (no ACK). Does NOT fetch the full message —
-    that's the caller's call.
-    """
+async def _connect_and_stream(ws_url: str, agent_email: str) -> AsyncIterator[WSNotification]:
+    """Connect once and yield notifications until disconnect. Sends no frames."""
     import websockets
 
     async with websockets.connect(ws_url) as ws:
         logger.info("Connected to WebSocket for %s", agent_email)
-
         async for raw in ws:
             try:
                 payload = json.loads(raw)
@@ -146,6 +197,6 @@ async def _connect_and_stream(
                     logger.warning("WS notification missing message_id: %s", raw)
                     continue
                 yield WSNotification.from_payload(payload)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.exception("Error processing WS notification")
                 continue
