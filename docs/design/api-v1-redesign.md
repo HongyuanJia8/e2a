@@ -1850,3 +1850,91 @@ Every fix was **test-first**: a contract/store test was written and confirmed to
 `VerifyDomainView` shape divergence (doc-only); `LimitsView` `0`=zero is the
 documented meaning (no `unlimited` sentinel — consistent with the finite-caps
 policy).
+
+## 13. Slice 8e — retire the legacy `/api/v1` surface + flatten the SDK `oag/` subpath (2026-06)
+
+With every consumer (web, CLI, MCP, both SDKs) cut over to `/v1`, the legacy
+`gorilla/mux` `/api/v1` strangler residue was deleted and the generated SDK base
+was un-nested. Done as one PR.
+
+### 13.1 Server — legacy `/api/v1` deleted
+The chi root is the process handler; Huma `/v1` operations are mounted on it and
+any unmatched route falls back to the legacy mux. By this slice the only `/api/v1`
+routes left on that mux were residue. Decision per endpoint (consumer-verified —
+no in-repo caller hits any of these):
+
+- **Already covered by `/v1` → deleted the legacy route + handler:**
+  `/api/v1/agents/{email}/ws` (real WS is `/v1/agents/{address}/ws`),
+  `PATCH /api/v1/agents/{email}/messages/{id}` (label update → `/v1` `updateMessage`),
+  `GET /api/v1/messages/{id}` (flat outbound detail → agent-scoped `/v1`),
+  `GET /api/v1/pending` (clients build the cross-agent pending view client-side
+  from `GET /v1/agents` + per-agent message lists filtered to `pending_approval`).
+- **Dropped (no `/v1` equivalent, no consumer):** account-level
+  `/api/v1/users/me/signing-secrets` (superseded by per-webhook `whsec_` /
+  `/v1/webhooks/{id}/rotate-secret`) and bulk
+  `POST /api/v1/webhooks/{id}/redeliver-since` (`/v1` has per-event redeliver).
+  Shared replay helpers (`loadEventForReplay`/`insertReplayDelivery`, used by the
+  `/v1` per-event redeliver via `events_export.go`) were preserved.
+- **Moved to `/v1`:** the HITL magic-link pages `approve`/`reject` →
+  `/v1/approve`, `/v1/reject` (raw token-gated HTML, served via the chi root's
+  fallback to the mux; the notifier email link + the rendered form action now emit
+  the `/v1` path). The single-event redeliver, agent CRUD, send/reply/forward,
+  conversations, etc. had already moved in earlier slices.
+
+`RegisterWSRoute` and its three call sites were removed (the `/v1` WS is wired via
+`apiserver.Params.WSHandle`). The Huma spec (`api/openapi.yaml`) is unchanged —
+none of the deleted routes were Huma operations — so `spec-check` stays green.
+Obsolete legacy tests (`hitl_approval_api_test.go`, `hitl_agent_scoped_routes_test.go`,
+`labels_api_test.go`, `signing_secrets_api_test.go`) were removed; their `/v1`
+equivalents are covered under `internal/httpapi`. The bearer-auth test was
+repointed to `GET /v1/agents` (the chi layer reuses `agent.API.AuthenticateUser`).
+
+### 13.2 SDK — `oag/` flattened to `generated/`, legacy codegen deleted
+The OpenAPI-Generator base moved `src/v1/oag/` → `src/v1/generated/` in both SDKs
+(reusing the slot freed by deleting the dead legacy codegen); the hand-written
+ergonomic layer's imports + the `generate-oag.sh` scripts + `.openapi-generator-ignore`
+were updated so regeneration is reproducible (`generate-sdk-check` stays clean).
+Deleted dead legacy codegen: the TS `openapi-typescript` output
+(`src/v1/generated/types.ts`), the Python `datamodel-codegen` module, and the
+swag→TS npm scripts/devDeps. The `make swagger` target + `web/public/openapi.yaml`
+are kept (the dashboard's `scalar.html` API-reference page renders the file) but
+unwired from `make generate`/`generate-check`.
+
+### 13.3 Known deprecations & follow-ups (from the review passes)
+
+- **Per-user signing secrets — management API dropped, signing path kept
+  (deliberate deprecation).** Deleting `/api/v1/users/me/signing-secrets` removed
+  the only way to create/rotate/delete per-user webhook signing secrets, but the
+  secrets themselves remain a *live* signing path: the SMTP relay signs inbound
+  webhook deliveries with `GetUserSigningSecrets` (falling back to the
+  deployment-wide signer when a user has none), and `hitlnotify` reads them too.
+  So webhook signing never breaks — existing secrets keep working and absent ones
+  use the deployment signer — but per-user signing is now legacy/unmanaged, with
+  per-webhook `whsec_` (`/v1/webhooks/{id}/rotate-secret`) the forward path. This
+  is an accepted deprecation, not a regression in signing behavior; the store
+  schema + relay read path are intentionally left intact for in-place secrets.
+  **Operational cost (security review):** a tenant who suspects their per-user
+  relay-signing secret is compromised now has no self-serve rotation path (the
+  webhook `rotate-secret` op is a *different*, per-webhook key). Until a `/v1`
+  account surface or dashboard control is added, rotation is an operator task.
+- **Magic-link `/v1/*` proxying (fixed here).** Moving the HITL pages from
+  `/api/v1/approve` to `/v1/approve` would have 404'd behind the web front, which
+  proxied `/api/*` but had no `/v1/*` rule — so `web/Caddyfile` + `web/next.config.ts`
+  now proxy `/v1/*` to the backend (this also covers the dashboard's own same-origin
+  `/v1` fetches + the `/v1` WebSocket, which had the same missing rule since the
+  web `/v1` repoint). Found by the adversarial review; masked in CI because tests
+  mount the Go handler directly with no proxy.
+- **Doc sweep follow-up.** `web/public/openapi.yaml` (rendered by the dashboard's
+  `scalar.html` reference page) is frozen and still lists the deleted endpoints; it
+  needs a `make swagger` regen once a swag version is pinned. `docs/api.md` predates
+  the v1 redesign and still documents the old flat paths (now flagged inline with a
+  pointer to `api/openapi.yaml`); a full agent-scoped rewrite is tracked. README,
+  `docs/api.md` (deleted signing-secrets section), and `docs/events.md` (deleted
+  `redeliver-since`) were corrected in this PR.
+- **Required pre-deploy follow-up: migrate `tests/e2e-prod` to `/v1`.** The manual
+  post-deploy verification suite (run against `https://e2a.dev`, not CI-gated)
+  still calls `/api/v1/*` (~243 refs across ~15 files). It works against prod
+  today via the legacy fallback but **breaks once this change deploys** — most
+  refs are a prefix swap, but the moved/dropped ones (flat HITL approve/reject →
+  agent-scoped `/v1`, signing-secrets, `pending`, `send`) need per-endpoint care.
+  Tracked as its own PR before the legacy surface is removed in prod.
