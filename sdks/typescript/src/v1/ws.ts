@@ -8,7 +8,7 @@ import { EventEmitter } from "node:events";
  * The body is intentionally not included — fetch it via REST when (and
  * only when) you actually need it:
  *
- *     const email = await client.api.getMessage(notif.recipient, notif.message_id);
+ *     const email = await client.messages.get(notif.recipient, notif.message_id);
  */
 export interface WSNotification {
   message_id: string;
@@ -25,7 +25,7 @@ export interface WSListenerOptions {
   apiKey: string;
   /** Agent email to listen for. */
   agentEmail: string;
-  /** Base URL (http/https). Defaults to "https://e2a.dev". */
+  /** Base URL (http/https). Defaults to "https://api.e2a.dev". */
   baseUrl?: string;
   /**
    * Auto-reconnect on disconnect. Defaults to true.
@@ -48,9 +48,15 @@ export interface WSListenerEvents {
 /**
  * Notification-only WebSocket listener.
  *
- * Connects to `/api/v1/agents/{email}/ws?token={apiKey}` and emits
+ * Connects to `/v1/agents/{address}/ws?token={apiKey}` and emits
  * `"notification"` events with lightweight metadata. The protocol is
  * server→client only — the client never sends application frames.
+ *
+ * Auth note: the API key currently rides in the `?token=` query parameter.
+ * Query strings can leak into access logs and proxy traces, so this is a
+ * known logged-credential limitation; moving auth to a header or a
+ * short-lived connect ticket is a planned server-side change. No client
+ * behavior changes when that lands — only this URL construction.
  *
  * For modern code, prefer {@link E2AClient.listen} which wraps this
  * class with an async-iteration-friendly API while still exposing the
@@ -67,9 +73,9 @@ export class WSListener extends EventEmitter<WSListenerEvents> {
 
   constructor(private readonly opts: WSListenerOptions) {
     super();
-    const base = (opts.baseUrl ?? "https://e2a.dev").replace(/\/+$/, "");
+    const base = (opts.baseUrl ?? "https://api.e2a.dev").replace(/\/+$/, "");
     const wsBase = base.replace(/^http/, "ws");
-    this.url = `${wsBase}/api/v1/agents/${encodeURIComponent(opts.agentEmail)}/ws?token=${opts.apiKey}`;
+    this.url = `${wsBase}/v1/agents/${encodeURIComponent(opts.agentEmail)}/ws?token=${opts.apiKey}`;
     this.shouldReconnect = opts.reconnect ?? true;
     this.initialDelayMs = opts.reconnectDelay ?? 1000;
     this.maxBackoffMs = opts.maxBackoffMs ?? 30_000;
