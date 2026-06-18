@@ -115,13 +115,17 @@ func testServer(t *testing.T) *httptest.Server {
 			if agentID == "support@acme.com" && messageID == "msg_1" {
 				return &identity.Message{
 					ID:             "msg_1",
+					Direction:      "inbound",
 					Sender:         "alice@example.com",
 					ToRecipients:   []string{"support@acme.com"},
 					Recipient:      "support@acme.com",
 					Subject:        "Help",
 					ConversationID: "conv_1",
-					DeliveryStatus: "unread",
-					CreatedAt:      time.Unix(1700000000, 0).UTC(),
+					// Real inbound rows carry the read-state in inbox_status; the
+					// store mirrors it into DeliveryStatus for inbound. `status`
+					// on the detail view is the inbox read-state (B2).
+					InboxStatus: "unread",
+					CreatedAt:   time.Unix(1700000000, 0).UTC(),
 					AuthHeaders:    map[string]string{"spf": "pass"},
 					RawMessage:     []byte("raw"),
 				}, nil
@@ -147,6 +151,9 @@ func testServer(t *testing.T) *httptest.Server {
 			return []identity.Domain{{Domain: "acme.com", Verified: true, VerificationToken: "e2a-verify=tok", IsPrimary: true, AgentCount: 2}}, nil
 		},
 		ClaimDomain: func(ctx context.Context, domain, userID string) (*identity.Domain, error) {
+			if domain == "taken.com" {
+				return nil, identity.ErrDomainTaken
+			}
 			return &identity.Domain{Domain: domain, Verified: false, VerificationToken: "e2a-verify=new"}, nil
 		},
 		EnforceDomainCreate: func(ctx context.Context, userID string) error {

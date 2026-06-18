@@ -397,7 +397,7 @@ func (s *Store) ClaimOrCreateDomain(ctx context.Context, domain, userID string) 
 		return existing, nil // verified + same user
 	}
 
-	return nil, fmt.Errorf("domain not available")
+	return nil, ErrDomainTaken
 }
 
 // nullIfEmpty returns nil for empty strings so we can write SQL NULL
@@ -686,6 +686,12 @@ var ErrDomainHasAgents = fmt.Errorf("cannot delete domain: agents still exist")
 
 // ErrDomainNotFound is returned when a domain is not found or not owned by the user.
 var ErrDomainNotFound = fmt.Errorf("domain not found or not owned by user")
+
+// ErrDomainTaken is returned by ClaimOrCreateDomain when the domain row exists
+// and is owned by a different user (verified, or an unverified claim that must
+// not be squatted). The API layer maps it to 409 conflict, distinct from the
+// 400 used for malformed input.
+var ErrDomainTaken = fmt.Errorf("domain not available: already claimed by another account")
 
 // DeleteDomain deletes a domain only if owned by the user.
 // The handler should check for existing agents first.
@@ -1192,11 +1198,14 @@ func (s *Store) CreateOutboundMessage(ctx context.Context, agentID string, toRec
 		ToRecipients:      toRecipients,
 		CC:                cc,
 		BCC:               bcc,
+		// The sender of an outbound message is the agent itself (agent ID == email).
+		// Persist it so the `from` wire field isn't empty for outbound (B1).
+		Sender: agentID,
 	}
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO messages (id, agent_id, direction, recipient, subject, message_type, method, provider_message_id, conversation_id, created_at, expires_at, to_recipients, cc, bcc, status)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-		m.ID, m.AgentID, m.Direction, m.Recipient, m.Subject, m.Type, m.Method, m.ProviderMessageID, m.ConversationID, m.CreatedAt, m.ExpiresAt, m.ToRecipients, m.CC, m.BCC, MessageStatusSent,
+		`INSERT INTO messages (id, agent_id, direction, recipient, subject, message_type, method, provider_message_id, conversation_id, created_at, expires_at, to_recipients, cc, bcc, status, sender)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+		m.ID, m.AgentID, m.Direction, m.Recipient, m.Subject, m.Type, m.Method, m.ProviderMessageID, m.ConversationID, m.CreatedAt, m.ExpiresAt, m.ToRecipients, m.CC, m.BCC, MessageStatusSent, m.Sender,
 	)
 	if err != nil {
 		return nil, err
@@ -1258,6 +1267,9 @@ func (s *Store) CreatePendingOutboundMessage(ctx context.Context, agentID string
 		BodyText:          bodyText,
 		BodyHTML:          bodyHTML,
 		AttachmentsJSON:   json.RawMessage(attachmentsJSON),
+		// Sender is the agent itself (agent ID == email) so `from` isn't empty
+		// on a held draft's detail/list view (B1).
+		Sender: agentID,
 	}
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO messages (
@@ -1265,17 +1277,17 @@ func (s *Store) CreatePendingOutboundMessage(ctx context.Context, agentID string
 		    conversation_id, created_at, expires_at,
 		    to_recipients, cc, bcc,
 		    status, approval_expires_at,
-		    body_text, body_html, attachments_json)
+		    body_text, body_html, attachments_json, sender)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7,
 		         $8, $9, $10,
 		         $11, $12, $13,
 		         $14, $15,
-		         $16, $17, $18)`,
+		         $16, $17, $18, $19)`,
 		m.ID, m.AgentID, m.Direction, m.Recipient, m.Subject, m.EmailMessageID, m.Type,
 		m.ConversationID, m.CreatedAt, m.ExpiresAt,
 		m.ToRecipients, m.CC, m.BCC,
 		m.Status, m.ApprovalExpiresAt,
-		nullIfEmptyString(m.BodyText), nullIfEmptyString(m.BodyHTML), attachmentsArg,
+		nullIfEmptyString(m.BodyText), nullIfEmptyString(m.BodyHTML), attachmentsArg, m.Sender,
 	)
 	if err != nil {
 		return nil, err
@@ -2354,9 +2366,9 @@ func (s *Store) GetMessageWithContent(ctx context.Context, messageID, agentID st
 	err := s.pool.QueryRow(ctx,
 		`UPDATE messages SET inbox_status = CASE WHEN inbox_status = 'unread' THEN 'read' ELSE inbox_status END
 		 WHERE id = $1 AND agent_id = $2 AND expires_at > now()
-		 RETURNING id, agent_id, direction, sender, recipient, to_recipients, cc, reply_to, subject, email_message_id, conversation_id, COALESCE(inbox_status, ''), raw_message, auth_headers, auth_verdict, COALESCE(flagged, false), COALESCE(flag_reason, ''), created_at, expires_at, labels, COALESCE(delivery_status, ''), COALESCE(delivery_detail, ''), COALESCE(sent_as, ''), COALESCE(body_text, ''), COALESCE(body_html, '')`,
+		 RETURNING id, agent_id, direction, sender, recipient, to_recipients, cc, reply_to, subject, email_message_id, conversation_id, COALESCE(inbox_status, ''), raw_message, auth_headers, auth_verdict, COALESCE(flagged, false), COALESCE(flag_reason, ''), created_at, expires_at, labels, COALESCE(delivery_status, ''), COALESCE(delivery_detail, ''), COALESCE(sent_as, ''), COALESCE(body_text, ''), COALESCE(body_html, ''), COALESCE(status, '')`,
 		messageID, agentID,
-	).Scan(&m.ID, &m.AgentID, &m.Direction, &m.Sender, &m.Recipient, &m.ToRecipients, &m.CC, &m.ReplyTo, &m.Subject, &m.EmailMessageID, &m.ConversationID, &m.InboxStatus, &m.RawMessage, &authHeadersJSON, &authVerdict, &m.Flagged, &m.FlagReason, &m.CreatedAt, &m.ExpiresAt, &m.Labels, &outboundDeliveryStatus, &m.DeliveryDetail, &m.SentAs, &m.BodyText, &m.BodyHTML)
+	).Scan(&m.ID, &m.AgentID, &m.Direction, &m.Sender, &m.Recipient, &m.ToRecipients, &m.CC, &m.ReplyTo, &m.Subject, &m.EmailMessageID, &m.ConversationID, &m.InboxStatus, &m.RawMessage, &authHeadersJSON, &authVerdict, &m.Flagged, &m.FlagReason, &m.CreatedAt, &m.ExpiresAt, &m.Labels, &outboundDeliveryStatus, &m.DeliveryDetail, &m.SentAs, &m.BodyText, &m.BodyHTML, &m.Status)
 	if err != nil {
 		return nil, err
 	}
@@ -2672,8 +2684,10 @@ func (s *Store) GetConversationByID(ctx context.Context, agentID, conversationID
 		        m.created_at, m.expires_at,
 		        m.labels,
 		        COALESCE(m.delivery_status, ''), COALESCE(m.delivery_detail, ''), COALESCE(m.sent_as, ''), m.auth_verdict,
-		        COALESCE(m.flagged, false), COALESCE(m.flag_reason, '')
+		        COALESCE(m.flagged, false), COALESCE(m.flag_reason, ''),
+		        COALESCE(wd.status, ''), COALESCE(wd.last_error, '')
 		 FROM messages m
+		 LEFT JOIN webhook_deliveries wd ON wd.message_id = m.id
 		 WHERE m.agent_id = $1
 		   AND m.conversation_id = $2
 		   AND m.expires_at > now()
@@ -2704,6 +2718,7 @@ func (s *Store) GetConversationByID(ctx context.Context, agentID, conversationID
 			&m.Labels,
 			&outboundDeliveryStatus, &m.DeliveryDetail, &m.SentAs, &authVerdict,
 			&m.Flagged, &m.FlagReason,
+			&m.WebhookStatus, &m.WebhookError,
 		); err != nil {
 			return nil, err
 		}
