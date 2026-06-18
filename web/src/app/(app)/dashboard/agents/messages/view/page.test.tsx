@@ -1,6 +1,16 @@
 // Focus-page contract: renders for outbound pending + inbound,
 // Headers collapsible respects ?headers=1, Approve calls the API +
 // redirects, ⌘↵ triggers Approve, missing params surface an error.
+//
+// In /v1 there's one agent-scoped detail endpoint
+// (GET /v1/agents/{address}/messages/{id} → MessageView). That detail
+// shape carries NEITHER `direction` NOR `hitl_status`, and on outbound
+// rows the wire `from` and `status` come back as EMPTY strings — so the
+// page CANNOT recover direction or pending-state from the fetch. The
+// list/pending rows (MessageSummaryView) carry both, so they thread the
+// authoritative values into the URL: `?direction=<inbound|outbound>` and
+// `&pending=1`. A deep link with no params defaults to inbound /
+// not-pending (no approve/reject), which we also assert below.
 
 import { render, screen, waitFor } from "../../../../../../test-utils/swr";
 import { render as rawRender } from "@testing-library/react";
@@ -53,37 +63,36 @@ const NOW = new Date("2026-05-24T12:00:00Z");
 const minutesAgo = (n: number) =>
   new Date(NOW.getTime() - n * 60_000).toISOString();
 
+const AGENT_EMAIL = "support@acme.io";
+
+// REAL MessageView wire (GET /v1/agents/{address}/messages/{id}) for a
+// held outbound draft. Per the server: the detail view has NO `direction`
+// and NO `hitl_status`, and on an outbound row `from` and `status` are
+// EMPTY strings. Direction + pending-state are NOT recoverable here —
+// they're threaded via the URL params. Body comes through `body.text`.
 const OUTBOUND_PENDING = {
-  id: "msg_pending",
-  agent_id: "ag_1",
-  direction: "outbound",
-  subject: "Re: Q3 contract renewal",
-  type: "reply",
-  conversation_id: "conv_K3p9aQ",
+  message_id: "msg_pending",
+  from: "",
   to: ["maya@stripe.com"],
   cc: [],
-  bcc: [],
-  status: "pending_approval",
-  approval_expires_at: new Date(NOW.getTime() + 47 * 60_000).toISOString(),
+  reply_to: [],
+  recipient: "maya@stripe.com",
+  subject: "Re: Q3 contract renewal",
+  conversation_id: "conv_K3p9aQ",
+  status: "",
   created_at: minutesAgo(13),
-  email_message_id: "msg_b3n1xz",
-  body_text: "Hi Maya,\n\nThanks for sending over the renewal draft…\n\nBest,\nAcme Support",
-  edited: false,
-  inbound: {
-    sender: "maya@stripe.com",
-    subject: "Q3 contract renewal",
-    created_at: minutesAgo(25),
-    auth_headers: { "X-E2A-Auth-Verified": "true" },
+  body: {
+    text: "Hi Maya,\n\nThanks for sending over the renewal draft…\n\nBest,\nAcme Support",
   },
 };
 
 const INBOUND_DETAIL = {
   message_id: "msg_in1",
   from: "maya@stripe.com",
-  to: ["support@acme.io"],
+  to: [AGENT_EMAIL],
   cc: [],
   reply_to: [],
-  recipient: "support@acme.io",
+  recipient: AGENT_EMAIL,
   subject: "Q3 contract renewal",
   conversation_id: "conv_K3p9aQ",
   status: "read",
@@ -98,32 +107,29 @@ const INBOUND_DETAIL = {
   ),
 };
 
-function mockOutboundOnly(payload: Record<string, unknown>) {
-  mockFetch.mockImplementation((url: string) => {
-    if (url.includes("/api/v1/messages/") && !url.includes("/agents/")) {
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(payload),
-      });
-    }
-    return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve("not found") });
+// True if the URL targets the agent-scoped detail GET (not an
+// approve/reject sub-resource).
+function isDetailGet(url: string): boolean {
+  return (
+    url.includes("/v1/agents/") &&
+    url.includes("/messages/") &&
+    !url.endsWith("/approve") &&
+    !url.endsWith("/reject")
+  );
+}
+
+function jsonText(body: unknown, status = 200) {
+  return Promise.resolve({
+    ok: status >= 200 && status < 300,
+    status,
+    text: () => Promise.resolve(JSON.stringify(body)),
   });
 }
 
-function mockInboundFallback(inbound: Record<string, unknown>) {
-  // Outbound lookup 404s → page falls back to inbound endpoint.
+// Stage the single detail GET to return a given MessageView.
+function mockDetail(payload: Record<string, unknown>) {
   mockFetch.mockImplementation((url: string) => {
-    if (url.includes("/api/v1/messages/") && !url.includes("/agents/")) {
-      return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve("not found") });
-    }
-    if (url.includes("/api/v1/agents/") && url.includes("/messages/")) {
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(inbound),
-      });
-    }
+    if (isDetailGet(url)) return jsonText(payload);
     return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve("not found") });
   });
 }
@@ -133,18 +139,10 @@ function mockApproveSuccess() {
   mockFetch.mockImplementation((url: string, init?: RequestInit) => {
     if (url.endsWith("/approve") && init?.method === "POST") {
       calls++;
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({ status: "sent", message_id: "msg_pending" }),
-      });
+      return jsonText({ status: "sent", message_id: "msg_pending" });
     }
-    if (url.includes("/api/v1/messages/msg_pending") && !url.includes("/approve") && !url.includes("/reject")) {
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(OUTBOUND_PENDING),
-      });
+    if (isDetailGet(url) && url.includes("msg_pending")) {
+      return jsonText(OUTBOUND_PENDING);
     }
     return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve("not found") });
   });
@@ -164,8 +162,8 @@ afterEach(() => {
 
 describe("AgentMessageFocusPage", () => {
   it("renders the outbound pending detail with subject, identity row, and action card", async () => {
-    setSearchParams({ email: "support@acme.io", id: "msg_pending" });
-    mockOutboundOnly(OUTBOUND_PENDING);
+    setSearchParams({ email: "support@acme.io", id: "msg_pending", direction: "outbound", pending: "1" });
+    mockDetail(OUTBOUND_PENDING);
 
     render(<AgentMessageFocusPage />);
 
@@ -180,8 +178,8 @@ describe("AgentMessageFocusPage", () => {
   });
 
   it("renders the headers section open when ?headers=1", async () => {
-    setSearchParams({ email: "support@acme.io", id: "msg_pending", headers: "1" });
-    mockOutboundOnly(OUTBOUND_PENDING);
+    setSearchParams({ email: "support@acme.io", id: "msg_pending", direction: "outbound", pending: "1", headers: "1" });
+    mockDetail(OUTBOUND_PENDING);
 
     render(<AgentMessageFocusPage />);
 
@@ -193,9 +191,9 @@ describe("AgentMessageFocusPage", () => {
     expect(headerButton).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("falls back to the inbound endpoint when outbound returns 404", async () => {
-    setSearchParams({ email: "support@acme.io", id: "msg_in1" });
-    mockInboundFallback(INBOUND_DETAIL);
+  it("renders an inbound message (?direction=inbound) via the agent-scoped detail endpoint", async () => {
+    setSearchParams({ email: "support@acme.io", id: "msg_in1", direction: "inbound" });
+    mockDetail(INBOUND_DETAIL);
 
     render(<AgentMessageFocusPage />);
 
@@ -217,8 +215,8 @@ describe("AgentMessageFocusPage", () => {
   // was free (every navigation refetched the inbox); post-SWR it
   // needs an explicit cache invalidation.
   it("invalidates the per-agent inbox cache after a successful inbound load", async () => {
-    setSearchParams({ email: "support@acme.io", id: "msg_in1" });
-    mockInboundFallback(INBOUND_DETAIL);
+    setSearchParams({ email: "support@acme.io", id: "msg_in1", direction: "inbound" });
+    mockDetail(INBOUND_DETAIL);
 
     render(<AgentMessageFocusPage />);
 
@@ -232,8 +230,8 @@ describe("AgentMessageFocusPage", () => {
     });
   });
 
-  it("clicking Approve POSTs to /api/v1/agents/{email}/messages/{id}/approve and redirects to the thread", async () => {
-    setSearchParams({ email: "support@acme.io", id: "msg_pending" });
+  it("clicking Approve POSTs to /v1/agents/{address}/messages/{id}/approve and redirects to the thread", async () => {
+    setSearchParams({ email: "support@acme.io", id: "msg_pending", direction: "outbound", pending: "1" });
     const countCalls = mockApproveSuccess();
     const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
 
@@ -253,7 +251,7 @@ describe("AgentMessageFocusPage", () => {
   });
 
   it("⌘↵ keyboard shortcut triggers Approve when status is pending", async () => {
-    setSearchParams({ email: "support@acme.io", id: "msg_pending" });
+    setSearchParams({ email: "support@acme.io", id: "msg_pending", direction: "outbound", pending: "1" });
     const countCalls = mockApproveSuccess();
 
     render(<AgentMessageFocusPage />);
@@ -271,6 +269,47 @@ describe("AgentMessageFocusPage", () => {
     });
   });
 
+  // Regression (Bug 2 + Bug 3): the detail MessageView for an outbound
+  // row has `from:""` and `status:""` and no direction/hitl_status. A
+  // deep link with NO `?direction=`/`&pending=` params must therefore
+  // default to inbound + not-pending — render WITHOUT crashing and
+  // WITHOUT offering approve/reject. (The old code derived direction
+  // from `from === email`; with `from:""` it would have classified this
+  // as inbound too, but the load-bearing guarantee now is the explicit
+  // default + no action card.)
+  it("deep link with no direction/pending params renders as inbound, no approve/reject", async () => {
+    setSearchParams({ email: "support@acme.io", id: "msg_pending" });
+    mockDetail(OUTBOUND_PENDING);
+
+    render(<AgentMessageFocusPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("message-focus")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("message-focus").dataset.direction).toBe("inbound");
+    expect(screen.queryByTestId("action-card")).not.toBeInTheDocument();
+  });
+
+  // Regression (Bug 2 + Bug 3): the SAME wire payload (from:"", status:"")
+  // surfaces the approve/reject action card ONLY because direction +
+  // pending are threaded in via the URL. The pre-fix code gated on the
+  // detail `status === "pending_approval"` (always false here) so the
+  // action card never appeared on the focus page.
+  it("threaded ?direction=outbound&pending=1 surfaces approve/reject even though wire from/status are empty", async () => {
+    setSearchParams({ email: "support@acme.io", id: "msg_pending", direction: "outbound", pending: "1" });
+    mockDetail(OUTBOUND_PENDING);
+
+    render(<AgentMessageFocusPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("message-focus")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("message-focus").dataset.direction).toBe("outbound");
+    expect(screen.getByTestId("message-focus").dataset.status).toBe("pending_approval");
+    expect(screen.getByTestId("action-card")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Approve & send/i })).toBeInTheDocument();
+  });
+
   it("surfaces a clear error when ?email or ?id is missing", async () => {
     setSearchParams({});
 
@@ -279,20 +318,18 @@ describe("AgentMessageFocusPage", () => {
     expect(screen.getByText(/Missing \?email= or \?id=/)).toBeInTheDocument();
   });
 
-  // M1 regression test: a 500 from the outbound endpoint must NOT fall
-  // through to the inbound endpoint — that masked the real server
-  // error as "Message not found" in the earlier implementation.
-  it("surfaces the outbound error message when the outbound endpoint returns 500", async () => {
+  // A 5xx from the detail endpoint surfaces the server's error message
+  // directly (no silent fallback masking it as "not found").
+  it("surfaces the error message when the detail endpoint returns 500", async () => {
     setSearchParams({ email: "support@acme.io", id: "msg_unknown" });
     mockFetch.mockImplementation((url: string) => {
-      if (url.includes("/api/v1/messages/") && !url.includes("/agents/")) {
+      if (isDetailGet(url)) {
         return Promise.resolve({
           ok: false,
           status: 500,
           text: () => Promise.resolve("internal server error"),
         });
       }
-      // Inbound mock — should NOT be reached on a non-404.
       return Promise.resolve({
         ok: false,
         status: 404,
@@ -305,30 +342,19 @@ describe("AgentMessageFocusPage", () => {
     await waitFor(() => {
       expect(screen.getByText(/internal server error/)).toBeInTheDocument();
     });
-    // Verify inbound endpoint was never called.
-    const calls = mockFetch.mock.calls.map(([url]: [string]) => url);
-    expect(calls.some((u) => u.includes("/api/v1/agents/"))).toBe(false);
   });
 
   it("submits the edited body_text in the approve overrides when Edit + Approve is used", async () => {
-    setSearchParams({ email: "support@acme.io", id: "msg_pending" });
+    setSearchParams({ email: "support@acme.io", id: "msg_pending", direction: "outbound", pending: "1" });
     const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
     let approveBody: string | null = null;
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
-      if (url.includes("/api/v1/messages/msg_pending") && !url.endsWith("/approve") && !url.endsWith("/reject")) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve(OUTBOUND_PENDING),
-        });
+      if (isDetailGet(url) && url.includes("msg_pending")) {
+        return jsonText(OUTBOUND_PENDING);
       }
       if (url.endsWith("/approve") && init?.method === "POST") {
         approveBody = (init.body as string) || "";
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({ status: "sent", message_id: "msg_pending" }),
-        });
+        return jsonText({ status: "sent", message_id: "msg_pending" });
       }
       return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve("not found") });
     });
@@ -373,7 +399,7 @@ describe("AgentMessageFocusPage", () => {
   // would observe data via the cache but never fire onSuccess, so
   // the textarea would be empty and the assertion would fail.
   it("seeds the textarea from pre-populated SWR cache without firing a fetch (true cache-hit regression)", async () => {
-    setSearchParams({ email: "support@acme.io", id: "msg_pending" });
+    setSearchParams({ email: "support@acme.io", id: "msg_pending", direction: "outbound", pending: "1" });
     // Pre-seed both caches the page subscribes to. The
     // jest.setup.ts afterEach nukes the module-level cache between
     // tests, so these seeds are isolated to this test. The agents
@@ -382,8 +408,8 @@ describe("AgentMessageFocusPage", () => {
     // trigger a /api/dashboard/agents fetch and defeat the cache-
     // hit reproduction below.
     await mutate(
-      pendingMessageKey("msg_pending"),
-      OUTBOUND_PENDING,
+      pendingMessageKey("support@acme.io", "msg_pending"),
+      { direction: "outbound", data: { ...OUTBOUND_PENDING, id: "msg_pending", body_text: OUTBOUND_PENDING.body.text } },
       { revalidate: false },
     );
     await mutate(
@@ -426,29 +452,21 @@ describe("AgentMessageFocusPage", () => {
   // `${email}|${id}`, an edit-in-progress on A would bleed into B's
   // view and the user would see A's stale draft superimposed on B.
   it("resets per-message state when ?id changes (no draft bleed across navigation)", async () => {
-    setSearchParams({ email: "support@acme.io", id: "msg_pending" });
+    setSearchParams({ email: "support@acme.io", id: "msg_pending", direction: "outbound", pending: "1" });
     const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
 
     const OTHER = {
       ...OUTBOUND_PENDING,
-      id: "msg_other",
+      message_id: "msg_other",
       subject: "Different subject",
-      body_text: "Different body content",
+      body: { text: "Different body content" },
     };
     mockFetch.mockImplementation((url: string) => {
-      if (url.includes("/api/v1/messages/msg_pending") && !url.includes("/agents/")) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve(OUTBOUND_PENDING),
-        });
+      if (isDetailGet(url) && url.includes("msg_pending")) {
+        return jsonText(OUTBOUND_PENDING);
       }
-      if (url.includes("/api/v1/messages/msg_other") && !url.includes("/agents/")) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve(OTHER),
-        });
+      if (isDetailGet(url) && url.includes("msg_other")) {
+        return jsonText(OTHER);
       }
       return Promise.resolve({
         ok: false,
@@ -470,7 +488,7 @@ describe("AgentMessageFocusPage", () => {
     expect(screen.getByDisplayValue(/stale draft body/)).toBeInTheDocument();
 
     // Navigate to message B by updating the URL params and rerendering.
-    setSearchParams({ email: "support@acme.io", id: "msg_other" });
+    setSearchParams({ email: "support@acme.io", id: "msg_other", direction: "outbound", pending: "1" });
     rerender(<AgentMessageFocusPage />);
 
     // Message B's body must show, and the stale draft from A must not.
@@ -481,24 +499,16 @@ describe("AgentMessageFocusPage", () => {
   });
 
   it("Reject confirm flow posts the reason and redirects to the thread", async () => {
-    setSearchParams({ email: "support@acme.io", id: "msg_pending" });
+    setSearchParams({ email: "support@acme.io", id: "msg_pending", direction: "outbound", pending: "1" });
     const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
     let rejectBody: string | null = null;
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
-      if (url.includes("/api/v1/messages/msg_pending") && !url.endsWith("/approve") && !url.endsWith("/reject")) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve(OUTBOUND_PENDING),
-        });
+      if (isDetailGet(url) && url.includes("msg_pending")) {
+        return jsonText(OUTBOUND_PENDING);
       }
       if (url.endsWith("/reject") && init?.method === "POST") {
         rejectBody = (init.body as string) || "";
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({ status: "rejected", message_id: "msg_pending" }),
-        });
+        return jsonText({ status: "rejected", message_id: "msg_pending" });
       }
       return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve("not found") });
     });

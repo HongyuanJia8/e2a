@@ -18,20 +18,43 @@ import { usePendingCount } from "./usePendingCount";
 const mockFetch = jest.fn();
 global.fetch = mockFetch;
 
+// In /v1 the pending list is aggregated client-side: GET /v1/agents,
+// then GET /v1/agents/{address}/messages?direction=outbound per agent,
+// keeping rows whose `hitl_status === "pending_approval"`. REAL wire
+// shape: outbound rows have empty `status` (delivery rollup) and carry
+// the HITL lifecycle in `hitl_status`; the count would be 0 if the
+// filter keyed off `status` (Bug 1). Mock both legs.
 function mockPendingCount(count: number) {
-  const messages = Array.from({ length: count }, (_, i) => ({
-    id: `msg_${i}`,
-    agent_id: "ag_1",
+  const items = Array.from({ length: count }, (_, i) => ({
+    message_id: `msg_${i}`,
     direction: "outbound",
-    subject: `S${i}`,
+    from: "",
     to: [],
-    status: "pending_approval",
+    recipient: "",
+    subject: `S${i}`,
+    status: "",
+    hitl_status: "pending_approval",
     created_at: new Date().toISOString(),
   }));
-  mockFetch.mockResolvedValue({
-    ok: true,
-    status: 200,
-    json: () => Promise.resolve({ messages }),
+  mockFetch.mockImplementation((url: string) => {
+    if (url === "/v1/agents") {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              agents: [{ email: "ag_1@agents.e2a.dev", hitl_enabled: true }],
+            }),
+          ),
+      });
+    }
+    // The per-agent outbound messages page.
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({ items, next_cursor: null })),
+    });
   });
 }
 

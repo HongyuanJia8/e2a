@@ -77,11 +77,13 @@ const ORPHAN_INBOUND: MessageSummary = {
 
 function mockMessages(messages: MessageSummary[]) {
   mockFetch.mockImplementation((url: string) => {
-    if (url.includes("/api/v1/agents/") && url.includes("/messages")) {
+    if (url.includes("/v1/agents/") && url.includes("/messages")) {
+      // PageMessageSummaryView envelope; api helper reads it via res.text().
       return Promise.resolve({
         ok: true,
         status: 200,
-        json: () => Promise.resolve({ messages }),
+        text: () =>
+          Promise.resolve(JSON.stringify({ items: messages, next_cursor: null })),
       });
     }
     return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve("not found") });
@@ -161,7 +163,15 @@ describe("AgentInboxPage", () => {
     expect(mockRouterPush).toHaveBeenCalledWith(
       expect.stringContaining("/dashboard/agents/messages/view"),
     );
-    expect(mockRouterPush.mock.calls[0][0]).toContain("id=msg_pending");
+    const url = mockRouterPush.mock.calls[0][0];
+    expect(url).toContain("id=msg_pending");
+    // Regression (Bug 2 + Bug 3): the inbox row carries direction +
+    // hitl_status, which the focus page can't recover from the detail
+    // MessageView — so they must be threaded into the URL. Without
+    // &direction=outbound the focus page misclassifies it as inbound;
+    // without &pending=1 it never shows approve/reject.
+    expect(url).toContain("direction=outbound");
+    expect(url).toContain("pending=1");
   });
 
   it("renders the empty state when there are no messages", async () => {
