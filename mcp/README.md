@@ -114,20 +114,34 @@ Hosts that support OAuth connectors can instead add `https://api.e2a.dev/mcp` as
 
 ## Tools
 
-The server registers **33** tools spanning agents, messages, human-in-the-loop
-approval, attachments, domains, events, and webhooks. The tables below highlight
-the most commonly used ones — your MCP host's tool list shows the full set with
-per-tool descriptions.
+The server exposes up to **35** tools spanning agents, messages, human-in-the-loop
+approval, attachments, domains, events, and webhooks. **The visible set depends on
+your credential's scope (§6a):** an **agent**-scoped credential sees the 14
+runtime/inbox tools (read, send, reply, and view its pending queue); an
+**account**-scoped credential also sees the admin/setup tools (agent/domain/
+webhook/event management — **and HITL approve/reject, which is an account-owner
+action, never agent self-approval**) — all 35.
+Every tool carries MCP annotations (`readOnlyHint`/`destructiveHint`/
+`idempotentHint`) so hosts can auto-approve reads and flag destructive actions.
+The tables below highlight the most commonly used ones — your MCP host's tool list
+shows the set your scope allows, with per-tool descriptions.
 
 ### Identity
 
 | Tool | Description |
 | --- | --- |
-| `whoami` | Get the calling agent's full record (resolved from an agent-scoped credential). |
+| `whoami` | Get the authenticated account's identity — user, scope, plan/limits; for an agent-scoped credential, also the bound agent address. |
 | `list_agents` | List every agent inbox owned by the authenticated user. |
-| `create_agent` | Register a new inbox using a slug on the shared domain. Defaults to `local` mode — no webhook required. See note below for cloud mode. |
+| `create_agent` | Register a new agent by its full email address — on a verified domain you own, or the deployment's shared domain. No delivery "mode": inbound is always available via `list_messages` (poll) or a `create_webhook` subscription. (Admin/account-scoped.) |
 
-> **Cloud-mode agents must verify webhook signatures.** When you create an agent with `agent_mode: "cloud"`, e2a HMAC-signs every webhook delivery against your account's webhook signing secret (`E2A_WEBHOOK_SECRET`, shown in the [e2a dashboard](https://e2a.dev)). Your webhook handler must verify the signature on every request — the [e2a SDK](https://www.npmjs.com/package/@e2a/sdk) exposes `constructEvent(rawBody, signatureHeader, secret)` which verifies the signature and returns a typed event in one call (throws on a bad signature). Local-mode agents (the default) avoid this entirely by polling via `list_messages`.
+> **Webhook deliveries are signed — verify them.** Push delivery is a top-level
+> resource (`create_webhook`), not a per-agent mode. e2a HMAC-signs every webhook
+> delivery against the webhook's signing secret (returned once from `create_webhook`
+> / `rotate_webhook_secret`). Your handler must verify the signature on every
+> request — the [e2a SDK](https://www.npmjs.com/package/@e2a/sdk) exposes
+> `constructEvent(rawBody, signatureHeader, secret)` which verifies and returns a
+> typed event in one call (throws on a bad signature). Or skip webhooks entirely
+> and poll via `list_messages`.
 
 ### Messages
 

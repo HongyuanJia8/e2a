@@ -1,0 +1,114 @@
+// Tool tier map — the single source of truth for §6a scope-gating.
+//
+// The MCP surface splits by persona, exposed per credential scope (§5/§6a):
+//   - runtime (scope=agent): what a deployed agent uses every turn. An
+//     `agent`-scoped credential sees ONLY these.
+//   - admin   (scope=account): provisioning/setup. An `account`-scoped
+//     credential sees runtime + admin (the full surface).
+//
+// This is a UX / decision-space optimization, NOT the security boundary — the
+// backend enforces scope per-handler regardless (an agent-scoped credential is
+// 403'd on account ops even if a tool were mis-listed). Keeping the classifica-
+// tion here (one auditable place) mirrors the design's "the drift-gate map
+// records each tool's tier next to its operationId".
+//
+// INVARIANT: every registered tool name MUST appear in exactly one set below.
+// A new tool with no tier would be silently gated out of EVERY scope (it's not
+// in any allowed set), so it'd vanish without a dedicated failure. The exported
+// `assertToolTiersComplete` makes that loud: a test collects the actual
+// registered tool names and asserts the tier map covers them exactly (see
+// tools.test.ts "every registered tool has exactly one tier").
+
+/** Runtime/inbox tools — visible to BOTH agent- and account-scoped credentials. */
+export const RUNTIME_TOOLS: ReadonlySet<string> = new Set([
+  "whoami",
+  "list_agents",
+  "get_agent",
+  "list_messages",
+  "get_message",
+  "get_attachment",
+  "update_message_labels",
+  "list_conversations",
+  "get_conversation",
+  "send_message",
+  "reply_to_message",
+  "forward_message",
+  // NOTE: approve_message / reject_message are deliberately NOT here — they are
+  // admin/account-scope (below). Letting the gated agent approve its own held
+  // outbound would be self-approval and defeat the HITL gate; approval is an
+  // account-owner / human action (or the magic-link browser flow). An
+  // agent-scoped credential can send (which gets held) and SEE its pending
+  // queue (list_pending_messages / get_pending_message), but not release it.
+  "list_pending_messages",
+  "get_pending_message",
+]);
+
+/** Admin/setup tools — visible ONLY to account-scoped credentials. */
+export const ADMIN_TOOLS: ReadonlySet<string> = new Set([
+  "create_agent",
+  "update_agent",
+  "delete_agent",
+  // HITL approval is an account-owner / human review action — NOT something the
+  // gated agent may do to its own held outbound (that would be self-approval,
+  // defeating HITL). The backend enforces this too: the approve/reject handlers
+  // (internal/httpapi/hitl.go) require account scope (403 for agent-scoped).
+  "approve_message",
+  "reject_message",
+  "list_domains",
+  "get_domain",
+  "register_domain",
+  "verify_domain",
+  "delete_domain",
+  "list_webhooks",
+  "get_webhook",
+  "create_webhook",
+  "update_webhook",
+  "delete_webhook",
+  "rotate_webhook_secret",
+  "test_webhook",
+  "list_webhook_deliveries",
+  "list_events",
+  "get_event",
+  "redeliver_event",
+]);
+
+export type Scope = "account" | "agent";
+
+/**
+ * The set of tool names a given credential scope may see.
+ * - `agent`   → runtime only.
+ * - `account` → runtime + admin (full surface).
+ * Any unrecognized scope falls back to runtime (least privilege).
+ */
+export function toolNamesForScope(scope: Scope | string): ReadonlySet<string> {
+  if (scope === "account") {
+    return new Set([...RUNTIME_TOOLS, ...ADMIN_TOOLS]);
+  }
+  // agent, or anything unexpected → least privilege.
+  return RUNTIME_TOOLS;
+}
+
+/** True if `name` is allowed for `scope`. */
+export function toolAllowedForScope(name: string, scope: Scope | string): boolean {
+  return toolNamesForScope(scope).has(name);
+}
+
+/**
+ * Drift guard: assert the tier map covers the actually-registered tools EXACTLY.
+ * Throws if any registered tool is untiered (would be silently hidden from every
+ * scope), double-tiered, or if a tier lists a name that isn't registered
+ * (phantom). Call from a test with the real registered tool names.
+ */
+export function assertToolTiersComplete(registered: Iterable<string>): void {
+  const reg = new Set(registered);
+  const untiered = [...reg].filter((n) => !RUNTIME_TOOLS.has(n) && !ADMIN_TOOLS.has(n));
+  const doubled = [...reg].filter((n) => RUNTIME_TOOLS.has(n) && ADMIN_TOOLS.has(n));
+  const phantom = [...RUNTIME_TOOLS, ...ADMIN_TOOLS].filter((n) => !reg.has(n));
+  const problems: string[] = [];
+  if (untiered.length) problems.push(`untiered (hidden from all scopes): ${untiered.join(", ")}`);
+  if (doubled.length) problems.push(`in both tiers: ${doubled.join(", ")}`);
+  if (phantom.length) problems.push(`tiered but not registered: ${phantom.join(", ")}`);
+  if (problems.length) {
+    throw new Error(`tool tier map out of sync — ${problems.join("; ")}`);
+  }
+}
