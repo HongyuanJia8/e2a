@@ -151,7 +151,7 @@ type Deps struct {
 
 	// Suppression list (decision 9 / Slice 4b). Optional — nil deployments
 	// return 501 from the /v1/account/suppressions endpoints.
-	ListSuppressions  func(ctx context.Context, userID string) ([]identity.Suppression, error)
+	ListSuppressions  func(ctx context.Context, userID string, limit int, afterCreatedAt time.Time, afterAddress string) ([]identity.Suppression, error)
 	RemoveSuppression func(ctx context.Context, userID, address string) (bool, error)
 	DeleteUserData    func(ctx context.Context, user *identity.User) (*identity.DeleteUserDataResult, error)
 
@@ -227,7 +227,7 @@ func New(deps Deps) *Server {
 	root.Use(authChallenge(deps.AuthChallenge))
 	root.Use(withRawRequest)
 
-	config := huma.DefaultConfig("e2a API", "1.0.0")
+	config := huma.DefaultConfig("e2a API", APIVersion)
 	// Serve the spec and human docs under the versioned prefix so they sit
 	// beside the operations (api-v1-redesign §1: everything lives under the
 	// api host; here, under /v1).
@@ -271,8 +271,8 @@ func New(deps Deps) *Server {
 	// WebSocket transport — registered directly on chi (not Huma; it's a raw
 	// upgrade, not a JSON operation). First-class /v1 inbound transport.
 	if deps.WSHandle != nil {
-		root.Get("/v1/agents/{address}/ws", func(w http.ResponseWriter, r *http.Request) {
-			deps.WSHandle(w, r, chi.URLParam(r, "address"))
+		root.Get("/v1/agents/{email}/ws", func(w http.ResponseWriter, r *http.Request) {
+			deps.WSHandle(w, r, chi.URLParam(r, "email"))
 		})
 	}
 

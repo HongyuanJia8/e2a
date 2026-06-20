@@ -8,17 +8,10 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 )
 
-// ApproveResultView is the approve→sent response (mirrors the legacy body).
-type ApproveResultView struct {
-	Status            string `json:"status"`
-	MessageID         string `json:"message_id"`
-	ProviderMessageID string `json:"provider_message_id,omitempty"`
-	Method            string `json:"method,omitempty"`
-	Edited            bool   `json:"edited"`
-}
-
+// approve returns the unified SendResultView (MSG-9) — approve is a send, so it
+// shares send/reply/forward's result shape (with edited set).
 type approveInput struct {
-	Address        string `path:"address"`
+	Address        string `path:"email"`
 	ID             string `path:"id"`
 	RawBody        []byte
 	IdempotencyKey string `header:"Idempotency-Key"`
@@ -26,22 +19,26 @@ type approveInput struct {
 }
 
 type approveOutput struct {
-	Body ApproveResultView
+	Body SendResultView
 }
 
-// RejectResultView mirrors the legacy reject body.
+// RejectResultView is the reject response. Reject is not a send, so it keeps
+// its own shape (status + rejection_reason).
 type RejectResultView struct {
 	Status          string `json:"status"`
 	MessageID       string `json:"message_id"`
 	RejectionReason string `json:"rejection_reason,omitempty"`
 }
 
+// RejectRequest is the reject body (MSG-10, was the inline RejectInputBody).
+type RejectRequest struct {
+	Reason string `json:"reason,omitempty"`
+}
+
 type rejectInput struct {
-	Address string `path:"address"`
+	Address string `path:"email"`
 	ID      string `path:"id"`
-	Body    struct {
-		Reason string `json:"reason,omitempty"`
-	}
+	Body    RejectRequest
 }
 
 type rejectOutput struct {
@@ -50,14 +47,14 @@ type rejectOutput struct {
 
 func (s *Server) registerHITL() {
 	huma.Register(s.API, huma.Operation{
-		OperationID: "approveMessage", Method: http.MethodPost, Path: "/v1/agents/{address}/messages/{id}/approve",
+		OperationID: "approveMessage", Method: http.MethodPost, Path: "/v1/agents/{email}/messages/{id}/approve",
 		Summary: "Approve a held message", Tags: []string{"messages"},
 		Description: "Approve a pending_approval draft (with optional reviewer overrides) and send it. Honors Idempotency-Key (the approve triggers an SES send).",
 		Security:    []map[string][]string{{"bearer": {}}},
 	}, s.handleApprove)
 
 	huma.Register(s.API, huma.Operation{
-		OperationID: "rejectMessage", Method: http.MethodPost, Path: "/v1/agents/{address}/messages/{id}/reject",
+		OperationID: "rejectMessage", Method: http.MethodPost, Path: "/v1/agents/{email}/messages/{id}/reject",
 		Summary: "Reject a held message", Tags: []string{"messages"},
 		Description: "Reject a pending_approval draft so it is never sent.",
 		Security:    []map[string][]string{{"bearer": {}}},
@@ -79,14 +76,15 @@ func (s *Server) handleApprove(ctx context.Context, in *approveInput) (*approveO
 	if s.deps.ApprovePending == nil {
 		return nil, NewError(http.StatusInternalServerError, "internal_error", "approve unavailable")
 	}
-	_, view, err := runIdempotent(s, ctx, user.ID, in.IdempotencyKey, "/v1/approve/"+in.ID, in.RawBody, func() (int, ApproveResultView, error) {
+	_, view, err := runIdempotent(s, ctx, user.ID, in.IdempotencyKey, "/v1/approve/"+in.ID, in.RawBody, func() (int, SendResultView, error) {
 		sent, derr := s.deps.ApprovePending(ctx, user.ID, in.ID, ag.Email, in.Body)
 		if derr != nil {
-			return 0, ApproveResultView{}, NewError(derr.Status, derr.Code, derr.Msg)
+			return 0, SendResultView{}, NewError(derr.Status, derr.Code, derr.Msg)
 		}
-		return http.StatusOK, ApproveResultView{
-			Status: sent.Status, MessageID: sent.ID, ProviderMessageID: sent.ProviderMessageID,
-			Method: sent.Method, Edited: sent.Edited,
+		edited := sent.Edited
+		return http.StatusOK, SendResultView{
+			Status: "sent", MessageID: sent.ID, ProviderMessageID: sent.ProviderMessageID,
+			SentAs: sent.SentAs, Method: sent.Method, Edited: &edited,
 		}, nil
 	})
 	if err != nil {

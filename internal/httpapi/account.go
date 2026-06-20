@@ -3,17 +3,33 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/Mnexa-AI/e2a/internal/identity"
 	"github.com/danielgtaylor/huma/v2"
 )
 
-// LimitsView mirrors the legacy LimitsInfo (GET /users/me/limits).
-type LimitsView struct {
-	PlanCode   string          `json:"plan_code"`
-	Limits     LimitsCapsView  `json:"limits"`
-	Usage      LimitsUsageView `json:"usage"`
-	UpgradeURL string          `json:"upgrade_url"`
+// AccountUserView is the authenticated principal's identity (A-1). Returned by
+// GET /v1/account (MCP `whoami`) so an agent/operator can answer "who am I"
+// without a follow-up call.
+type AccountUserView struct {
+	ID    string `json:"id"`
+	Email string `json:"email"`
+}
+
+// AccountView is the authenticated account: identity + plan + limits + usage
+// (A-2, formerly LimitsView). `whoami` maps here. It is scope-aware: `scope`
+// is always set, and `agent_address` is populated ONLY for agent-scoped
+// credentials (where the credential *is* a single agent) — omitted for
+// account scope, which spans many agents.
+type AccountView struct {
+	User         AccountUserView `json:"user"`
+	Scope        string          `json:"scope" enum:"account,agent"`
+	AgentAddress string          `json:"agent_address,omitempty"`
+	PlanCode     string          `json:"plan_code"`
+	Limits       LimitsCapsView  `json:"limits"`
+	Usage        LimitsUsageView `json:"usage"`
+	UpgradeURL   string          `json:"upgrade_url"`
 }
 
 type LimitsCapsView struct {
@@ -31,13 +47,13 @@ type LimitsUsageView struct {
 	StorageBytes  int64 `json:"storage_bytes"`
 }
 
-type limitsOutput struct{ Body LimitsView }
+type accountOutput struct{ Body AccountView }
 
 func (s *Server) registerAccount() {
 	huma.Register(s.API, huma.Operation{
 		OperationID: "getAccount", Method: http.MethodGet, Path: "/v1/account",
-		Summary: "Get account: plan limits + usage", Tags: []string{"account"},
-		Description: "The authenticated account's plan caps and current usage. (Deployment discovery — shared domain, slug registration — is the separate public GET /v1/info.)",
+		Summary: "Get account: identity + plan limits + usage (whoami)", Tags: []string{"account"},
+		Description: "The authenticated principal's identity (user + scope; agent_address for agent-scoped credentials), plan caps, and current usage. Works for both account- and agent-scoped credentials. (Deployment discovery — shared domain, slug registration — is the separate public GET /v1/info.)",
 		Security:    []map[string][]string{{"bearer": {}}},
 	}, s.handleGetMyLimits)
 
@@ -78,7 +94,18 @@ type suppressionsOutput struct {
 	Body Page[identity.Suppression]
 }
 
-func (s *Server) handleListSuppressions(ctx context.Context, _ *struct{}) (*suppressionsOutput, error) {
+// suppressionsCursor is the opaque keyset position: the last row's
+// (created_at, address). Compact keys keep the cursor short.
+type suppressionsCursor struct {
+	CreatedAt time.Time `json:"c"`
+	Address   string    `json:"a"`
+}
+
+type listSuppressionsInput struct {
+	PageParams
+}
+
+func (s *Server) handleListSuppressions(ctx context.Context, in *listSuppressionsInput) (*suppressionsOutput, error) {
 	user, err := s.requireAccountUser(ctx)
 	if err != nil {
 		return nil, err
@@ -86,11 +113,38 @@ func (s *Server) handleListSuppressions(ctx context.Context, _ *struct{}) (*supp
 	if s.deps.ListSuppressions == nil {
 		return nil, NewError(http.StatusNotImplemented, "not_implemented", "suppressions are not available on this deployment")
 	}
-	list, err := s.deps.ListSuppressions(ctx, user.ID)
+	var afterCreatedAt time.Time
+	var afterAddress string
+	if in.Cursor != "" {
+		var cur suppressionsCursor
+		if err := DecodeCursor(in.Cursor, &cur); err != nil {
+			return nil, NewError(http.StatusBadRequest, "invalid_cursor", "invalid pagination cursor")
+		}
+		afterCreatedAt = cur.CreatedAt
+		afterAddress = cur.Address
+	}
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	// Fetch limit+1 to detect a further page.
+	list, err := s.deps.ListSuppressions(ctx, user.ID, limit+1, afterCreatedAt, afterAddress)
 	if err != nil {
 		return nil, NewError(http.StatusInternalServerError, "internal_error", "failed to list suppressions")
 	}
-	return &suppressionsOutput{Body: NewPage(list, "")}, nil
+	hasMore := len(list) > limit
+	if hasMore {
+		list = list[:limit]
+	}
+	var nextCursor string
+	if hasMore {
+		last := list[len(list)-1]
+		nextCursor, err = EncodeCursor(suppressionsCursor{CreatedAt: last.CreatedAt, Address: last.Address})
+		if err != nil {
+			return nil, NewError(http.StatusInternalServerError, "internal_error", "failed to build pagination cursor")
+		}
+	}
+	return &suppressionsOutput{Body: NewPage(list, nextCursor)}, nil
 }
 
 type deleteSuppressionInput struct {
@@ -133,6 +187,15 @@ func (s *Server) handleExportUserData(ctx context.Context, _ *struct{}) (*export
 	if err != nil {
 		return nil, NewError(http.StatusInternalServerError, "internal_error", "failed to export user data")
 	}
+	// A-3: top-level export collections render as [] not null when empty.
+	if dump != nil {
+		dump.Domains = orEmpty(dump.Domains)
+		dump.Agents = orEmpty(dump.Agents)
+		dump.APIKeys = orEmpty(dump.APIKeys)
+		dump.Messages = orEmpty(dump.Messages)
+		dump.UsageEvents = orEmpty(dump.UsageEvents)
+		dump.OAuthConnections = orEmpty(dump.OAuthConnections)
+	}
 	return &exportOutput{
 		ContentDisposition: `attachment; filename="e2a-export-` + user.ID + `.json"`,
 		Body:               dump,
@@ -165,11 +228,15 @@ func (s *Server) handleDeleteAccount(ctx context.Context, in *deleteAccountInput
 	return &deleteAccountOutput{Body: res}, nil
 }
 
-func (s *Server) handleGetMyLimits(ctx context.Context, _ *struct{}) (*limitsOutput, error) {
-	user, err := s.requireAccountUser(ctx)
+func (s *Server) handleGetMyLimits(ctx context.Context, _ *struct{}) (*accountOutput, error) {
+	// whoami works for BOTH scopes (A-1): an agent-scoped credential must be
+	// able to learn its own identity, so this authenticates any principal
+	// rather than requiring account scope.
+	p, err := s.requirePrincipal(ctx)
 	if err != nil {
 		return nil, err
 	}
+	user := p.User
 	if s.deps.GetLimits == nil {
 		return nil, NewError(http.StatusServiceUnavailable, "limits_unavailable", "limits subsystem not configured")
 	}
@@ -181,8 +248,17 @@ func (s *Server) handleGetMyLimits(ctx context.Context, _ *struct{}) (*limitsOut
 	if s.deps.GetUsage != nil {
 		usage = s.deps.GetUsage(ctx, user.ID)
 	}
-	return &limitsOutput{Body: LimitsView{
-		PlanCode: caps.PlanCode,
+	// agent_address only for agent-scoped credentials (the credential IS one
+	// agent; its id == its email by construction). Omitted for account scope.
+	agentAddress := ""
+	if p.Scope == identity.ScopeAgent {
+		agentAddress = p.AgentID
+	}
+	return &accountOutput{Body: AccountView{
+		User:         AccountUserView{ID: user.ID, Email: user.Email},
+		Scope:        p.Scope,
+		AgentAddress: agentAddress,
+		PlanCode:     caps.PlanCode,
 		Limits: LimitsCapsView{
 			MaxAgents:        caps.MaxAgents,
 			MaxDomains:       caps.MaxDomains,

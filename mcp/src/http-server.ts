@@ -85,7 +85,7 @@ export function buildApp(opts: HttpServerOptions): BuiltApp {
   // in favor of external middleware; we enforce it here. 421 Misdirected
   // Request is the spec-recommended status for "this server is not what
   // you asked for." Strip port before comparing so the same allowlist
-  // entry works both for prod (`mcp.e2a.dev`) and tests on random ports
+  // entry works both for prod (`api.e2a.dev`) and tests on random ports
   // (`127.0.0.1:54321`).
   const allowedHosts = new Set(opts.allowedHosts.map((h) => h.toLowerCase()));
   app.use("/mcp", (req, res, next) => {
@@ -327,21 +327,22 @@ async function handleStreamingOrDelete(
  * MCP transport, on the other hand, has a clear notion of "session
  * init": one prefetch per session is cheap and lets every subsequent
  * tool call dispatch without forcing the LLM (or the user) to pass
- * agent_email explicitly. The OAuth grant already binds the user to
+ * email explicitly. The OAuth grant already binds the user to
  * one agent at consent, so for the dominant single-agent case the
  * default is unambiguous.
  *
  * Resolution order (highest precedence first):
- *   1. `E2A_AGENT_EMAIL` env var (constructor reads it into agentEmail).
- *   2. listAgents() yields exactly one agent — use it.
- *   3. Otherwise leave agentEmail empty. Tools that take an optional
- *      agent_email arg keep their existing fall-back behavior
- *      (whoami's manual single-agent resolution, error with hint
- *      otherwise).
+ *   1. listAgents() yields exactly one agent — pin it as the default.
+ *   2. Otherwise leave the default empty. Tools that take an optional
+ *      `email` arg require it explicitly (resolveAddress errors with a
+ *      hint pointing at list_agents).
+ *
+ * (There is no env-var default: E2A_AGENT_EMAIL was removed. An
+ * agent-scoped credential resolves its agent server-side.)
  *
  * listAgents failures are swallowed: a transient backend hiccup
  * shouldn't break MCP initialize. Worst case, the user sees the same
- * "agentEmail is required" error they'd see today.
+ * "email is required" error they'd see today.
  */
 export async function buildSessionClient(
   opts: HttpServerOptions,
