@@ -23,12 +23,15 @@
 > — `conversations.list` now returns an `AutoPager` (PR #238); and Decision 3's
 > proposed `from`/`reply_to` outbound body fields did **not** land — `from` was
 > **dropped** as redundant with the route (the sender is structurally the path
-> agent; PR #238), and `reply_to` is **deferred**, not rejected. **Still
-> pending:** the MCP tool-surface re-curation to the §6a target (the SDK
-> *transport* was repointed onto `/v1`, but the tool names/args in
-> `mcp/src/tools/` remain the pre-redesign set — tracked as a separate round).
-> The event name `email.rejected` shipped as-is (decision 9's
-> `email.approval_rejected` rename did not land).
+> agent; PR #238), and `reply_to` is **deferred**, not rejected. The **MCP
+> tool-surface re-curation to the §6a target shipped** — the tool names/args in
+> `mcp/src/tools/` were reshaped onto `/v1` (`send_message`/`reply_to_message`,
+> cursor pagination, structured error `code`s, `get_attachment` download URLs;
+> the SDK *transport* was repointed in the earlier round). The rejected-decision
+> event ships as **`email.approval_rejected`** (decision 9's rename **landed** —
+> `api/openapi.yaml` + the webhook-subscription and `/v1/events` enums all use it;
+> the `email.rejected` strings left in `internal/agent/api.go` are stale code
+> comments, not the wire value, which is `webhookpub.EventEmailRejected`).
 
 ## 1. Problem statement
 
@@ -966,12 +969,17 @@ review diligence — a #206-style omission can't merge.
 >   with a `(retryable)` hint — so agents branch on a code, not prose; wrapper
 >   errors with no code stay plain; the message is sanitized + length-bounded and
 >   the raw body/headers are never surfaced). Adversarial review caught that
->   send/reply/forward return the raw body **string** (those ops declare no
->   `default: ErrorEnvelope`), so the TS SDK `fromApiException` now parses a
->   string body's envelope — recovering the code for every operation.
->   **Follow-up:** the Python SDK has the same string-body gap, and the proper
->   root cause is adding `default: ErrorEnvelope` to the send/reply/forward Huma
->   handlers (then regen) so every generated client parses it. **#5 attachment
+>   send/reply/forward returned the raw body **string** (those ops declared no
+>   `default: ErrorEnvelope` — a custom `Responses` map suppresses Huma's auto
+>   default), so the TS SDK `fromApiException` parses a string body's envelope to
+>   recover the code. **Root cause now fixed:** every op with a custom `Responses`
+>   map (`sendMessage`/`replyToMessage`/`forwardMessage`/`testAgent` +
+>   `registerDomain`/`verifyDomain`) re-adds `default: ErrorEnvelope` via
+>   `s.errorEnvelopeResponse()`, so the OpenAPI contract documents the error shape
+>   and generated clients deserialize the code natively. The **Python SDK already
+>   handled this** independently — `from_api_exception`'s `_parse_envelope`
+>   `json.loads`-es a raw string body, so it surfaced the code before and after the
+>   spec fix (unit- and client-tested). **#5 attachment
 >   download-URL ✅ done** (native adapter; AgentDrive/object-storage adapter +
 >   outbound presigned-upload + large-file attach-by-reference deferred as seams —
 >   see [attachment-retrieval.md](attachment-retrieval.md)). **#7 idempotency-key
