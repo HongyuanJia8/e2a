@@ -177,6 +177,47 @@ describe("fromApiException", () => {
     expect(err.status).toBe(500);
     expect(err.retryable).toBe(true);
   });
+
+  // Regression: operations that declare ONLY success codes in the spec
+  // (sendMessage / replyToMessage / forwardMessage) hand back the RAW body
+  // STRING, not the parsed envelope. The machine `code` must still be recovered
+  // — otherwise it degrades to the generic status bucket and the raw body leaks.
+  it("parses the envelope from a RAW STRING body (send/reply/forward path)", () => {
+    const raw = JSON.stringify({
+      error: { code: "domain_not_verified", message: "the sending domain is not verified", request_id: "req_str" },
+    });
+    const apiEx = new ApiException(403, "Unknown API Status Code!", raw, {});
+    const err = fromApiException(apiEx);
+    expect(err.code).toBe("domain_not_verified"); // not the generic "forbidden"
+    expect(err.message).toBe("the sending domain is not verified"); // not the raw dump
+    expect(err.requestId).toBe("req_str"); // recovered from the body when no header
+  });
+
+  it("leaves a non-JSON string body as the status-bucket fallback", () => {
+    const apiEx = new ApiException(403, "nope", "<html>gateway</html>", {});
+    const err = fromApiException(apiEx);
+    expect(err).toBeInstanceOf(E2APermissionError); // status bucket, no crash
+    expect(err.code).not.toBe("domain_not_verified"); // didn't hallucinate a code
+  });
+
+  // Regression: the generated ApiException.message is a full dump (raw body +
+  // all headers). fromApiException must NEVER pass that through — for a
+  // non-envelope error it synthesizes a clean message instead, so the raw body,
+  // headers, and any embedded secrets never reach a caller (or, via MCP, an
+  // agent's context).
+  it("never leaks the raw body/headers dump when the body isn't an envelope", () => {
+    const apiEx = new ApiException(
+      502,
+      "Unknown API Status Code!",
+      "upstream <html>Bad Gateway</html> req_BODY_SECRET not-json",
+      { "x-request-id": "req_HDR_SECRET", "set-cookie": "session=secret" },
+    );
+    const err = fromApiException(apiEx);
+    expect(err.message).toMatch(/e2a API error \(502\)/); // clean synthetic message
+    for (const leak of ["req_BODY_SECRET", "<html>", "Headers:", "set-cookie", "session=secret"]) {
+      expect(err.message).not.toContain(leak);
+    }
+  });
 });
 
 describe("connectionError + isRetryableStatus", () => {
