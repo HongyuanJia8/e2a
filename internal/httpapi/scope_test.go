@@ -49,7 +49,7 @@ func scopeTestServer(t *testing.T) *httptest.Server {
 			}
 			return nil, errors.New("not found")
 		},
-		UpdateAgentHITL: func(ctx context.Context, agentID, userID string, enabled bool, ttl int, action string) error {
+		UpdateAgentHITL: func(ctx context.Context, agentID, userID string, ttl int, action string) error {
 			return nil
 		},
 		DeleteAgent: func(ctx context.Context, agentID, userID string) error { return nil },
@@ -91,7 +91,7 @@ func TestScope_AccountOnlyRoutesRejectAgentKeys(t *testing.T) {
 // agent-scoped credential even on its own bound agent.
 func TestScope_UpdateAgentIsAccountOnly(t *testing.T) {
 	srv := scopeTestServer(t)
-	body := map[string]any{"hitl_enabled": true, "hitl_ttl_seconds": 3600, "hitl_expiration_action": "reject"}
+	body := map[string]any{"hitl_ttl_seconds": 3600, "hitl_expiration_action": "reject"}
 
 	code, _ := sendJSON(t, "PATCH", srv.URL+"/v1/agents/support%40acme.com", "acct", body)
 	if code != 200 {

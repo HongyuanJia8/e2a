@@ -75,11 +75,7 @@ components:
           type: boolean
         email:
           type: string
-        hitl_enabled:
-          type: boolean
         hitl_expiration_action:
-          type: string
-        hitl_mode:
           type: string
         hitl_ttl_seconds:
           format: int64
@@ -97,6 +93,16 @@ components:
             - "null"
         inbound_policy:
           type: string
+        inbound_policy_action:
+          type: string
+        inbound_scan:
+          type: string
+        inbound_scan_block_threshold:
+          format: double
+          type: number
+        inbound_scan_review_threshold:
+          format: double
+          type: number
         last_delivery_at:
           format: date-time
           type: string
@@ -105,6 +111,24 @@ components:
         outbound_7d:
           format: int64
           type: integer
+        outbound_allowlist:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        outbound_policy:
+          type: string
+        outbound_policy_action:
+          type: string
+        outbound_scan:
+          type: string
+        outbound_scan_block_threshold:
+          format: double
+          type: number
+        outbound_scan_review_threshold:
+          format: double
+          type: number
         pending_count:
           format: int64
           type: integer
@@ -123,15 +147,22 @@ components:
         - public
         - created_at
         - user_id
-        - hitl_enabled
         - hitl_ttl_seconds
         - hitl_expiration_action
-        - hitl_mode
         - inbound_7d
         - outbound_7d
         - pending_count
         - webhook_healthy
         - inbound_policy
+        - inbound_policy_action
+        - outbound_policy
+        - outbound_policy_action
+        - inbound_scan
+        - inbound_scan_review_threshold
+        - inbound_scan_block_threshold
+        - outbound_scan
+        - outbound_scan_review_threshold
+        - outbound_scan_block_threshold
       type: object
     AgentView:
       additionalProperties: false
@@ -145,17 +176,10 @@ components:
           type: boolean
         email:
           type: string
-        hitl_enabled:
-          type: boolean
         hitl_expiration_action:
           enum:
             - approve
             - reject
-          type: string
-        hitl_mode:
-          enum:
-            - all
-            - high_impact
           type: string
         hitl_ttl_seconds:
           format: int64
@@ -173,8 +197,52 @@ components:
             - domain
             - verified_only
           type: string
+        inbound_policy_action:
+          enum:
+            - flag
+            - review
+            - block
+          type: string
+        inbound_scan:
+          enum:
+            - "off"
+            - "on"
+          type: string
+        inbound_scan_block_threshold:
+          format: double
+          type: number
+        inbound_scan_review_threshold:
+          format: double
+          type: number
         name:
           type: string
+        outbound_allowlist:
+          items:
+            type: string
+          type: array
+        outbound_policy:
+          enum:
+            - open
+            - allowlist
+            - domain
+          type: string
+        outbound_policy_action:
+          enum:
+            - flag
+            - review
+            - block
+          type: string
+        outbound_scan:
+          enum:
+            - "off"
+            - "on"
+          type: string
+        outbound_scan_block_threshold:
+          format: double
+          type: number
+        outbound_scan_review_threshold:
+          format: double
+          type: number
       required:
         - id
         - domain
@@ -182,11 +250,18 @@ components:
         - name
         - domain_verified
         - created_at
-        - hitl_enabled
         - hitl_ttl_seconds
         - hitl_expiration_action
-        - hitl_mode
         - inbound_policy
+        - inbound_policy_action
+        - outbound_policy
+        - outbound_policy_action
+        - inbound_scan
+        - inbound_scan_review_threshold
+        - inbound_scan_block_threshold
+        - outbound_scan
+        - outbound_scan_review_threshold
+        - outbound_scan_block_threshold
       type: object
     ApproveRequest:
       additionalProperties: false
@@ -867,6 +942,8 @@ components:
           type:
             - array
             - "null"
+        review_reason:
+          type: string
         reviewed_at:
           format: date-time
           type: string
@@ -874,6 +951,11 @@ components:
           type: string
         reviewed_by_user_id:
           type: string
+        scan_action:
+          type: string
+        scan_score:
+          format: double
+          type: number
         sender:
           type: string
         sent_as:
@@ -1521,17 +1603,10 @@ components:
     UpdateAgentRequest:
       additionalProperties: false
       properties:
-        hitl_enabled:
-          type: boolean
         hitl_expiration_action:
           enum:
             - approve
             - reject
-          type: string
-        hitl_mode:
-          enum:
-            - all
-            - high_impact
           type: string
         hitl_ttl_seconds:
           format: int64
@@ -1547,6 +1622,50 @@ components:
             - domain
             - verified_only
           type: string
+        inbound_policy_action:
+          enum:
+            - flag
+            - review
+            - block
+          type: string
+        inbound_scan:
+          enum:
+            - "off"
+            - "on"
+          type: string
+        inbound_scan_block_threshold:
+          format: double
+          type: number
+        inbound_scan_review_threshold:
+          format: double
+          type: number
+        outbound_allowlist:
+          items:
+            type: string
+          type: array
+        outbound_policy:
+          enum:
+            - open
+            - allowlist
+            - domain
+          type: string
+        outbound_policy_action:
+          enum:
+            - flag
+            - review
+            - block
+          type: string
+        outbound_scan:
+          enum:
+            - "off"
+            - "on"
+          type: string
+        outbound_scan_block_threshold:
+          format: double
+          type: number
+        outbound_scan_review_threshold:
+          format: double
+          type: number
       type: object
     UpdateDomainRequest:
       additionalProperties: false

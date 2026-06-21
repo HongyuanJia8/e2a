@@ -16,18 +16,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/actiongate"
 	"github.com/Mnexa-AI/e2a/internal/agentauth"
 	"github.com/Mnexa-AI/e2a/internal/approvaltoken"
 	"github.com/Mnexa-AI/e2a/internal/auth"
 	"github.com/Mnexa-AI/e2a/internal/dkim"
-	"github.com/Mnexa-AI/e2a/internal/emailauth"
 	"github.com/Mnexa-AI/e2a/internal/hitlnotify"
 	"github.com/Mnexa-AI/e2a/internal/idempotency"
 	"github.com/Mnexa-AI/e2a/internal/identity"
 	"github.com/Mnexa-AI/e2a/internal/limits"
 	"github.com/Mnexa-AI/e2a/internal/oauth"
 	"github.com/Mnexa-AI/e2a/internal/outbound"
+	"github.com/Mnexa-AI/e2a/internal/piguard"
 	"github.com/Mnexa-AI/e2a/internal/ratelimit"
 	"github.com/Mnexa-AI/e2a/internal/telemetry"
 	"github.com/Mnexa-AI/e2a/internal/usage"
@@ -155,8 +154,11 @@ func validateSlug(slug string) error {
 }
 
 type API struct {
-	store      *identity.Store
-	sender     *outbound.Sender
+	store  *identity.Store
+	sender *outbound.Sender
+	// screen runs outbound content screening (Slice 5). Stateless heuristics
+	// engine; mirrors the relay's inbound piguard engine.
+	screen     *piguard.Engine
 	smtpRelay  *outbound.SMTPRelay
 	userAuth   *auth.UserAuth
 	usage      usage.UsageTracker
@@ -504,6 +506,7 @@ func NewAPI(store *identity.Store, sender *outbound.Sender, smtpRelay *outbound.
 	return &API{
 		store:         store,
 		sender:        sender,
+		screen:        piguard.NewEngine(piguard.EngineConfig{}, piguard.NewHeuristicsDetector()),
 		smtpRelay:     smtpRelay,
 		userAuth:      userAuth,
 		usage:         usage,
@@ -950,7 +953,7 @@ func checkDomainRecords(domain, smtpDomain, verificationToken, dkimSelector, dki
 // holdForApproval persists a fully composed outbound SendRequest as a
 // pending_approval message and writes a 202 response. It is the shared
 // branch taken by handleSendEmail, handleReplyToMessage, and
-// handleSendTestEmail when agent.HITLEnabled is true.
+// handleSendTestEmail when outbound screening holds the message for review.
 //
 // replyToEmailMessageID is the inbound Message-ID being replied to, or "".
 // msgType is one of "send", "reply", "test", or "forward".
@@ -1052,45 +1055,6 @@ func (a *API) checkSuppression(ctx context.Context, userID string, req outbound.
 	return nil
 }
 
-// actionGateHold computes the Slice 7b trust-gated hold decision. The caller
-// has already confirmed HITL is enabled; this only chooses based on the
-// agent's hitl_mode and the trust signals.
-//
-//   - referenced: the inbound message this action reacts to (reply/forward);
-//     nil for a cold send/test, which has no untrusted input to react to.
-//   - untrusted input (today): the referenced inbound's DMARC verdict is not a
-//     pass — i.e. we can't confirm it really came from the claimed sender. A
-//     missing verdict is treated as untrusted (fail-closed). This is the
-//     pluggable seam: a content-level prompt-injection verdict can later OR
-//     into this signal without touching actiongate.
-//   - high impact: a recipient reaches a domain that wasn't a participant of
-//     the referenced inbound (reply to a new party / forward to a third party).
-func actionGateHold(agent *identity.AgentIdentity, req outbound.SendRequest, referenced *identity.Message) actiongate.Decision {
-	mode := agent.HITLMode
-	if mode == "" {
-		mode = actiongate.ModeAll
-	}
-	untrusted := referenced == nil || referenced.Auth == nil ||
-		referenced.Auth.DMARC.Status != emailauth.StatusPass
-
-	// Trust anchor for the high-impact check is the agent's OWN verified domain
-	// — NOT the referenced inbound's From/To/Cc. high_impact only ever holds on
-	// an untrusted (DMARC-fail) inbound, whose headers are attacker-controlled:
-	// a spoofer who adds `Cc: exfil@evil.com` would otherwise pre-authorize
-	// their own exfil domain as a "participant" and slip a forward past the gate
-	// (adversarial review). So an untrusted inbound expands the trusted set by
-	// nothing; any recipient off the agent's domain is high-impact. (Reusing a
-	// *trusted* prior thread's participants is a possible future refinement.)
-	participants := []string{agent.EmailAddress()}
-
-	recipients := make([]string, 0, len(req.To)+len(req.CC)+len(req.BCC))
-	recipients = append(recipients, req.To...)
-	recipients = append(recipients, req.CC...)
-	recipients = append(recipients, req.BCC...)
-
-	return actiongate.Evaluate(mode, referenced != nil, untrusted, actiongate.HighImpact(participants, recipients))
-}
-
 // DeliverOutbound is the shared send/reply/forward delivery tail, HTTP-free:
 // HITL hold (HoldForApprovalCore), else self-send loopback, else SES send +
 // record outbound + publish sent event. The caller has already authed,
@@ -1109,18 +1073,34 @@ func (a *API) DeliverOutbound(ctx context.Context, user *identity.User, agent *i
 		return nil, supErr
 	}
 
-	// Trust-gated action authorization (decision 10 / Slice 7b): when HITL is
-	// on, the sub-mode decides WHAT is held — all outbound (hitl_mode=all), or
-	// only a high-impact action taken on untrusted inbound (high_impact).
-	// `referenced` is the inbound message this action reacts to (reply/forward);
-	// nil for a cold send.
-	if agent.HITLEnabled && actionGateHold(agent, req, referenced).Hold {
+	// Outbound screening (Slice 5): the recipient gate (outbound_policy) + content
+	// scan (outbound_scan) combine into one applied action. block ⇒ refuse;
+	// review ⇒ hold; flag ⇒ send + annotate; allow ⇒ send.
+	verdict := a.screenOutbound(ctx, agent, req)
+	if verdict.Block() {
+		// Egress block: refuse to the caller. No message row is persisted; the
+		// audit lives in screening_events keyed to a STABLE soft-ref id so a
+		// retried block doesn't write duplicate audit rows / events.
+		a.auditRowless(ctx, agent, blockAuditID(agent.ID, req), req, verdict)
+		return nil, &OutboundError{http.StatusForbidden, "blocked_by_policy", "message blocked by outbound policy"}
+	}
+
+	// Hold when outbound screening says review. The outbound recipient gate
+	// (outbound_policy: allowlist+review is the trust-ramp) + content scan now
+	// fully own the hold decision — hitl_enabled/hitl_mode were retired in
+	// Slice 5b (their behavior is mapped forward by migration 042).
+	if verdict.Review() {
 		msg, err := a.HoldForApprovalCore(ctx, agent, req, msgType, replyToEmailMessageID)
 		if err != nil {
 			if errors.Is(err, errHoldAttachments) {
 				return nil, &OutboundError{http.StatusInternalServerError, "internal_error", "failed to serialize attachments"}
 			}
 			return nil, &OutboundError{http.StatusInternalServerError, "internal_error", "failed to hold message for approval"}
+		}
+		// Tag the held row + audit only when screening drove the hold (a pure
+		// legacy-HITL hold carries no screening verdict).
+		if verdict.Annotate() {
+			a.annotateAndAudit(ctx, agent, msg.ID, req, verdict)
 		}
 		return &OutboundResult{Held: true, PendingMessageID: msg.ID, ApprovalExpiresAt: msg.ApprovalExpiresAt}, nil
 	}
@@ -1162,6 +1142,10 @@ func (a *API) DeliverOutbound(ctx context.Context, user *identity.User, agent *i
 		if err := a.store.MarkMessageSent(ctx, outMsg.ID, result.SentAs, result.To, result.CC, result.BCC); err != nil {
 			log.Printf("[api] mark sent (delivery_status): %v", err)
 		}
+		// flag verdict: delivered + annotated (denorm + screening_events + event).
+		if verdict.Annotate() {
+			a.annotateAndAudit(ctx, agent, outMsg.ID, req, verdict)
+		}
 		log.Printf("[mail:%s] dir=outbound type=%s from=%s to=%v slug=%s conv_id=%s subject=%q", outMsg.ID, msgType, agent.EmailAddress(), result.To, slug, req.ConversationID, req.Subject)
 	}
 	a.publishSent(ctx, a.buildSentEvent(agent, outMsg, result, req, msgType), outMsg)
@@ -1190,14 +1174,21 @@ func (a *API) SendTestCore(ctx context.Context, agent *identity.AgentIdentity) (
 	subject := "Test email from e2a"
 	body := fmt.Sprintf("This is a test email for %s.\n\nYour agent is set up and ready to receive emails.", agent.EmailAddress())
 
-	// A platform test is a cold self-send (no referenced inbound), so in
-	// hitl_mode=high_impact it isn't held (nothing untrusted to react to); in
-	// hitl_mode=all it's held like any outbound.
+	// A platform test is a normal outbound send through the same screening:
+	// block ⇒ refuse, review ⇒ hold, flag ⇒ send + annotate.
 	testReq := outbound.SendRequest{To: to, Subject: subject, Body: body}
-	if agent.HITLEnabled && actionGateHold(agent, testReq, nil).Hold {
+	verdict := a.screenOutbound(ctx, agent, testReq)
+	if verdict.Block() {
+		a.auditRowless(ctx, agent, blockAuditID(agent.ID, testReq), testReq, verdict)
+		return nil, &OutboundError{http.StatusForbidden, "blocked_by_policy", "test message blocked by outbound policy"}
+	}
+	if verdict.Review() {
 		msg, err := a.HoldForApprovalCore(ctx, agent, testReq, "test", "")
 		if err != nil {
 			return nil, &OutboundError{http.StatusInternalServerError, "internal_error", "failed to hold message for approval"}
+		}
+		if verdict.Annotate() {
+			a.annotateAndAudit(ctx, agent, msg.ID, testReq, verdict)
 		}
 		return &OutboundResult{Held: true, PendingMessageID: msg.ID, ApprovalExpiresAt: msg.ApprovalExpiresAt}, nil
 	}
@@ -1213,6 +1204,10 @@ func (a *API) SendTestCore(ctx context.Context, agent *identity.AgentIdentity) (
 		return nil, &OutboundError{http.StatusInternalServerError, "internal_error", fmt.Sprintf("failed to send test email: %v", err)}
 	}
 	log.Printf("[api] test email sent to %s (message_id=%s)", agent.EmailAddress(), messageID)
+	// flag verdict: the test send persists no message row, so audit row-less.
+	if verdict.Annotate() {
+		a.auditRowless(ctx, agent, blockAuditID(agent.ID, testReq), testReq, verdict)
+	}
 	return &OutboundResult{MessageID: messageID, Method: "smtp"}, nil
 }
 

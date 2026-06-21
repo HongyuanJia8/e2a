@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/actiongate"
 	"github.com/Mnexa-AI/e2a/internal/dkim"
 	"github.com/Mnexa-AI/e2a/internal/emailauth"
 	"github.com/Mnexa-AI/e2a/internal/inboundpolicy"
@@ -76,21 +75,20 @@ type Domain struct {
 }
 
 type AgentIdentity struct {
-	ID                   string    `json:"id"`
-	Domain               string    `json:"domain"`
-	Email                string    `json:"email"`
-	Name                 string    `json:"name"`
-	DomainVerified       bool      `json:"domain_verified"`
-	Public               bool      `json:"public"`
-	CreatedAt            time.Time `json:"created_at"`
-	UserID               string    `json:"user_id"`
-	HITLEnabled          bool      `json:"hitl_enabled"`
-	HITLTTLSeconds       int       `json:"hitl_ttl_seconds"`
-	HITLExpirationAction string    `json:"hitl_expiration_action"`
-	// HITLMode is the action-gate sub-mode (migration 036 / Slice 7b): "all"
-	// (hold every outbound when HITL is on; the default) or "high_impact" (hold
-	// only a high-impact action on untrusted inbound). Ignored when HITL is off.
-	HITLMode string `json:"hitl_mode"`
+	ID             string    `json:"id"`
+	Domain         string    `json:"domain"`
+	Email          string    `json:"email"`
+	Name           string    `json:"name"`
+	DomainVerified bool      `json:"domain_verified"`
+	Public         bool      `json:"public"`
+	CreatedAt      time.Time `json:"created_at"`
+	UserID         string    `json:"user_id"`
+	// HITL review-queue mechanism. The producer policies hitl_enabled/hitl_mode
+	// were retired (Slice 5b/5c, columns dropped in migration 043) — outbound_policy
+	// + outbound_scan own holds now. These two knobs govern how the review queue
+	// behaves (TTL + expiry action) for both directions.
+	HITLTTLSeconds       int    `json:"hitl_ttl_seconds"`
+	HITLExpirationAction string `json:"hitl_expiration_action"`
 	// Dashboard enrichment fields. Computed at read
 	// time by ListAgentsByUser via correlated subqueries — other load
 	// paths (GetAgentByID / GetAgentByEmail) leave them at zero values,
@@ -111,6 +109,21 @@ type AgentIdentity struct {
 	// trusts; empty for open/verified_only.
 	InboundPolicy    string   `json:"inbound_policy"`
 	InboundAllowlist []string `json:"inbound_allowlist,omitempty"`
+	// Screening config (migration 038 / Slice 3). The producer-policy actions
+	// decide what a gate/scan violation does (flag|review|block); outbound_policy +
+	// outbound_allowlist are the egress recipient gate (open|allowlist|domain);
+	// inbound_scan/outbound_scan toggle the content scan with a review/block
+	// threshold ladder. See docs/design/2026-06-20-agent-screening-hitl.md §4.1.
+	InboundPolicyAction         string   `json:"inbound_policy_action"`
+	OutboundPolicy              string   `json:"outbound_policy"`
+	OutboundAllowlist           []string `json:"outbound_allowlist,omitempty"`
+	OutboundPolicyAction        string   `json:"outbound_policy_action"`
+	InboundScan                 string   `json:"inbound_scan"`
+	InboundScanReviewThreshold  float64  `json:"inbound_scan_review_threshold"`
+	InboundScanBlockThreshold   float64  `json:"inbound_scan_block_threshold"`
+	OutboundScan                string   `json:"outbound_scan"`
+	OutboundScanReviewThreshold float64  `json:"outbound_scan_review_threshold"`
+	OutboundScanBlockThreshold  float64  `json:"outbound_scan_block_threshold"`
 	// AssertionVersion is the auth.md kill-switch counter (migration 035 /
 	// Slice 5b-2): stamped into minted identity_assertion/access_token JWTs and
 	// re-checked at the token endpoint; a bump invalidates prior tokens.
@@ -272,6 +285,16 @@ type Message struct {
 	// human-readable reason. Inbound-relevant; outbound rows read false/''.
 	Flagged    bool   `json:"flagged,omitempty"`
 	FlagReason string `json:"flag_reason,omitempty"`
+
+	// ReviewReason / ScanScore / ScanAction carry the applied screening verdict
+	// (migration 037 / Slice 2), denormalized onto the row for fast review-queue
+	// rendering. ReviewReason is one of sender_gate|recipient_gate|inbound_scan|
+	// outbound_scan|outbound_send; ScanAction is the applied action
+	// (flag|review|block); ScanScore is the aggregate 0..1 score (nil for gate-only
+	// holds). The full per-detector breakdown lives in screening_events.
+	ReviewReason string   `json:"review_reason,omitempty"`
+	ScanScore    *float64 `json:"scan_score,omitempty"`
+	ScanAction   string   `json:"scan_action,omitempty"`
 }
 
 // Message status values mirror the CHECK constraint in migration 003_hitl.sql.
@@ -281,6 +304,16 @@ const (
 	MessageStatusRejected        = "rejected"
 	MessageStatusExpiredApproved = "expired_approved"
 	MessageStatusExpiredRejected = "expired_rejected"
+
+	// Inbound/screening review-hold statuses (migration 037 / Slice 2): the
+	// direction-aware analogue of the outbound pending_approval lifecycle. On
+	// release, approve = deliver to the agent, reject = drop. pending_approval stays
+	// reserved for the explicit user-send-approval (edit-then-approve) flow.
+	MessageStatusPendingReview         = "pending_review"
+	MessageStatusReviewApproved        = "review_approved"
+	MessageStatusReviewRejected        = "review_rejected"
+	MessageStatusReviewExpiredApproved = "review_expired_approved"
+	MessageStatusReviewExpiredRejected = "review_expired_rejected"
 )
 
 type Store struct {
@@ -742,18 +775,24 @@ func (s *Store) GetAgentByID(ctx context.Context, id string) (*AgentIdentity, er
 	a := &AgentIdentity{}
 	err := s.pool.QueryRow(ctx,
 		`SELECT a.id, a.domain, a.user_id, a.name, a.public, a.created_at,
-		        a.hitl_enabled, a.hitl_ttl_seconds, a.hitl_expiration_action,
-		        COALESCE(a.hitl_mode, 'all'),
+		        a.hitl_ttl_seconds, a.hitl_expiration_action,
 		        COALESCE(a.inbound_policy, 'open'), a.inbound_allowlist,
+		        a.inbound_policy_action,
+		        a.outbound_policy, a.outbound_allowlist, a.outbound_policy_action,
+		        a.inbound_scan, a.inbound_scan_review_threshold, a.inbound_scan_block_threshold,
+		        a.outbound_scan, a.outbound_scan_review_threshold, a.outbound_scan_block_threshold,
 		        COALESCE(a.assertion_version, 1),
 		        d.verified as domain_verified
 		 FROM agent_identities a
 		 JOIN domains d ON a.domain = d.domain
 		 WHERE a.id = $1`, id,
 	).Scan(&a.ID, &a.Domain, &a.UserID, &a.Name, &a.Public, &a.CreatedAt,
-		&a.HITLEnabled, &a.HITLTTLSeconds, &a.HITLExpirationAction,
-		&a.HITLMode,
+		&a.HITLTTLSeconds, &a.HITLExpirationAction,
 		&a.InboundPolicy, &a.InboundAllowlist,
+		&a.InboundPolicyAction,
+		&a.OutboundPolicy, &a.OutboundAllowlist, &a.OutboundPolicyAction,
+		&a.InboundScan, &a.InboundScanReviewThreshold, &a.InboundScanBlockThreshold,
+		&a.OutboundScan, &a.OutboundScanReviewThreshold, &a.OutboundScanBlockThreshold,
 		&a.AssertionVersion,
 		&a.DomainVerified)
 	if err != nil {
@@ -806,7 +845,6 @@ func createAgent(ctx context.Context, exec agentExecutor, agentEmail, domain, na
 		Public:               true,
 		CreatedAt:            time.Now(),
 		UserID:               userID,
-		HITLEnabled:          false,
 		HITLTTLSeconds:       HITLDefaultTTLSeconds,
 		HITLExpirationAction: HITLDefaultExpirationAct,
 	}
@@ -825,38 +863,16 @@ func createAgent(ctx context.Context, exec agentExecutor, agentEmail, domain, na
 // UpdateAgentHITL updates all three HITL settings on an agent owned by userID.
 // The TTL and expiration action are validated against the same rules as the
 // DB CHECK constraints so callers get a clean error rather than a raw SQL error.
-func (s *Store) UpdateAgentHITL(ctx context.Context, agentID, userID string, enabled bool, ttlSeconds int, expirationAction string) error {
+func (s *Store) UpdateAgentHITL(ctx context.Context, agentID, userID string, ttlSeconds int, expirationAction string) error {
 	if err := ValidateHITLConfig(ttlSeconds, expirationAction); err != nil {
 		return err
 	}
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE agent_identities
-		    SET hitl_enabled = $1,
-		        hitl_ttl_seconds = $2,
-		        hitl_expiration_action = $3
-		  WHERE id = $4 AND user_id = $5`,
-		enabled, ttlSeconds, expirationAction, agentID, userID,
-	)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("agent not found or not owned by user")
-	}
-	return nil
-}
-
-// UpdateAgentHITLMode sets the action-gate sub-mode (migration 036 / Slice 7b)
-// on an agent owned by userID. Independent of UpdateAgentHITL so a PATCH can set
-// hitl_mode without re-sending the other HITL fields (additive-PATCH model). An
-// unknown mode is rejected with a clean error rather than a raw CHECK violation.
-func (s *Store) UpdateAgentHITLMode(ctx context.Context, agentID, userID, mode string) error {
-	if !actiongate.Valid(mode) {
-		return fmt.Errorf("invalid hitl_mode %q", mode)
-	}
-	tag, err := s.pool.Exec(ctx,
-		`UPDATE agent_identities SET hitl_mode = $3 WHERE id = $1 AND user_id = $2`,
-		agentID, userID, mode,
+		    SET hitl_ttl_seconds = $1,
+		        hitl_expiration_action = $2
+		  WHERE id = $3 AND user_id = $4`,
+		ttlSeconds, expirationAction, agentID, userID,
 	)
 	if err != nil {
 		return err
@@ -911,9 +927,12 @@ func (s *Store) UpdateAgentInboundPolicy(ctx context.Context, agentID, userID, p
 func (s *Store) ListAgentsByUser(ctx context.Context, userID string) ([]AgentIdentity, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT a.id, a.domain, a.user_id, a.name, a.public, a.created_at,
-		        a.hitl_enabled, a.hitl_ttl_seconds, a.hitl_expiration_action,
-		        COALESCE(a.hitl_mode, 'all'),
+		        a.hitl_ttl_seconds, a.hitl_expiration_action,
 		        COALESCE(a.inbound_policy, 'open'), a.inbound_allowlist,
+		        a.inbound_policy_action,
+		        a.outbound_policy, a.outbound_allowlist, a.outbound_policy_action,
+		        a.inbound_scan, a.inbound_scan_review_threshold, a.inbound_scan_block_threshold,
+		        a.outbound_scan, a.outbound_scan_review_threshold, a.outbound_scan_block_threshold,
 		        d.verified as domain_verified,
 		        (SELECT count(*) FROM messages m
 		           WHERE m.agent_id = a.id AND m.direction = 'inbound'
@@ -948,9 +967,12 @@ func (s *Store) ListAgentsByUser(ctx context.Context, userID string) ([]AgentIde
 		var a AgentIdentity
 		var lastDeliveryAt *time.Time
 		if err := rows.Scan(&a.ID, &a.Domain, &a.UserID, &a.Name, &a.Public, &a.CreatedAt,
-			&a.HITLEnabled, &a.HITLTTLSeconds, &a.HITLExpirationAction,
-			&a.HITLMode,
+			&a.HITLTTLSeconds, &a.HITLExpirationAction,
 			&a.InboundPolicy, &a.InboundAllowlist,
+			&a.InboundPolicyAction,
+			&a.OutboundPolicy, &a.OutboundAllowlist, &a.OutboundPolicyAction,
+			&a.InboundScan, &a.InboundScanReviewThreshold, &a.InboundScanBlockThreshold,
+			&a.OutboundScan, &a.OutboundScanReviewThreshold, &a.OutboundScanBlockThreshold,
 			&a.DomainVerified,
 			&a.Inbound7d, &a.Outbound7d, &a.PendingCount,
 			&lastDeliveryAt, &a.WebhookHealthy); err != nil {
@@ -1010,8 +1032,8 @@ func NewMessageID() string {
 // for this row (may be one of the To: addresses, or absent from the
 // header list when the agent was Bcc'd). replyTo is the parsed Reply-To:
 // header (empty when absent — never silently falls back to sender).
-func (s *Store) CreateInboundMessage(ctx context.Context, id, agentID, senderEmail, recipient, emailMessageID, subject, conversationID, deliveryStatus string, rawMessage []byte, authHeaders map[string]string, authVerdict []byte, flagged bool, flagReason string, toRecipients, cc, replyTo []string) (*Message, error) {
-	return createInboundMessage(ctx, s.pool, id, agentID, senderEmail, recipient, emailMessageID, subject, conversationID, deliveryStatus, rawMessage, authHeaders, authVerdict, flagged, flagReason, toRecipients, cc, replyTo)
+func (s *Store) CreateInboundMessage(ctx context.Context, id, agentID, senderEmail, recipient, emailMessageID, subject, conversationID, deliveryStatus string, rawMessage []byte, authHeaders map[string]string, authVerdict []byte, flagged bool, flagReason string, toRecipients, cc, replyTo []string, screening InboundScreening) (*Message, error) {
+	return createInboundMessage(ctx, s.pool, id, agentID, senderEmail, recipient, emailMessageID, subject, conversationID, deliveryStatus, rawMessage, authHeaders, authVerdict, flagged, flagReason, toRecipients, cc, replyTo, screening)
 }
 
 // WithTx opens a transaction, runs fn inside it, and commits if fn
@@ -1043,8 +1065,8 @@ func (s *Store) WithTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
 // Mirrors the CreateAgentTx pattern at store.go:596-607 — same SQL
 // body, executed against either *pgxpool.Pool or pgx.Tx via the
 // messageExecutor interface below.
-func (s *Store) CreateInboundMessageInTx(ctx context.Context, tx pgx.Tx, id, agentID, senderEmail, recipient, emailMessageID, subject, conversationID, deliveryStatus string, rawMessage []byte, authHeaders map[string]string, authVerdict []byte, flagged bool, flagReason string, toRecipients, cc, replyTo []string) (*Message, error) {
-	return createInboundMessage(ctx, tx, id, agentID, senderEmail, recipient, emailMessageID, subject, conversationID, deliveryStatus, rawMessage, authHeaders, authVerdict, flagged, flagReason, toRecipients, cc, replyTo)
+func (s *Store) CreateInboundMessageInTx(ctx context.Context, tx pgx.Tx, id, agentID, senderEmail, recipient, emailMessageID, subject, conversationID, deliveryStatus string, rawMessage []byte, authHeaders map[string]string, authVerdict []byte, flagged bool, flagReason string, toRecipients, cc, replyTo []string, screening InboundScreening) (*Message, error) {
+	return createInboundMessage(ctx, tx, id, agentID, senderEmail, recipient, emailMessageID, subject, conversationID, deliveryStatus, rawMessage, authHeaders, authVerdict, flagged, flagReason, toRecipients, cc, replyTo, screening)
 }
 
 // messageExecutor is the subset of *pgxpool.Pool and pgx.Tx that
@@ -1054,7 +1076,7 @@ type messageExecutor interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 }
 
-func createInboundMessage(ctx context.Context, exec messageExecutor, id, agentID, senderEmail, recipient, emailMessageID, subject, conversationID, deliveryStatus string, rawMessage []byte, authHeaders map[string]string, authVerdict []byte, flagged bool, flagReason string, toRecipients, cc, replyTo []string) (*Message, error) {
+func createInboundMessage(ctx context.Context, exec messageExecutor, id, agentID, senderEmail, recipient, emailMessageID, subject, conversationID, deliveryStatus string, rawMessage []byte, authHeaders map[string]string, authVerdict []byte, flagged bool, flagReason string, toRecipients, cc, replyTo []string, screening InboundScreening) (*Message, error) {
 	if id == "" {
 		id = NewMessageID()
 	}
@@ -1069,25 +1091,37 @@ func createInboundMessage(ctx context.Context, exec messageExecutor, id, agentID
 		}
 	}
 
+	// Held messages (review/block) carry a review-queue status; everything else is
+	// 'sent' (the inbound default — delivered).
+	status := MessageStatusSent
+	if screening.Status != "" {
+		status = screening.Status
+	}
+
 	m := &Message{
-		ID:             id,
-		AgentID:        agentID,
-		Direction:      "inbound",
-		Sender:         senderEmail,
-		Recipient:      recipient,
-		ToRecipients:   toRecipients,
-		CC:             cc,
-		ReplyTo:        replyTo,
-		Subject:        subject,
-		EmailMessageID: emailMessageID,
-		RawMessage:     rawMessage,
-		AuthHeaders:    authHeaders,
-		ConversationID: conversationID,
-		DeliveryStatus: deliveryStatus,
-		Flagged:        flagged,
-		FlagReason:     flagReason,
-		CreatedAt:      now,
-		ExpiresAt:      now.Add(MessageTTL),
+		ID:                id,
+		AgentID:           agentID,
+		Direction:         "inbound",
+		Sender:            senderEmail,
+		Recipient:         recipient,
+		ToRecipients:      toRecipients,
+		CC:                cc,
+		ReplyTo:           replyTo,
+		Subject:           subject,
+		EmailMessageID:    emailMessageID,
+		RawMessage:        rawMessage,
+		AuthHeaders:       authHeaders,
+		ConversationID:    conversationID,
+		DeliveryStatus:    deliveryStatus,
+		Flagged:           flagged,
+		FlagReason:        flagReason,
+		ReviewReason:      screening.ReviewReason,
+		ScanScore:         screening.ScanScore,
+		ScanAction:        screening.ScanAction,
+		Status:            status,
+		ApprovalExpiresAt: screening.ApprovalExpiresAt,
+		CreatedAt:         now,
+		ExpiresAt:         now.Add(MessageTTL),
 	}
 	// inbox_status column has CHECK constraint: must be 'unread', 'read', or NULL
 	var inboxStatus *string
@@ -1095,9 +1129,9 @@ func createInboundMessage(ctx context.Context, exec messageExecutor, id, agentID
 		inboxStatus = &m.DeliveryStatus
 	}
 	_, err := exec.Exec(ctx,
-		`INSERT INTO messages (id, agent_id, direction, sender, recipient, to_recipients, cc, reply_to, subject, email_message_id, raw_message, auth_headers, auth_verdict, flagged, flag_reason, conversation_id, inbox_status, created_at, expires_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
-		m.ID, m.AgentID, m.Direction, m.Sender, m.Recipient, m.ToRecipients, m.CC, m.ReplyTo, m.Subject, m.EmailMessageID, m.RawMessage, authHeadersJSON, nullIfEmptyBytes(authVerdict), m.Flagged, nullIfEmptyString(m.FlagReason), m.ConversationID, inboxStatus, m.CreatedAt, m.ExpiresAt,
+		`INSERT INTO messages (id, agent_id, direction, sender, recipient, to_recipients, cc, reply_to, subject, email_message_id, raw_message, auth_headers, auth_verdict, flagged, flag_reason, conversation_id, inbox_status, created_at, expires_at, review_reason, scan_score, scan_action, status, approval_expires_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)`,
+		m.ID, m.AgentID, m.Direction, m.Sender, m.Recipient, m.ToRecipients, m.CC, m.ReplyTo, m.Subject, m.EmailMessageID, m.RawMessage, authHeadersJSON, nullIfEmptyBytes(authVerdict), m.Flagged, nullIfEmptyString(m.FlagReason), m.ConversationID, inboxStatus, m.CreatedAt, m.ExpiresAt, nullIfEmptyString(m.ReviewReason), m.ScanScore, nullIfEmptyString(m.ScanAction), m.Status, m.ApprovalExpiresAt,
 	)
 	if err != nil {
 		return nil, err
@@ -1105,12 +1139,26 @@ func createInboundMessage(ctx context.Context, exec messageExecutor, id, agentID
 	return m, nil
 }
 
+// InboundScreening carries the applied screening verdict denormalized onto the
+// inbound message row (migration 037). Zero value = no screening (delivered
+// normally as status 'sent'). When Status is set to a review-hold status
+// (pending_review / review_rejected) the message is persisted but NOT delivered;
+// ApprovalExpiresAt sets the review TTL deadline for the expiry worker.
+type InboundScreening struct {
+	ReviewReason      string
+	ScanScore         *float64
+	ScanAction        string
+	Status            string
+	ApprovalExpiresAt *time.Time
+}
+
 func (s *Store) GetInboundMessage(ctx context.Context, id string) (*Message, error) {
 	m := &Message{}
 	var authVerdict []byte
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, agent_id, direction, sender, recipient, to_recipients, cc, reply_to, subject, email_message_id, raw_message, auth_verdict, COALESCE(flagged, false), COALESCE(flag_reason, ''), created_at, expires_at
-		 FROM messages WHERE id = $1 AND direction = 'inbound' AND expires_at > now()`, id,
+		 FROM messages WHERE id = $1 AND direction = 'inbound' AND expires_at > now()
+		   AND status NOT IN (`+heldInboundStatuses+`)`, id,
 	).Scan(&m.ID, &m.AgentID, &m.Direction, &m.Sender, &m.Recipient, &m.ToRecipients, &m.CC, &m.ReplyTo, &m.Subject, &m.EmailMessageID, &m.RawMessage, &authVerdict, &m.Flagged, &m.FlagReason, &m.CreatedAt, &m.ExpiresAt)
 	if err != nil {
 		return nil, err
@@ -1160,6 +1208,7 @@ func (s *Store) GetInboundByEmailMessageID(ctx context.Context, agentID, emailMe
 		   AND direction = 'inbound'
 		   AND email_message_id = $2
 		   AND expires_at > now()
+		   AND status NOT IN (`+heldInboundStatuses+`)
 		 ORDER BY created_at DESC LIMIT 1`,
 		agentID, emailMessageID,
 	).Scan(&m.ID, &m.AgentID, &m.Direction, &m.Sender, &m.Recipient, &m.ToRecipients, &m.CC, &m.ReplyTo, &m.Subject, &m.EmailMessageID, &m.RawMessage, &authHeaders, &m.CreatedAt, &m.ExpiresAt)
@@ -2146,6 +2195,7 @@ func (s *Store) ListActivityByAgent(ctx context.Context, agentID string, limit i
 		 FROM messages m
 		 LEFT JOIN webhook_deliveries wd ON wd.message_id = m.id
 		 WHERE m.agent_id = $1 AND m.expires_at > now()
+		   AND NOT (m.direction = 'inbound' AND m.status IN (`+heldInboundStatuses+`))
 		 ORDER BY m.created_at DESC
 		 LIMIT $2`, agentID, limit,
 	)
@@ -2255,6 +2305,21 @@ func (s *Store) GetMessagesByAgent(ctx context.Context, f MessageListFilter) ([]
 		query = baseSelect
 	default: // "inbound" — default keeps SDK polling contract
 		query = baseSelect + ` AND m.direction = 'inbound'`
+	}
+
+	// Inbound review holds are NOT delivered — exclude them from the agent inbox
+	// until approved (Slice 4b). pending_review (awaiting a human), review_rejected
+	// (blocked / human-rejected), and review_expired_rejected (TTL-dropped) stay
+	// hidden; review_approved / review_expired_approved (and plain 'sent') are
+	// delivered and shown. The clause is direction-aware so outbound rows
+	// (pending_approval etc.) are unaffected.
+	switch f.Direction {
+	case "outbound":
+		// no inbound rows in the result set
+	case "all":
+		query += ` AND (m.direction = 'outbound' OR m.status NOT IN (` + heldInboundStatuses + `))`
+	default: // inbound
+		query += ` AND m.status NOT IN (` + heldInboundStatuses + `)`
 	}
 
 	// Inbox status filter only applies when inbound rows are in the
@@ -2386,6 +2451,7 @@ func (s *Store) GetMessageWithContent(ctx context.Context, messageID, agentID st
 		`WITH upd AS (
 		   UPDATE messages SET inbox_status = CASE WHEN inbox_status = 'unread' THEN 'read' ELSE inbox_status END
 		   WHERE id = $1 AND agent_id = $2 AND expires_at > now()
+		     AND NOT (direction = 'inbound' AND status IN (`+heldInboundStatuses+`))
 		   RETURNING id, agent_id, direction, sender, recipient, to_recipients, cc, reply_to, subject, email_message_id, conversation_id, COALESCE(inbox_status, '') AS inbox_status, raw_message, auth_headers, auth_verdict, COALESCE(flagged, false) AS flagged, COALESCE(flag_reason, '') AS flag_reason, created_at, expires_at, labels, COALESCE(delivery_status, '') AS delivery_status, COALESCE(delivery_detail, '') AS delivery_detail, COALESCE(sent_as, '') AS sent_as, COALESCE(body_text, '') AS body_text, COALESCE(body_html, '') AS body_html, COALESCE(status, '') AS status
 		 )
 		 SELECT upd.id, upd.agent_id, upd.direction, upd.sender, upd.recipient, upd.to_recipients, upd.cc, upd.reply_to, upd.subject, upd.email_message_id, upd.conversation_id, upd.inbox_status, upd.raw_message, upd.auth_headers, upd.auth_verdict, upd.flagged, upd.flag_reason, upd.created_at, upd.expires_at, upd.labels, upd.delivery_status, upd.delivery_detail, upd.sent_as, upd.body_text, upd.body_html, upd.status, COALESCE(wd.status, ''), COALESCE(wd.last_error, '')
@@ -2452,7 +2518,7 @@ func (s *Store) ModifyMessageLabels(ctx context.Context, messageID, agentID stri
 
 	var current []string
 	err = tx.QueryRow(ctx,
-		`SELECT labels FROM messages WHERE id = $1 AND agent_id = $2 AND expires_at > now() FOR UPDATE`,
+		`SELECT labels FROM messages WHERE id = $1 AND agent_id = $2 AND expires_at > now() AND NOT (direction = 'inbound' AND status IN (`+heldInboundStatuses+`)) FOR UPDATE`,
 		messageID, agentID,
 	).Scan(&current)
 	if err != nil {
@@ -2486,7 +2552,7 @@ func (s *Store) ModifyMessageLabels(ctx context.Context, messageID, agentID stri
 	sort.Strings(final)
 
 	if _, err := tx.Exec(ctx,
-		`UPDATE messages SET labels = $1 WHERE id = $2 AND agent_id = $3`,
+		`UPDATE messages SET labels = $1 WHERE id = $2 AND agent_id = $3 AND NOT (direction = 'inbound' AND status IN (`+heldInboundStatuses+`))`,
 		final, messageID, agentID,
 	); err != nil {
 		return nil, err
@@ -2503,7 +2569,7 @@ func (s *Store) ModifyMessageLabels(ctx context.Context, messageID, agentID stri
 // UpdateMessageDeliveryStatus sets the inbox_status on a message.
 func (s *Store) UpdateMessageDeliveryStatus(ctx context.Context, messageID, agentID, status string) error {
 	_, err := s.pool.Exec(ctx,
-		`UPDATE messages SET inbox_status = $1 WHERE id = $2 AND agent_id = $3`,
+		`UPDATE messages SET inbox_status = $1 WHERE id = $2 AND agent_id = $3 AND NOT (direction = 'inbound' AND status IN (`+heldInboundStatuses+`))`,
 		status, messageID, agentID,
 	)
 	return err
@@ -2658,6 +2724,7 @@ func (s *Store) ListConversationsByAgent(ctx context.Context, f ConversationList
 		WHERE agent_id = $1
 		  AND conversation_id <> ''
 		  AND expires_at > now()
+		  AND NOT (direction = 'inbound' AND status IN (` + heldInboundStatuses + `))
 		GROUP BY conversation_id`
 
 	args := []interface{}{f.AgentID}
@@ -2735,6 +2802,7 @@ func (s *Store) GetConversationByID(ctx context.Context, agentID, conversationID
 		 WHERE m.agent_id = $1
 		   AND m.conversation_id = $2
 		   AND m.expires_at > now()
+		   AND NOT (m.direction = 'inbound' AND m.status IN (`+heldInboundStatuses+`))
 		 ORDER BY m.created_at ASC, m.id ASC`,
 		agentID, conversationID,
 	)

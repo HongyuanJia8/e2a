@@ -21,6 +21,7 @@ import (
 	"github.com/Mnexa-AI/e2a/internal/identity"
 	"github.com/Mnexa-AI/e2a/internal/inboundpolicy"
 	"github.com/Mnexa-AI/e2a/internal/limits"
+	"github.com/Mnexa-AI/e2a/internal/piguard"
 	"github.com/Mnexa-AI/e2a/internal/usage"
 	"github.com/Mnexa-AI/e2a/internal/webhookpub"
 	"github.com/Mnexa-AI/e2a/internal/ws"
@@ -49,10 +50,14 @@ type Server struct {
 	// instead — preserves the v1 default-off rollout posture even if
 	// a deployment forgets to wire it. The Outbox's own FeatureFlag
 	// is the secondary gate.
-	outbox     webhookpub.Outbox
-	hub        *ws.Hub
-	usage      usage.UsageTracker
-	enforcer   limits.Enforcer // optional; when nil, inbound caps are not enforced
+	outbox   webhookpub.Outbox
+	hub      *ws.Hub
+	usage    usage.UsageTracker
+	enforcer limits.Enforcer // optional; when nil, inbound caps are not enforced
+	// screen is the content-screening engine (Slice 4). Runs the per-agent inbound
+	// scan when inbound_scan='on'. Always non-nil (built with the dependency-free
+	// heuristics detector); external providers plug in behind the same interface.
+	screen     *piguard.Engine
 	smtpDomain string
 	// outboundFromDomain is the domain used in envelope MAIL FROM for mail we
 	// originate (e.g. "send.e2a.dev"). Inbound messages whose envelope MAIL FROM
@@ -90,6 +95,7 @@ func NewServer(cfg *config.Config, store *identity.Store, signer *headers.Signer
 		signer:             signer,
 		hub:                hub,
 		usage:              usage,
+		screen:             piguard.NewEngine(piguard.EngineConfig{}, piguard.NewHeuristicsDetector()),
 		smtpDomain:         cfg.SMTP.Domain,
 		outboundFromDomain: cfg.OutboundSMTP.FromDomain,
 	}
@@ -332,6 +338,12 @@ func (s *session) deliverToAgent(ctx context.Context, agent *identity.AgentIdent
 	dmarcPass := domainAuth.DMARC.Status == emailauth.StatusPass
 	policyDecision := inboundpolicy.EvaluateIngestion(agent.InboundPolicy, agent.InboundAllowlist, senderEmail, dmarcPass)
 
+	// Content screening (Slice 4): run the per-agent inbound scan and record the
+	// audit trail (screening_events) + the denormalized verdict. Detection +
+	// annotation only here — review/block holds are a later slice, so the message
+	// still delivers.
+	screenRes := s.relay.screenInbound(ctx, agent, messageID, senderEmail, body, domainAuth, policyDecision)
+
 	// Record inbound usage (fail-open — never block inbound email)
 	if agent.UserID != "" {
 		s.relay.usage.RecordAndCheck(ctx, agent.UserID, agent.ID, agent.Domain, "inbound")
@@ -367,8 +379,11 @@ func (s *session) deliverToAgent(ctx context.Context, agent *identity.AgentIdent
 	// email.flagged (decision 10): fired in addition to email.received when the
 	// ingestion policy didn't match, so operators get a signal that this message
 	// is untrusted. Deterministic id keeps MTA retries idempotent.
+	// email.flagged fires for a delivered gate-flag. When the message is HELD
+	// (review/block), delivery is suppressed and email.injection_detected carries
+	// the signal instead, so don't also fire email.flagged.
 	var flaggedEvent *webhookpub.Event
-	if policyDecision.Flagged {
+	if policyDecision.Flagged && !screenRes.Hold {
 		fe := webhookpub.NewEvent(webhookpub.EventEmailFlagged, agent.UserID, map[string]interface{}{
 			"message_id":      messageID,
 			"conversation_id": conversationID,
@@ -391,6 +406,30 @@ func (s *session) deliverToAgent(ctx context.Context, agent *identity.AgentIdent
 		fe.MessageID = messageID
 		fe.ID = webhookpub.DeterministicEventID(messageID, webhookpub.EventEmailFlagged)
 		flaggedEvent = &fe
+	}
+
+	// email.injection_detected (Slice 4): fired when the content scan flags the
+	// message. Carries the score, applied action, and categories. Deterministic id
+	// keeps MTA retries idempotent, mirroring email.flagged.
+	var injectionEvent *webhookpub.Event
+	if screenRes.Emit() {
+		ie := webhookpub.NewEvent(webhookpub.EventEmailInjectionDetected, agent.UserID, map[string]interface{}{
+			"message_id":      messageID,
+			"conversation_id": conversationID,
+			"agent":           map[string]interface{}{"id": agent.ID, "email": agent.EmailAddress(), "domain": agent.Domain},
+			"from":            senderEmail,
+			"recipient":       rcpt,
+			"subject":         s.inboundSubject,
+			"score":           screenRes.Score,
+			"action":          screenRes.Action,
+			"categories":      screenRes.Categories,
+			"reason":          screenRes.Reason,
+		})
+		ie.AgentID = agent.ID
+		ie.ConversationID = conversationID
+		ie.MessageID = messageID
+		ie.ID = webhookpub.DeterministicEventID(messageID, webhookpub.EventEmailInjectionDetected)
+		injectionEvent = &ie
 	}
 
 	// Record inbound message with full content. Pass messageID so the
@@ -428,15 +467,27 @@ func (s *session) deliverToAgent(ctx context.Context, agent *identity.AgentIdent
 				deliveryStatus, body, authHeaders, authVerdictJSON,
 				policyDecision.Flagged, policyDecision.Reason,
 				s.inboundThreadInfo.To, s.inboundThreadInfo.CC, s.inboundThreadInfo.ReplyTo,
+				screenRes.Denorm,
 			)
 			if txErr != nil {
 				return txErr
 			}
-			if txErr = s.relay.outbox.PublishTx(ctx, tx, event); txErr != nil {
-				return txErr
+			// Held messages (review/block) are persisted but NOT delivered — suppress
+			// the email.received push (the agent only ever sees released messages).
+			if !screenRes.Hold {
+				if txErr = s.relay.outbox.PublishTx(ctx, tx, event); txErr != nil {
+					return txErr
+				}
 			}
 			if flaggedEvent != nil {
-				return s.relay.outbox.PublishTx(ctx, tx, *flaggedEvent)
+				if txErr = s.relay.outbox.PublishTx(ctx, tx, *flaggedEvent); txErr != nil {
+					return txErr
+				}
+			}
+			if injectionEvent != nil {
+				if txErr = s.relay.outbox.PublishTx(ctx, tx, *injectionEvent); txErr != nil {
+					return txErr
+				}
 			}
 			return nil
 		})
@@ -447,6 +498,7 @@ func (s *session) deliverToAgent(ctx context.Context, agent *identity.AgentIdent
 			deliveryStatus, body, authHeaders, authVerdictJSON,
 			policyDecision.Flagged, policyDecision.Reason,
 			s.inboundThreadInfo.To, s.inboundThreadInfo.CC, s.inboundThreadInfo.ReplyTo,
+			screenRes.Denorm,
 		)
 	}
 	if err != nil {
@@ -454,6 +506,12 @@ func (s *session) deliverToAgent(ctx context.Context, agent *identity.AgentIdent
 		return
 	}
 	_ = inboundMsg
+
+	// Append the screening audit rows (gate + scan violations) best-effort. Soft-ref
+	// + deterministic ids make this idempotent under MTA retry, so it's safe outside
+	// the message transaction.
+	s.relay.writeScreeningEvents(ctx, messageID, screenRes.Events)
+
 	slug, _, _ := strings.Cut(rcpt, "@")
 
 	log.Printf("[mail:%s] dir=inbound from=%s to=%s slug=%s conv_id=%s subject=%q verified=%t",
@@ -483,9 +541,15 @@ func (s *session) deliverToAgent(ctx context.Context, agent *identity.AgentIdent
 	// MTA sees 4xx — out of scope for the C3 dedup fix; tracked
 	// separately.
 	if s.relay.publisher != nil && (s.relay.outbox == nil || !s.relay.outbox.Enabled()) {
-		go s.relay.publisher.Publish(context.Background(), event)
+		// Held messages are not delivered — suppress the email.received push.
+		if !screenRes.Hold {
+			go s.relay.publisher.Publish(context.Background(), event)
+		}
 		if flaggedEvent != nil {
 			go s.relay.publisher.Publish(context.Background(), *flaggedEvent)
+		}
+		if injectionEvent != nil {
+			go s.relay.publisher.Publish(context.Background(), *injectionEvent)
 		}
 	}
 
@@ -493,7 +557,7 @@ func (s *session) deliverToAgent(ctx context.Context, agent *identity.AgentIdent
 	// /v1/webhooks subscriber resource (driven by the publisher above)
 	// is the durable push path; WS is an opportunistic live-tail on top
 	// of it, available to every agent regardless of how it's configured.
-	if s.relay.hub != nil && s.relay.hub.IsConnected(agent.ID) {
+	if s.relay.hub != nil && !screenRes.Hold && s.relay.hub.IsConnected(agent.ID) {
 		notification := buildWSNotification(inboundMsg)
 		if s.relay.hub.Send(agent.ID, notification) {
 			log.Printf("[mail:%s] ws_notify=sent slug=%s", messageID, slug)

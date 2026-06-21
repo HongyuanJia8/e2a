@@ -60,19 +60,29 @@ type AgentView struct {
 	Name                 string    `json:"name"`
 	DomainVerified       bool      `json:"domain_verified"`
 	CreatedAt            time.Time `json:"created_at"`
-	HITLEnabled          bool      `json:"hitl_enabled"`
-	HITLTTLSeconds       int       `json:"hitl_ttl_seconds"`
-	HITLExpirationAction string    `json:"hitl_expiration_action" enum:"approve,reject"`
-	// HITLMode is the action-gate sub-mode (Slice 7b): "all" (hold every
-	// outbound when HITL is on) or "high_impact" (hold only a high-impact action
-	// on unauthenticated inbound). Meaningful only when hitl_enabled.
-	HITLMode string `json:"hitl_mode" enum:"all,high_impact"`
+	// hitl_enabled / hitl_mode were retired in Slice 5b (see outbound_policy /
+	// outbound_scan). The HITL review-queue mechanism fields survive.
+	HITLTTLSeconds       int    `json:"hitl_ttl_seconds"`
+	HITLExpirationAction string `json:"hitl_expiration_action" enum:"approve,reject"`
 	// InboundPolicy is the per-agent inbound ingestion gate (migration 033 /
 	// Slice 7): one of open, allowlist, domain, verified_only. InboundAllowlist
 	// holds the trusted addresses (allowlist) or domains (domain); omitted when
 	// empty.
 	InboundPolicy    string   `json:"inbound_policy" enum:"open,allowlist,domain,verified_only"`
 	InboundAllowlist []string `json:"inbound_allowlist,omitempty" nullable:"false"`
+	// Screening config (migration 038 / Slice 3): producer-policy actions, the
+	// outbound recipient gate, and the inbound/outbound content scans with their
+	// review/block threshold ladder.
+	InboundPolicyAction         string   `json:"inbound_policy_action" enum:"flag,review,block"`
+	OutboundPolicy              string   `json:"outbound_policy" enum:"open,allowlist,domain"`
+	OutboundAllowlist           []string `json:"outbound_allowlist,omitempty" nullable:"false"`
+	OutboundPolicyAction        string   `json:"outbound_policy_action" enum:"flag,review,block"`
+	InboundScan                 string   `json:"inbound_scan" enum:"off,on"`
+	InboundScanReviewThreshold  float64  `json:"inbound_scan_review_threshold"`
+	InboundScanBlockThreshold   float64  `json:"inbound_scan_block_threshold"`
+	OutboundScan                string   `json:"outbound_scan" enum:"off,on"`
+	OutboundScanReviewThreshold float64  `json:"outbound_scan_review_threshold"`
+	OutboundScanBlockThreshold  float64  `json:"outbound_scan_block_threshold"`
 }
 
 // agentViewFromIdentity maps the storage record to the public view.
@@ -84,12 +94,21 @@ func agentViewFromIdentity(ag *identity.AgentIdentity) AgentView {
 		Name:                 ag.Name,
 		DomainVerified:       ag.DomainVerified,
 		CreatedAt:            ag.CreatedAt,
-		HITLEnabled:          ag.HITLEnabled,
 		HITLTTLSeconds:       ag.HITLTTLSeconds,
 		HITLExpirationAction: ag.HITLExpirationAction,
-		HITLMode:             ag.HITLMode,
 		InboundPolicy:        ag.InboundPolicy,
 		InboundAllowlist:     ag.InboundAllowlist,
+
+		InboundPolicyAction:         ag.InboundPolicyAction,
+		OutboundPolicy:              ag.OutboundPolicy,
+		OutboundAllowlist:           ag.OutboundAllowlist,
+		OutboundPolicyAction:        ag.OutboundPolicyAction,
+		InboundScan:                 ag.InboundScan,
+		InboundScanReviewThreshold:  ag.InboundScanReviewThreshold,
+		InboundScanBlockThreshold:   ag.InboundScanBlockThreshold,
+		OutboundScan:                ag.OutboundScan,
+		OutboundScanReviewThreshold: ag.OutboundScanReviewThreshold,
+		OutboundScanBlockThreshold:  ag.OutboundScanBlockThreshold,
 	}
 }
 

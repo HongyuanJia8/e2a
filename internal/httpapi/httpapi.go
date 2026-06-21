@@ -70,7 +70,7 @@ type AgentCreateEnforcer func(ctx context.Context, userID string) error
 
 // Agent mutation funcs mirror the like-named store methods.
 type (
-	AgentHITLUpdater func(ctx context.Context, agentID, userID string, enabled bool, ttlSeconds int, expirationAction string) error
+	AgentHITLUpdater func(ctx context.Context, agentID, userID string, ttlSeconds int, expirationAction string) error
 	AgentDeleter     func(ctx context.Context, agentID, userID string) error
 )
 
@@ -86,9 +86,9 @@ type Deps struct {
 	// Optional — nil disables the challenge header.
 	AuthChallenge func(r *http.Request) string
 	ListAgents    AgentLister
-	GetAgent               AgentGetter
-	GetMessage             MessageGetter
-	ListMessages           MessageLister
+	GetAgent      AgentGetter
+	GetMessage    MessageGetter
+	ListMessages  MessageLister
 	// ModifyMessageLabels applies a labels delta to a message scoped to an
 	// agent, returning the post-update set. Mirrors store.ModifyMessageLabels.
 	ModifyMessageLabels func(ctx context.Context, messageID, agentID string, add, remove []string) ([]string, error)
@@ -100,14 +100,15 @@ type Deps struct {
 	LookupDomain       DomainLookup
 	EnforceAgentCreate AgentCreateEnforcer
 	UpdateAgentHITL    AgentHITLUpdater
-	// UpdateAgentHITLMode sets the action-gate sub-mode (Slice 7b). Returns a
-	// validation error for an unknown mode (handler maps to 400).
-	UpdateAgentHITLMode func(ctx context.Context, agentID, userID, mode string) error
 	// UpdateAgentInboundPolicy sets the per-agent inbound ingestion gate
 	// (migration 033 / Slice 7). Returns a validation error for an unknown
 	// policy, which the handler maps to 400 invalid_request.
 	UpdateAgentInboundPolicy func(ctx context.Context, agentID, userID, policy string, allowlist []string) error
-	DeleteAgent              AgentDeleter
+	// UpdateAgentScanConfig sets the per-agent content-screening config (migration
+	// 038 / Slice 3). Returns a validation error for an invalid posture, which the
+	// handler maps to 400 invalid_request.
+	UpdateAgentScanConfig func(ctx context.Context, agentID, userID string, cfg identity.ScanConfig) error
+	DeleteAgent           AgentDeleter
 
 	// domains
 	ListDomains         func(ctx context.Context, userID string) ([]identity.Domain, error)

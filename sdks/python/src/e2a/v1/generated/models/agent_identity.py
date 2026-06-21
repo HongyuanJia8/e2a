@@ -18,8 +18,8 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictFloat, StrictInt, StrictStr
+from typing import Any, ClassVar, Dict, List, Optional, Union
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -31,22 +31,30 @@ class AgentIdentity(BaseModel):
     domain: StrictStr
     domain_verified: StrictBool
     email: StrictStr
-    hitl_enabled: StrictBool
     hitl_expiration_action: StrictStr
-    hitl_mode: StrictStr
     hitl_ttl_seconds: StrictInt
     id: StrictStr
     inbound_7d: StrictInt
     inbound_allowlist: Optional[List[StrictStr]] = None
     inbound_policy: StrictStr
+    inbound_policy_action: StrictStr
+    inbound_scan: StrictStr
+    inbound_scan_block_threshold: Union[StrictFloat, StrictInt]
+    inbound_scan_review_threshold: Union[StrictFloat, StrictInt]
     last_delivery_at: Optional[datetime] = None
     name: StrictStr
     outbound_7d: StrictInt
+    outbound_allowlist: Optional[List[StrictStr]] = None
+    outbound_policy: StrictStr
+    outbound_policy_action: StrictStr
+    outbound_scan: StrictStr
+    outbound_scan_block_threshold: Union[StrictFloat, StrictInt]
+    outbound_scan_review_threshold: Union[StrictFloat, StrictInt]
     pending_count: StrictInt
     public: StrictBool
     user_id: StrictStr
     webhook_healthy: StrictBool
-    __properties: ClassVar[List[str]] = ["created_at", "domain", "domain_verified", "email", "hitl_enabled", "hitl_expiration_action", "hitl_mode", "hitl_ttl_seconds", "id", "inbound_7d", "inbound_allowlist", "inbound_policy", "last_delivery_at", "name", "outbound_7d", "pending_count", "public", "user_id", "webhook_healthy"]
+    __properties: ClassVar[List[str]] = ["created_at", "domain", "domain_verified", "email", "hitl_expiration_action", "hitl_ttl_seconds", "id", "inbound_7d", "inbound_allowlist", "inbound_policy", "inbound_policy_action", "inbound_scan", "inbound_scan_block_threshold", "inbound_scan_review_threshold", "last_delivery_at", "name", "outbound_7d", "outbound_allowlist", "outbound_policy", "outbound_policy_action", "outbound_scan", "outbound_scan_block_threshold", "outbound_scan_review_threshold", "pending_count", "public", "user_id", "webhook_healthy"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -92,6 +100,11 @@ class AgentIdentity(BaseModel):
         if self.inbound_allowlist is None and "inbound_allowlist" in self.model_fields_set:
             _dict['inbound_allowlist'] = None
 
+        # set to None if outbound_allowlist (nullable) is None
+        # and model_fields_set contains the field
+        if self.outbound_allowlist is None and "outbound_allowlist" in self.model_fields_set:
+            _dict['outbound_allowlist'] = None
+
         return _dict
 
     @classmethod
@@ -108,17 +121,25 @@ class AgentIdentity(BaseModel):
             "domain": obj.get("domain"),
             "domain_verified": obj.get("domain_verified"),
             "email": obj.get("email"),
-            "hitl_enabled": obj.get("hitl_enabled"),
             "hitl_expiration_action": obj.get("hitl_expiration_action"),
-            "hitl_mode": obj.get("hitl_mode"),
             "hitl_ttl_seconds": obj.get("hitl_ttl_seconds"),
             "id": obj.get("id"),
             "inbound_7d": obj.get("inbound_7d"),
             "inbound_allowlist": obj.get("inbound_allowlist"),
             "inbound_policy": obj.get("inbound_policy"),
+            "inbound_policy_action": obj.get("inbound_policy_action"),
+            "inbound_scan": obj.get("inbound_scan"),
+            "inbound_scan_block_threshold": obj.get("inbound_scan_block_threshold"),
+            "inbound_scan_review_threshold": obj.get("inbound_scan_review_threshold"),
             "last_delivery_at": obj.get("last_delivery_at"),
             "name": obj.get("name"),
             "outbound_7d": obj.get("outbound_7d"),
+            "outbound_allowlist": obj.get("outbound_allowlist"),
+            "outbound_policy": obj.get("outbound_policy"),
+            "outbound_policy_action": obj.get("outbound_policy_action"),
+            "outbound_scan": obj.get("outbound_scan"),
+            "outbound_scan_block_threshold": obj.get("outbound_scan_block_threshold"),
+            "outbound_scan_review_threshold": obj.get("outbound_scan_review_threshold"),
             "pending_count": obj.get("pending_count"),
             "public": obj.get("public"),
             "user_id": obj.get("user_id"),
