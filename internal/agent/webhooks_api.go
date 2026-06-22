@@ -157,6 +157,61 @@ func (a *API) buildRejectedEvent(
 	}
 }
 
+// buildInboundReleasedEvent fires when a reviewer releases a held inbound
+// message to the agent (status pending_review → review_approved, now inbox-
+// visible). This is the ONLY push signal an approved inbound message gets:
+// email.received was suppressed while it was held and is not re-fired on release
+// (push re-delivery is a tracked follow-up), so without this event an approved
+// inbound message is invisible to subscribers. See design 2026-06-22 §4 (Q2).
+//
+// ownerUserID is the ROUTING key (whose webhooks fire) — always the agent's
+// owner, mirroring buildApprovedEvent. reviewerUserID is the human who acted; it
+// goes in the payload as reviewed_by_user_id. They are equal today (the endpoint
+// is account-scoped + ownership-checked) but are kept distinct so a future
+// multi-reviewer ACL can't misroute the event to a non-owner reviewer.
+func (a *API) buildInboundReleasedEvent(msg *identity.ReviewMessageMeta, ownerUserID, reviewerUserID string) webhookpub.Event {
+	data := map[string]interface{}{
+		"message_id":          msg.ID,
+		"direction":           "inbound",
+		"from":                msg.Sender,
+		"subject":             msg.Subject,
+		"type":                msg.Type,
+		"reviewed_by_user_id": reviewerUserID,
+	}
+	return webhookpub.Event{
+		ID:        generateEventIDForAgent(),
+		Type:      webhookpub.EventEmailReviewApproved,
+		CreatedAt: time.Now().UTC(),
+		UserID:    ownerUserID,
+		AgentID:   msg.AgentID,
+		MessageID: msg.ID,
+		Data:      data,
+	}
+}
+
+// buildInboundRejectedEvent fires when a reviewer drops a held inbound message
+// (status pending_review → review_rejected; it stays hidden from the agent and
+// its raw payload is retained for forensics — design §4.4). Routing key is the
+// agent owner (see buildInboundReleasedEvent).
+func (a *API) buildInboundRejectedEvent(msg *identity.ReviewMessageMeta, ownerUserID, reviewerUserID, reason string) webhookpub.Event {
+	data := map[string]interface{}{
+		"message_id":          msg.ID,
+		"direction":           "inbound",
+		"type":                msg.Type,
+		"rejection_reason":    reason,
+		"reviewed_by_user_id": reviewerUserID,
+	}
+	return webhookpub.Event{
+		ID:        generateEventIDForAgent(),
+		Type:      webhookpub.EventEmailReviewRejected,
+		CreatedAt: time.Now().UTC(),
+		UserID:    ownerUserID,
+		AgentID:   msg.AgentID,
+		MessageID: msg.ID,
+		Data:      data,
+	}
+}
+
 // generateEventIDForAgent wraps webhookpub's id helper so this file
 // doesn't need to import internal/webhookpub just for the constructor.
 func generateEventIDForAgent() string {

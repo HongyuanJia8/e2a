@@ -228,3 +228,105 @@ func TestListExpiredReviews_AndExpire(t *testing.T) {
 		}
 	}
 }
+
+// TestGetReviewMessage_DispatchView covers the review-queue single getter that
+// the /approve+/reject endpoints use to branch on direction. Unlike every
+// agent-facing read path it MUST see held inbound statuses (so an inbound hold is
+// resolvable), it MUST report direction (so the handler can dispatch), and it MUST
+// be scoped to agent_id (tenant isolation).
+func TestGetReviewMessage_DispatchView(t *testing.T) {
+	pool := testutil.TestDB(t)
+	store := identity.NewStore(pool)
+	ctx := context.Background()
+	userID, agentID := seedReviewAgent(t, store, ctx, "getreview.example.com")
+	exp := time.Now().Add(time.Hour)
+
+	// A held inbound message — invisible to the agent, but resolvable here.
+	heldID := createInbound(t, store, ctx, agentID, "evil@x.com", "held", identity.InboundScreening{
+		Status: identity.MessageStatusPendingReview, ScanAction: "review",
+		ReviewReason: identity.ReviewReasonInboundScan, ApprovalExpiresAt: &exp,
+	})
+	// Sanity: it is genuinely held (the agent read path refuses it).
+	if _, err := store.GetInboundMessage(ctx, heldID); err == nil {
+		t.Fatalf("precondition: held message must be unreadable via GetInboundMessage")
+	}
+
+	got, err := store.GetReviewMessage(ctx, heldID, agentID)
+	if err != nil {
+		t.Fatalf("GetReviewMessage(held inbound): %v", err)
+	}
+	if got.Direction != "inbound" || got.Status != identity.MessageStatusPendingReview {
+		t.Errorf("held inbound view = dir %q status %q, want inbound/pending_review", got.Direction, got.Status)
+	}
+	if got.Sender != "evil@x.com" {
+		t.Errorf("sender = %q, want evil@x.com (needed for the review_approved event)", got.Sender)
+	}
+
+	// Tenant isolation: another agent cannot resolve this agent's held message.
+	if _, err := store.GetReviewMessage(ctx, heldID, "bot@someone-else.example.com"); err == nil {
+		t.Errorf("cross-tenant GetReviewMessage must fail, got nil error")
+	}
+
+	// Outbound messages report direction=outbound so the handler falls through to
+	// the send-approval path.
+	out, err := store.CreateOutboundMessage(ctx, agentID, []string{"to@x.com"}, nil, nil, "subj", "send", "smtp", "", "", []byte("Subject: subj\r\n\r\nx"))
+	if err != nil {
+		t.Fatalf("CreateOutboundMessage: %v", err)
+	}
+	gotOut, err := store.GetReviewMessage(ctx, out.ID, agentID)
+	if err != nil {
+		t.Fatalf("GetReviewMessage(outbound): %v", err)
+	}
+	if gotOut.Direction != "outbound" {
+		t.Errorf("outbound view direction = %q, want outbound", gotOut.Direction)
+	}
+
+	// A resolved (dropped) inbound message is STILL returnable — this is the
+	// review-queue getter, not an agent read path; it must report the terminal
+	// state so a late approve/reject surfaces a clean 409 rather than a 404.
+	if err := store.RejectInboundReview(ctx, heldID, agentID, userID, "x"); err != nil {
+		t.Fatalf("RejectInboundReview: %v", err)
+	}
+	resolved, err := store.GetReviewMessage(ctx, heldID, agentID)
+	if err != nil {
+		t.Fatalf("GetReviewMessage(rejected): %v", err)
+	}
+	if resolved.Status != identity.MessageStatusReviewRejected {
+		t.Errorf("resolved status = %q, want review_rejected", resolved.Status)
+	}
+
+	// Unknown id → error (the handler maps this to 404).
+	if _, err := store.GetReviewMessage(ctx, "msg_nope", agentID); err == nil {
+		t.Errorf("unknown id must error")
+	}
+}
+
+// TestInboundReview_RejectDeliveredMessageIsNoop is the safety property behind the
+// compare-and-set guard: a normally-delivered inbound message (never held — status
+// 'unread') must NOT be droppable into the hidden review_rejected state. Without
+// the status guard, an account owner (or a confused-deputy bug) could silently
+// disappear a legitimately delivered message via /reject.
+func TestInboundReview_RejectDeliveredMessageIsNoop(t *testing.T) {
+	pool := testutil.TestDB(t)
+	store := identity.NewStore(pool)
+	ctx := context.Background()
+	userID, agentID := seedReviewAgent(t, store, ctx, "delivered.example.com")
+
+	// A clean delivery — no screening hold (default status path).
+	delivered := createInbound(t, store, ctx, agentID, "ok@x.com", "hello", identity.InboundScreening{})
+
+	if err := store.RejectInboundReview(ctx, delivered, agentID, userID, "nope"); err != identity.ErrNotPendingReview {
+		t.Errorf("reject of a delivered message = %v, want ErrNotPendingReview (no-op)", err)
+	}
+	if err := store.ApproveInboundReview(ctx, delivered, agentID, userID); err != identity.ErrNotPendingReview {
+		t.Errorf("approve of a delivered message = %v, want ErrNotPendingReview (no-op)", err)
+	}
+	// The row is untouched — still a normal, agent-visible delivery.
+	var st string
+	if err := pool.QueryRow(ctx, `SELECT status FROM messages WHERE id=$1`, delivered).Scan(&st); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if st == identity.MessageStatusReviewRejected {
+		t.Error("a delivered message was dropped to review_rejected via /reject — must be impossible")
+	}
+}
