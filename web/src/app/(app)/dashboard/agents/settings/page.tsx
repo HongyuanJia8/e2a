@@ -1,19 +1,22 @@
 "use client";
 
-// Per-agent Settings — composes the mode/webhook/HITL editors that
-// used to live inline on the dashboard agent card, plus a danger
+// Per-agent Settings — the review-queue (HITL) editor plus a danger
 // zone for deletion. The dashboard card is now lean: identity +
-// stats + Open-inbox / Settings CTAs only; the editors live here.
+// Open-inbox / Settings CTAs only; the editor lives here.
 
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import useSWR from "swr";
 import { Eyebrow } from "../../../../components/loft/Eyebrow";
-import { deleteAgent } from "../../../../components/onboarding/api";
+import { Chip } from "../../../../components/loft/Chip";
+import { deleteAgent, getProtection } from "../../../../components/onboarding/api";
 import { useAgents } from "../../../../components/hooks/useAgents";
-import { invalidateAgents } from "../../../../../lib/swrKeys";
-import { AgentModeSwitcher } from "../../_components/AgentModeSwitcher";
-import { WebhookEditor } from "../../_components/WebhookEditor";
-import { HITLEditor } from "../../_components/HITLEditor";
+import {
+  invalidateAgents,
+  invalidateProtection,
+  protectionKey,
+} from "../../../../../lib/swrKeys";
+import { ProtectionEditor } from "../../_components/ProtectionEditor";
 
 // Suspense-wrap so useSearchParams stays inside a Suspense boundary
 // per Next.js 16+ requirements. Inner content is keyed by email so
@@ -41,6 +44,14 @@ function AgentSettingsContent({ email }: { email: string }) {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
 
+  // Review-queue config lives on the beta protection sub-resource
+  // (GET /v1/agents/{email}/protection → holds.{ttl_seconds,on_expiry}),
+  // not on the agent identity. Fetched separately, keyed by email.
+  const { data: protection } = useSWR(
+    agent ? protectionKey(agent.email) : null,
+    () => getProtection(agent!.email),
+  );
+
   // Three error states surfaced as one string:
   //   1. Missing ?email= → URL-shape problem
   //   2. The fetch errored
@@ -48,23 +59,20 @@ function AgentSettingsContent({ email }: { email: string }) {
   const error = !email
     ? "Missing ?email= query parameter"
     : fetchError
-      ? fetchError.message || "Failed to load agent"
+      ? fetchError.message || "Failed to load inbox"
       : !isLoading && !agent
-        ? `Agent ${email} not found`
+        ? `Inbox ${email} not found`
         : "";
 
-  // Editor saves now invalidate the shared `agentsKey` cache (see
-  // AgentModeSwitcher / WebhookEditor / HITLEditor). We re-derive
-  // the local `agent` value from useAgents(), so no refreshKey-bump
-  // pattern is needed any more — SWR fans the new data out to every
-  // consumer.
+  // After the Review-queue editor saves, refetch the protection config
+  // so the collapsed summary reflects the new TTL / on-expiry.
   const onEditorSaved = () => {
-    void invalidateAgents();
+    if (agent) void invalidateProtection(agent.email);
   };
 
   const onDelete = async () => {
     if (!agent) return;
-    if (!confirm(`Delete agent ${agent.email}? This cannot be undone.`)) return;
+    if (!confirm(`Delete inbox ${agent.email}? This cannot be undone.`)) return;
     setDeleting(true);
     setDeleteError("");
     try {
@@ -72,7 +80,7 @@ function AgentSettingsContent({ email }: { email: string }) {
       await invalidateAgents();
       router.push("/dashboard");
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : "Failed to delete agent");
+      setDeleteError(err instanceof Error ? err.message : "Failed to delete inbox");
       setDeleting(false);
     }
   };
@@ -100,8 +108,6 @@ function AgentSettingsContent({ email }: { email: string }) {
     );
   }
 
-  const isCloud = agent.agent_mode !== "local";
-
   return (
     <div
       data-testid="agent-settings"
@@ -112,43 +118,21 @@ function AgentSettingsContent({ email }: { email: string }) {
         width: "100%",
       }}
     >
-      {/* Mode */}
-      <Section title="Delivery mode" subtitle="Where the agent receives mail — directly via webhook (cloud) or by polling / WebSocket (local).">
-        <AgentModeSwitcher
-          email={agent.email}
-          currentMode={agent.agent_mode}
-          onSwitched={onEditorSaved}
-        />
-      </Section>
-
-      {/* Webhook URL — cloud-only */}
-      {isCloud && (
+      {/* Protection — backed by the beta protection sub-resource: the
+          inbound/outbound trust gates + content scan that decide what gets
+          held, and the review queue that governs held messages. Gated on
+          domain verification (the approve/reject pipeline needs a real
+          domain) and on the protection config having loaded. */}
+      {agent.domain_verified && protection && (
         <Section
-          title="Webhook"
-          subtitle="The HTTPS endpoint we POST inbound messages to. Updates take effect on the next delivery."
+          title="Protection"
+          beta
+          subtitle="Control who may send to and from this inbox, how aggressively content is scanned, and what happens to messages held for review."
         >
-          <WebhookEditor
+          <ProtectionEditor
             email={agent.email}
-            currentUrl={agent.webhook_url}
-            onUpdated={onEditorSaved}
-          />
-        </Section>
-      )}
-
-      {/* HITL — only when the domain is verified, matches the prior
-          AgentCard gating (the approve / reject pipeline needs a real
-          domain to deliver notifications). */}
-      {agent.domain_verified && (
-        <Section
-          title="Human-in-the-loop approvals"
-          subtitle="Hold outbound messages for review. While HITL is on, every send waits for an Approve or Reject before delivery — or auto-resolves at the TTL."
-        >
-          <HITLEditor
-            email={agent.email}
-            enabled={agent.hitl_enabled}
-            ttlSeconds={agent.hitl_ttl_seconds}
-            expirationAction={agent.hitl_expiration_action}
-            onUpdated={onEditorSaved}
+            config={protection}
+            onSaved={onEditorSaved}
           />
         </Section>
       )}
@@ -174,14 +158,14 @@ function AgentSettingsContent({ email }: { email: string }) {
             color: "var(--fg)",
           }}
         >
-          Delete this agent
+          Delete this inbox
         </h2>
         <p
           className="mb-4"
           style={{ fontSize: 13, color: "var(--fg-muted)", lineHeight: 1.6 }}
         >
-          Removes the agent and all of its messages older than the
-          30-day retention window. Pending HITL drafts are auto-rejected.
+          Removes the inbox and all of its messages older than the
+          30-day retention window. Pending review drafts are auto-rejected.
           The email address becomes available for re-registration. This
           cannot be undone.
         </p>
@@ -201,7 +185,7 @@ function AgentSettingsContent({ email }: { email: string }) {
             cursor: deleting ? "default" : "pointer",
           }}
         >
-          {deleting ? "Deleting…" : "Delete agent"}
+          {deleting ? "Deleting…" : "Delete inbox"}
         </button>
         {deleteError && (
           <p
@@ -219,10 +203,12 @@ function AgentSettingsContent({ email }: { email: string }) {
 function Section({
   title,
   subtitle,
+  beta = false,
   children,
 }: {
   title: string;
   subtitle: string;
+  beta?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -235,7 +221,10 @@ function Section({
         padding: "20px 22px",
       }}
     >
-      <Eyebrow>{title}</Eyebrow>
+      <div className="flex items-center gap-2">
+        <Eyebrow>{title}</Eyebrow>
+        {beta && <Chip tone="warn">Beta</Chip>}
+      </div>
       <p
         className="mt-2 mb-4"
         style={{

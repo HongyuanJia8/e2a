@@ -3,28 +3,17 @@
 import { useState } from "react";
 import Link from "next/link";
 import type { DashboardAgent } from "../../../components/types";
-import { ConnectInstructions } from "./ConnectInstructions";
 import { Chip } from "../../../components/loft/Chip";
 import { Dot } from "../../../components/loft/Dot";
 import { sendAgentTestEmail } from "../../../components/onboarding/api";
-import { AGENTS_DOMAIN } from "../../../../lib/site";
-
-function isSharedDomain(email: string): boolean {
-  return AGENTS_DOMAIN !== "" && email.endsWith("@" + AGENTS_DOMAIN);
-}
 
 export function AgentCard({
   agent,
 }: {
   agent: DashboardAgent;
 }) {
-  const [showConnect, setShowConnect] = useState(false);
   const [testState, setTestState] = useState<"idle" | "sending" | "sent">("idle");
   const [testError, setTestError] = useState("");
-
-  const isLocal = agent.agent_mode === "local";
-  const isCloud = agent.agent_mode !== "local";
-  const shared = isSharedDomain(agent.email);
 
   return (
     <div
@@ -78,13 +67,6 @@ export function AgentCard({
               <Dot tone={agent.domain_verified ? "success" : "warn"} />
               {agent.domain_verified ? "Verified" : "Unverified"}
             </Chip>
-            <Chip tone={shared ? "info" : "accent"}>
-              {shared ? "Shared" : "Custom"}
-            </Chip>
-            <Chip tone="neutral" mono>
-              {isLocal ? "Local" : "Cloud"}
-            </Chip>
-            {agent.hitl_enabled && <Chip tone="accent">HITL on</Chip>}
           </div>
 
           {/* Meta info */}
@@ -100,64 +82,51 @@ export function AgentCard({
 
         </div>
 
-        {/* Actions: Test + Connect. Edits (mode, webhook URL, HITL,
-            delete) live on the per-agent Settings page; the bottom
-            CTA bar wires that destination. */}
+        {/* Actions: Test only. Editing (review queue) + delete live on
+            the per-agent Settings page, reached via the bottom CTA bar.
+            Connection setup lives in onboarding / the e2a skill. */}
         <div className="flex gap-2 shrink-0 md:ml-4 flex-wrap">
           {agent.domain_verified && (
-            <>
-              <button
-                onClick={async () => {
-                  setTestError("");
-                  setTestState("sending");
-                  try {
-                    await sendAgentTestEmail(agent.email);
-                    setTestState("sent");
-                    setTimeout(() => setTestState("idle"), 3000);
-                  } catch (err) {
-                    setTestError(
-                      err instanceof Error ? err.message : "Network error",
-                    );
-                    setTestState("idle");
-                  }
-                }}
-                disabled={testState === "sending"}
-                className="text-[12px] px-3 py-1.5 transition disabled:cursor-not-allowed"
-                style={{
-                  background:
-                    testState === "sent"
-                      ? "var(--success)"
-                      : testState === "sending"
-                        ? "var(--bg-elev)"
-                        : "var(--bg-panel)",
-                  color:
-                    testState === "sent"
-                      ? "#fff"
-                      : testState === "sending"
-                        ? "var(--fg-muted)"
-                        : "var(--fg)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--r-md)",
-                }}
-              >
-                {testState === "sent"
-                  ? "Sent ✓"
-                  : testState === "sending"
-                    ? "Sending…"
-                    : "Test"}
-              </button>
-              <button
-                onClick={() => setShowConnect(!showConnect)}
-                className="text-[12px] px-3 py-1.5 transition"
-                style={{
-                  background: "var(--fg)",
-                  color: "var(--bg)",
-                  borderRadius: "var(--r-md)",
-                }}
-              >
-                {showConnect ? "Hide" : "Connect"}
-              </button>
-            </>
+            <button
+              onClick={async () => {
+                setTestError("");
+                setTestState("sending");
+                try {
+                  await sendAgentTestEmail(agent.email);
+                  setTestState("sent");
+                  setTimeout(() => setTestState("idle"), 3000);
+                } catch (err) {
+                  setTestError(
+                    err instanceof Error ? err.message : "Network error",
+                  );
+                  setTestState("idle");
+                }
+              }}
+              disabled={testState === "sending"}
+              className="text-[12px] px-3 py-1.5 transition disabled:cursor-not-allowed"
+              style={{
+                background:
+                  testState === "sent"
+                    ? "var(--success)"
+                    : testState === "sending"
+                      ? "var(--bg-elev)"
+                      : "var(--bg-panel)",
+                color:
+                  testState === "sent"
+                    ? "#fff"
+                    : testState === "sending"
+                      ? "var(--fg-muted)"
+                      : "var(--fg)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--r-md)",
+              }}
+            >
+              {testState === "sent"
+                ? "Sent ✓"
+                : testState === "sending"
+                  ? "Sending…"
+                  : "Test"}
+            </button>
           )}
         </div>
         {testError && (
@@ -168,47 +137,6 @@ export function AgentCard({
             {testError}
           </p>
         )}
-      </div>
-
-      {/* Connect instructions — inline on the card because they're a
-          first-mile onboarding affordance, not ongoing config. */}
-      {showConnect && (
-        <div className="mt-3 border-t border-border pt-4">
-          <ConnectInstructions mode={isLocal ? "local" : "cloud"} />
-        </div>
-      )}
-
-      {/* Per-agent stats footer. Cloud-mode agents also get a
-          webhook-reachable indicator on the right; local-mode hides it
-          because no webhook is involved. */}
-      <div
-        className="mt-4 pt-4 grid grid-cols-2 md:grid-cols-4 gap-4"
-        style={{ borderTop: "1px solid var(--border-sub)" }}
-      >
-        <AgentStat label="Inbound · 7d" value={agent.inbound_7d} />
-        <AgentStat label="Outbound · 7d" value={agent.outbound_7d} />
-        <AgentStat label="Pending" value={agent.pending_count} />
-        <AgentStat
-          label={isCloud ? "Webhook" : "Last delivery"}
-          value={
-            isCloud
-              ? agent.webhook_healthy === undefined
-                ? "—"
-                : agent.webhook_healthy
-                  ? "reachable"
-                  : "unreachable"
-              : agent.last_delivery_at
-                ? formatRelativeAge(agent.last_delivery_at)
-                : "—"
-          }
-          tone={
-            isCloud
-              ? agent.webhook_healthy === false
-                ? "danger"
-                : "muted"
-              : "muted"
-          }
-        />
       </div>
 
       {/* Bottom CTA bar — the two canonical entry points into the
@@ -232,56 +160,6 @@ export function AgentCard({
         >
           Settings
         </Link>
-      </div>
-    </div>
-  );
-}
-
-// formatRelativeAge converts an ISO timestamp into a compact relative
-// label for the per-agent stats row. Newer than 60s → "just now",
-// otherwise the smallest unit that fits.
-function formatRelativeAge(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  if (diff < 0 || isNaN(diff)) return "—";
-  const sec = Math.floor(diff / 1000);
-  if (sec < 60) return "just now";
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  return `${Math.floor(hr / 24)}d ago`;
-}
-
-function AgentStat({
-  label,
-  value,
-  tone = "muted",
-}: {
-  label: string;
-  value: number | string | undefined | null;
-  tone?: "muted" | "danger";
-}) {
-  const display =
-    value === undefined || value === null
-      ? "—"
-      : typeof value === "number"
-        ? String(value)
-        : value;
-  return (
-    <div>
-      <div
-        className="font-mono text-[10px] font-semibold uppercase mb-1"
-        style={{ color: "var(--fg-subtle)", letterSpacing: "0.08em" }}
-      >
-        {label}
-      </div>
-      <div
-        className="text-[16px] font-medium"
-        style={{
-          color: tone === "danger" ? "var(--danger-strong)" : "var(--fg)",
-        }}
-      >
-        {display}
       </div>
     </div>
   );

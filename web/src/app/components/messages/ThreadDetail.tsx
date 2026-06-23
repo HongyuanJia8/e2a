@@ -25,16 +25,17 @@ const STATE_CHIP: Record<Thread["state"], { tone: "warn" | "info" | "accent" | "
 export function ThreadDetail({
   thread,
   agentEmail,
+  onBack,
   onOpenMessage,
-  onOpenHeaders,
 }: {
   thread: Thread | null;
   agentEmail: string;
-  // Pass the whole row so the focus page can thread direction +
-  // pending-state through the URL (the detail endpoint can't recover
-  // either from its MessageView payload).
+  /** Return to the inbox list (clears the selected-thread hash). */
+  onBack: () => void;
+  // Only the pending-review callout navigates away (to the approve/reject
+  // surface). Reading a message never leaves the conversation — bodies
+  // render inline in the bubbles.
   onOpenMessage: (message: MessageSummary) => void;
-  onOpenHeaders: (message: MessageSummary) => void;
 }) {
   if (!thread) {
     return (
@@ -61,7 +62,7 @@ export function ThreadDetail({
   return (
     <div
       data-testid="thread-detail"
-      className="flex flex-col min-w-0 min-h-0 overflow-hidden"
+      className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden"
       style={{ background: "var(--bg)" }}
     >
       {/* Header */}
@@ -72,6 +73,23 @@ export function ThreadDetail({
           background: "var(--bg-panel)",
         }}
       >
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex items-center hover:opacity-80 transition"
+          style={{
+            gap: 6,
+            marginBottom: 12,
+            fontSize: 12,
+            color: "var(--fg-muted)",
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            padding: 0,
+          }}
+        >
+          <span aria-hidden>←</span> Inbox
+        </button>
         <div className="flex items-center" style={{ gap: 8, marginBottom: 10 }}>
           {thread.conversationId && (
             <code
@@ -151,15 +169,12 @@ export function ThreadDetail({
             message={m}
             counterparty={thread.counterparty}
             agentEmail={agentEmail}
-            onOpen={onOpenMessage}
-            onOpenHeaders={onOpenHeaders}
           />
         ))}
 
         {pendingDraft && (
           <PendingCallout
             draftedBy="agent"
-            expiresInLabel={null}
             onReview={() => onOpenMessage(pendingDraft)}
           />
         )}

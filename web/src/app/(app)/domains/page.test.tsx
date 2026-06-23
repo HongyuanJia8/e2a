@@ -24,10 +24,10 @@ function mockDomainsAndAgents(
         json: () => Promise.resolve({ items: domains }),
       });
     }
-    if (url === "/api/dashboard/agents") {
+    if (url === "/v1/agents") {
       return Promise.resolve({
         ok: true,
-        json: () => Promise.resolve({ agents }),
+        json: () => Promise.resolve({ items: agents }),
       });
     }
     return Promise.resolve({ ok: false, text: () => Promise.resolve("not found") });
@@ -138,7 +138,7 @@ describe("Domains page — with domains", () => {
     render(<DomainsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("1 agent")).toBeInTheDocument();
+      expect(screen.getByText("1 inbox")).toBeInTheDocument();
     });
   });
 
@@ -147,7 +147,7 @@ describe("Domains page — with domains", () => {
     render(<DomainsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("No agents")).toBeInTheDocument();
+      expect(screen.getByText("No inboxes")).toBeInTheDocument();
     });
   });
 
@@ -165,9 +165,9 @@ describe("Domains page — with domains", () => {
     render(<DomainsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("Create agent")).toBeInTheDocument();
+      expect(screen.getByText("Create inbox")).toBeInTheDocument();
     });
-    expect(screen.getByText("Create agent")).toHaveAttribute("href", "/get-started?domain=verified.example.com");
+    expect(screen.getByText("Create inbox")).toHaveAttribute("href", "/get-started?domain=verified.example.com");
   });
 
   it("toggles DNS records visibility", async () => {
@@ -216,7 +216,7 @@ describe("Domains page — error handling", () => {
       }
       return Promise.resolve({
         ok: true,
-        json: () => Promise.resolve({ agents: [] }),
+        json: () => Promise.resolve({ items: [] }),
       });
     });
 
@@ -250,10 +250,10 @@ describe("Domains page — verify domain", () => {
           json: () => Promise.resolve({ items: domains }),
         });
       }
-      if (url === "/api/dashboard/agents") {
+      if (url === "/v1/agents") {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ agents: [] }),
+          json: () => Promise.resolve({ items: [] }),
         });
       }
       return Promise.resolve({ ok: false, text: () => Promise.resolve("not found") });
@@ -289,10 +289,10 @@ describe("Domains page — verify domain", () => {
           json: () => Promise.resolve({ items: [sampleDomain] }),
         });
       }
-      if (url === "/api/dashboard/agents") {
+      if (url === "/v1/agents") {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ agents: [] }),
+          json: () => Promise.resolve({ items: [] }),
         });
       }
       return Promise.resolve({ ok: false, text: () => Promise.resolve("not found") });
@@ -328,10 +328,10 @@ describe("Domains page — Make primary action", () => {
               }),
           });
         }
-        if (url === "/api/dashboard/agents") {
+        if (url === "/v1/agents") {
           return Promise.resolve({
             ok: true,
-            json: () => Promise.resolve({ agents: [] }),
+            json: () => Promise.resolve({ items: [] }),
           });
         }
         if (

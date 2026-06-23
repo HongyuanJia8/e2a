@@ -3,10 +3,10 @@
 // Covers: required-param error, agent fetch, the three section
 // editors (mode switch / webhook URL / HITL) wire up to PUT
 // /api/dashboard/agents/{email}, and the danger-zone delete confirm
-// flow routes back to /dashboard on success.
+// flow (DELETE /v1/agents/{email}?confirm=DELETE) routes back to
+// /dashboard on success.
 
 import { render, screen, waitFor, fireEvent } from "../../../../../test-utils/swr";
-import userEvent from "@testing-library/user-event";
 import AgentSettingsPage from "./page";
 
 const mockUseSearchParams = jest.fn();
@@ -59,14 +59,25 @@ const baseAgent = {
   hitl_expiration_action: "reject" as const,
 };
 
+// GET /v1/agents/{email}/protection response — the review-queue editor
+// reads holds.{ttl_seconds,on_expiry} from here (the beta protection API).
+const PROTECTION = {
+  inbound: { gate: { policy: "open", action: "flag" }, scan: { sensitivity: "off" } },
+  outbound: { gate: { policy: "open", action: "flag" }, scan: { sensitivity: "off" } },
+  holds: { ttl_seconds: 604800, on_expiry: "reject" },
+};
+
 function mockAgent(agent: typeof baseAgent) {
   mockFetch.mockImplementation((url: string, init?: RequestInit) => {
-    if (url === "/api/dashboard/agents" && !init?.method) {
+    if (url === "/v1/agents" && !init?.method) {
       return Promise.resolve({
         ok: true,
         status: 200,
-        json: () => Promise.resolve({ agents: [agent] }),
+        json: () => Promise.resolve({ items: [agent] }),
       });
+    }
+    if (url === `/v1/agents/${encodeURIComponent(agent.email)}/protection` && !init?.method) {
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(PROTECTION) });
     }
     return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve("not found") });
   });
@@ -89,7 +100,7 @@ describe("AgentSettingsPage", () => {
     expect(screen.getByText(/Missing \?email= query parameter/)).toBeInTheDocument();
   });
 
-  it("renders the three section editors for a cloud, verified agent", async () => {
+  it("renders the protection section and danger zone for a verified agent", async () => {
     setSearchParams({ email: baseAgent.email });
     mockAgent(baseAgent);
 
@@ -99,142 +110,45 @@ describe("AgentSettingsPage", () => {
       expect(screen.getByTestId("agent-settings")).toBeInTheDocument();
     });
 
-    // Mode section + AgentModeSwitcher button
-    expect(screen.getByText(/Delivery mode/i)).toBeInTheDocument();
-    expect(screen.getByText(/Switch to local/i)).toBeInTheDocument();
+    // Protection (beta) section + its gate/scan/holds controls — gated on
+    // the protection fetch, so wait for it to settle.
+    await waitFor(() => {
+      expect(screen.getByText("Protection")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Beta")).toBeInTheDocument();
+    // Gate + scan + holds controls are all exposed.
+    expect(screen.getByText("Who may send to this inbox")).toBeInTheDocument();
+    expect(screen.getByText("Who this inbox may send to")).toBeInTheDocument();
+    expect(screen.getAllByText("Content scan sensitivity").length).toBe(2);
+    expect(screen.getByText("Approval window")).toBeInTheDocument();
 
-    // Webhook section + URL display
-    expect(screen.getByText("Webhook", { selector: "span" })).toBeInTheDocument();
-    expect(screen.getByText("https://acme.com/hook")).toBeInTheDocument();
-
-    // HITL section. The editor starts in a collapsed summary ("HITL:
-    // Disabled / Edit"); the "Require human approval" copy only
-    // appears after Edit is clicked. Assert the summary state here —
-    // clicking Edit is covered by the existing editor's own tests.
-    expect(screen.getByText(/Human-in-the-loop approvals/i)).toBeInTheDocument();
-    // Match within the HITL section to avoid colliding with the
-    // dashboard nav's "Disabled" copy elsewhere on the page (none
-    // exists on this page, but be explicit).
-    expect(screen.getByText("HITL:")).toBeInTheDocument();
+    // The retired Mode + per-agent Webhook sections must not render.
+    expect(screen.queryByText(/Delivery mode/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Switch to local/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("https://acme.com/hook")).not.toBeInTheDocument();
 
     // Danger zone
     expect(screen.getByTestId("danger-zone")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Delete agent/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Delete inbox/i })).toBeInTheDocument();
   });
 
-  it("hides the Webhook section for a local agent", async () => {
-    setSearchParams({ email: "bot@agents.e2a.dev" });
-    mockAgent({
-      ...baseAgent,
-      email: "bot@agents.e2a.dev",
-      agent_mode: "local",
-      webhook_url: "",
-    });
-
-    render(<AgentSettingsPage />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId("agent-settings")).toBeInTheDocument();
-    });
-    // The "Webhook" section header should NOT render for local agents
-    // — the editor is cloud-only.
-    expect(screen.queryByText("Webhook", { selector: "span" })).not.toBeInTheDocument();
-    // Mode section still present.
-    expect(screen.getByText(/Delivery mode/i)).toBeInTheDocument();
-  });
-
-  it("clicking 'Switch to local' on a cloud agent PUTs agent_mode=local", async () => {
+  it("saving the protection editor PUTs the full config (gates + scan + holds)", async () => {
     setSearchParams({ email: baseAgent.email });
+    const protectionUrl = `/v1/agents/${encodeURIComponent(baseAgent.email)}/protection`;
     let putBody: string | null = null;
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
-      if (url === "/api/dashboard/agents" && !init?.method) {
+      if (url === "/v1/agents" && !init?.method) {
         return Promise.resolve({
           ok: true,
           status: 200,
-          json: () => Promise.resolve({ agents: [baseAgent] }),
+          json: () => Promise.resolve({ items: [baseAgent] }),
         });
       }
-      if (
-        url === `/api/dashboard/agents/${encodeURIComponent(baseAgent.email)}` &&
-        init?.method === "PUT"
-      ) {
+      if (url === protectionUrl && !init?.method) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(PROTECTION) });
+      }
+      if (url === protectionUrl && init?.method === "PUT") {
         putBody = (init.body as string) ?? "";
-        return Promise.resolve({ ok: true, status: 204 });
-      }
-      return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve("not found") });
-    });
-
-    render(<AgentSettingsPage />);
-    await waitFor(() => {
-      expect(screen.getByText(/Switch to local/i)).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByText(/Switch to local/i));
-
-    await waitFor(() => {
-      expect(putBody).not.toBeNull();
-    });
-    expect(putBody).toBe(JSON.stringify({ agent_mode: "local", webhook_url: "" }));
-  });
-
-  it("editing the webhook URL PUTs webhook_url", async () => {
-    setSearchParams({ email: baseAgent.email });
-    const user = userEvent.setup();
-    let putBody: string | null = null;
-    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
-      if (url === "/api/dashboard/agents" && !init?.method) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({ agents: [baseAgent] }),
-        });
-      }
-      if (
-        url === `/api/dashboard/agents/${encodeURIComponent(baseAgent.email)}` &&
-        init?.method === "PUT"
-      ) {
-        putBody = (init.body as string) ?? "";
-        return Promise.resolve({ ok: true, status: 204 });
-      }
-      return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve("not found") });
-    });
-
-    render(<AgentSettingsPage />);
-    await waitFor(() => {
-      expect(screen.getByText("https://acme.com/hook")).toBeInTheDocument();
-    });
-
-    // The Webhook editor has its own "Edit" button (separate from the
-    // HITL Edit). Scope by reading the URL display's parent paragraph.
-    const webhookP = screen.getByText("https://acme.com/hook").closest("p")!;
-    fireEvent.click(webhookP.querySelector("button")!);
-    const input = screen.getByDisplayValue("https://acme.com/hook");
-    await user.clear(input);
-    await user.type(input, "https://acme.com/v2");
-    fireEvent.click(screen.getByText("Save"));
-
-    await waitFor(() => {
-      expect(putBody).not.toBeNull();
-    });
-    expect(putBody).toBe(JSON.stringify({ webhook_url: "https://acme.com/v2" }));
-  });
-
-  it("clicking 'Delete agent' DELETEs and routes back to /dashboard", async () => {
-    setSearchParams({ email: baseAgent.email });
-    let deleted = false;
-    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
-      if (url === "/api/dashboard/agents" && !init?.method) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({ agents: [baseAgent] }),
-        });
-      }
-      if (
-        url === `/api/dashboard/agents/${encodeURIComponent(baseAgent.email)}` &&
-        init?.method === "DELETE"
-      ) {
-        deleted = true;
         return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("") });
       }
       return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve("not found") });
@@ -242,10 +156,52 @@ describe("AgentSettingsPage", () => {
 
     render(<AgentSettingsPage />);
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Delete agent/i })).toBeInTheDocument();
+      expect(screen.getByText("Approval window")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /Delete agent/i }));
+    // The form is always editable: pick the "1 hour" window, then save.
+    fireEvent.click(screen.getByText("1 hour"));
+    fireEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => {
+      expect(putBody).not.toBeNull();
+    });
+    // Wholesale PUT: holds reflect the picked window; gates + scan come
+    // through from the loaded config (open / flag / off).
+    const body = JSON.parse(putBody!);
+    expect(body.holds).toEqual({ ttl_seconds: 3600, on_expiry: "reject" });
+    expect(body.inbound.gate.policy).toBe("open");
+    expect(body.inbound.scan.sensitivity).toBe("off");
+    expect(body.outbound.gate.policy).toBe("open");
+  });
+
+  it("clicking 'Delete inbox' DELETEs and routes back to /dashboard", async () => {
+    setSearchParams({ email: baseAgent.email });
+    let deleted = false;
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/v1/agents" && !init?.method) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ items: [baseAgent] }),
+        });
+      }
+      if (
+        url === `/v1/agents/${encodeURIComponent(baseAgent.email)}?confirm=DELETE` &&
+        init?.method === "DELETE"
+      ) {
+        deleted = true;
+        return Promise.resolve({ ok: true, status: 204, text: () => Promise.resolve("") });
+      }
+      return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve("not found") });
+    });
+
+    render(<AgentSettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Delete inbox/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Delete inbox/i }));
 
     await waitFor(() => {
       expect(deleted).toBe(true);
@@ -259,11 +215,11 @@ describe("AgentSettingsPage", () => {
 
     let deleted = false;
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
-      if (url === "/api/dashboard/agents" && !init?.method) {
+      if (url === "/v1/agents" && !init?.method) {
         return Promise.resolve({
           ok: true,
           status: 200,
-          json: () => Promise.resolve({ agents: [baseAgent] }),
+          json: () => Promise.resolve({ items: [baseAgent] }),
         });
       }
       if (init?.method === "DELETE") {
@@ -275,10 +231,10 @@ describe("AgentSettingsPage", () => {
 
     render(<AgentSettingsPage />);
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Delete agent/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Delete inbox/i })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /Delete agent/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Delete inbox/i }));
 
     // Give any in-flight handler a tick to fire (it shouldn't, but make
     // the negative assertion deterministic).

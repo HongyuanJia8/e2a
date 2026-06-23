@@ -1,9 +1,6 @@
 // Onboarding domain model types.
 // These map to the backend API shapes but are owned by the UI layer.
 
-/** Agent delivery mode — how the agent receives email. */
-export type AgentMode = "local" | "cloud";
-
 /** Address type — shared e2a slug vs custom domain. */
 export type AddressType = "shared" | "custom";
 
@@ -64,14 +61,13 @@ export type DomainProgress = {
 };
 
 /** Shared-domain flow steps (linear, fast). */
-export type SharedFlowStep = "address" | "mode" | "details" | "connect";
+export type SharedFlowStep = "address" | "details" | "connect";
 
 /** Custom-domain flow steps (checklist, resumable). */
 export type CustomFlowStep =
   | "choose_domain"
   | "dns"
   | "verify"
-  | "mode"
   | "create_agent"
   | "connect";
 
@@ -81,22 +77,18 @@ export type OnboardingPath = "choose" | "shared" | "custom";
 /** Parameters for creating an agent via the shared-domain flow. */
 export type SharedAgentParams = {
   slug: string;
-  agentMode: AgentMode;
-  webhookUrl?: string;
 };
 
 /** Parameters for creating an agent via the custom-domain flow. */
 export type CustomAgentParams = {
   domain: string;
   localPart: string;
-  agentMode: AgentMode;
-  webhookUrl?: string;
 };
 
 /** Normalized create-agent request for the API layer. */
 export type CreateAgentRequest =
-  | { type: "shared"; slug: string; agent_mode: AgentMode; webhook_url?: string }
-  | { type: "custom"; email: string; agent_mode: AgentMode; webhook_url?: string };
+  | { type: "shared"; slug: string }
+  | { type: "custom"; email: string };
 
 /** Response from POST /v1/agents. */
 export type AgentCreateResponse = {
@@ -105,11 +97,33 @@ export type AgentCreateResponse = {
   email: string;
 };
 
-/** Update agent mode request for PUT /api/dashboard/agents/{email}. */
-export type UpdateAgentRequest = {
-  agent_mode?: AgentMode;
-  webhook_url?: string;
-  hitl_enabled?: boolean;
-  hitl_ttl_seconds?: number;
-  hitl_expiration_action?: "approve" | "reject";
+// ── Protection config (GET/PUT /v1/agents/{email}/protection) ──
+// Mirrors ProtectionConfigView. Beta. The dashboard only edits the
+// `holds` section; inbound/outbound are read + passed back unchanged on
+// the wholesale PUT.
+
+export type ProtectionGate = {
+  policy?: "open" | "allowlist" | "domain";
+  allowlist?: string[];
+  action?: "flag" | "review" | "block";
+};
+
+export type ProtectionScan = {
+  sensitivity?: "off" | "low" | "medium" | "high";
+};
+
+export type ProtectionDirection = {
+  gate: ProtectionGate;
+  scan: ProtectionScan;
+};
+
+export type ProtectionHolds = {
+  ttl_seconds?: number;
+  on_expiry?: "approve" | "reject";
+};
+
+export type ProtectionConfig = {
+  inbound: ProtectionDirection;
+  outbound: ProtectionDirection;
+  holds: ProtectionHolds;
 };

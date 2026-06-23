@@ -4,12 +4,10 @@
 import type {
   DomainInfo,
   AgentCreateResponse,
-  AgentMode,
-  UpdateAgentRequest,
+  ProtectionConfig,
 } from "./types";
 import type {
   DashboardAgent,
-  ActivityEntry,
   InboundMessageDetail,
   ListMessagesResponse,
   PendingMessageSummary,
@@ -98,17 +96,19 @@ export async function setDomainPrimary(domain: string): Promise<DomainInfo> {
 
 // ── Agents ───────────────────────────────────────────────
 
+// GET /v1/agents → PageAgentView. AgentView carries exactly the slim
+// identity fields the dashboard list needs (id/domain/email/name/
+// domain_verified/created_at), so the wire rows map straight onto
+// DashboardAgent. (Per-agent config moved to the protection sub-resource.)
 export async function listAgents(): Promise<DashboardAgent[]> {
-  const data = await request<{ agents: DashboardAgent[] }>("/api/dashboard/agents");
-  return data.agents ?? [];
+  const data = await request<{ items?: DashboardAgent[] | null }>("/v1/agents");
+  return data.items ?? [];
 }
 
 export async function createAgent(params: {
   slug?: string;
   email?: string;
   name?: string;
-  agent_mode: AgentMode;
-  webhook_url?: string;
 }): Promise<AgentCreateResponse> {
   return request<AgentCreateResponse>("/v1/agents", {
     method: "POST",
@@ -116,10 +116,14 @@ export async function createAgent(params: {
   });
 }
 
+// DELETE /v1/agents/{email}. The v1 surface guards destructive deletes
+// behind an explicit `?confirm=DELETE` query param and returns 204 (no
+// body) on success — `request<T>` maps that to undefined.
 export async function deleteAgent(email: string): Promise<void> {
-  return request("/api/dashboard/agents/" + encodeURIComponent(email), {
-    method: "DELETE",
-  });
+  return request(
+    "/v1/agents/" + encodeURIComponent(email) + "?confirm=DELETE",
+    { method: "DELETE" },
+  );
 }
 
 // Fires a synthetic "Test email from e2a" send to the agent's own
@@ -133,24 +137,6 @@ export async function sendAgentTestEmail(
   return request(
     "/v1/agents/" + encodeURIComponent(email) + "/test",
     { method: "POST" },
-  );
-}
-
-// ── Agent activity (deprecated) ─────────────────────────
-
-/**
- * @deprecated No web client reads this anymore. The dashboard agent
- * card used to expand an inline ActivityPanel that called this helper;
- * that panel was removed in favor of the threaded inbox at
- * `/dashboard/agents/messages`. The backend endpoint
- * `/api/dashboard/agents/{email}/activity` is also ready for deletion
- * — keep this helper around for one release in case external tooling
- * imported it via tree-shaken builds, then remove the helper + the
- * endpoint together in a follow-up.
- */
-export async function getAgentActivity(email: string): Promise<ActivityEntry[]> {
-  return request<ActivityEntry[]>(
-    "/api/dashboard/agents/" + encodeURIComponent(email) + "/activity",
   );
 }
 
@@ -281,9 +267,9 @@ export async function getInboundMessage(
 
 // Projects a MessageView into the PendingMessageDetail shape the review
 // surfaces read. Fields the `/v1` MessageView doesn't expose
-// (approval_expires_at, attachments, the parent inbound context, the
-// reviewer identity) come through undefined — the UI degrades
-// gracefully, hiding those affordances.
+// (attachments, the parent inbound context, the reviewer identity) come
+// through undefined — the UI degrades gracefully, hiding those
+// affordances.
 function projectPending(
   email: string,
   w: MessageViewWire,
@@ -368,16 +354,30 @@ export async function getMessageDetail(
   };
 }
 
-// ── Agent update (general) ──────────────────────────────
+// ── Protection config (review-queue holds) ──────────────
 
-export async function updateAgent(
+// GET /v1/agents/{address}/protection — the agent's protection posture
+// (inbound/outbound trust gate + content scan + the review-hold queue).
+// Account-scope only; the dashboard's session cookie qualifies. Beta:
+// the shape may change before it's declared stable.
+export async function getProtection(email: string): Promise<ProtectionConfig> {
+  return request<ProtectionConfig>(
+    "/v1/agents/" + encodeURIComponent(email) + "/protection",
+  );
+}
+
+// Replace the agent's full protection posture. The PUT is a wholesale
+// replace (inbound/outbound/holds all required), so callers send the
+// complete config — the ProtectionEditor edits every section in one form
+// and submits the whole thing, which matches this contract exactly.
+export async function setProtection(
   email: string,
-  update: UpdateAgentRequest,
+  config: ProtectionConfig,
 ): Promise<void> {
-  return request("/api/dashboard/agents/" + encodeURIComponent(email), {
-    method: "PUT",
-    body: JSON.stringify(update),
-  });
+  return request(
+    "/v1/agents/" + encodeURIComponent(email) + "/protection",
+    { method: "PUT", body: JSON.stringify(config) },
+  );
 }
 
 // ── HITL pending messages ───────────────────────────────

@@ -187,7 +187,7 @@ describe("Address type choice", () => {
     fireEvent.click(screen.getByText("Shared e2a domain"));
 
     await waitFor(() => {
-      expect(screen.getByText("Delivery mode")).toBeInTheDocument();
+      expect(screen.getByText("Create your inbox")).toBeInTheDocument();
     });
     expect(screen.getByPlaceholderText("my-agent")).toBeInTheDocument();
   });
@@ -221,14 +221,11 @@ describe("Shared local flow", () => {
       expect(screen.getByPlaceholderText("my-agent")).toBeInTheDocument();
     });
 
-    // Local agent is selected by default
-    expect(screen.getByText("Local agent")).toBeInTheDocument();
-
     // Enter slug
     await userEvent.type(screen.getByPlaceholderText("my-agent"), "my-bot");
 
     // Submit
-    fireEvent.click(screen.getByText("Create agent"));
+    fireEvent.click(screen.getByText("Create inbox"));
 
     // Verify API call
     await waitFor(() => {
@@ -236,108 +233,23 @@ describe("Shared local flow", () => {
         "/v1/agents",
         expect.objectContaining({
           method: "POST",
-          body: JSON.stringify({ slug: "my-bot", agent_mode: "local" }),
+          body: JSON.stringify({ slug: "my-bot" }),
         }),
       );
     });
 
-    // Should show local success state
+    // Should show success state
     await waitFor(() => {
-      expect(screen.getByText("Agent registered!")).toBeInTheDocument();
+      expect(screen.getByText("Inbox created!")).toBeInTheDocument();
     });
     expect(screen.getByText("Connect your agent")).toBeInTheDocument();
     expect(screen.getByText("Install the e2a skill")).toBeInTheDocument();
   });
 });
 
-// ── Shared cloud flow ────────────────────────────────────
+// ── Shared form validation ───────────────────────────────
 
-describe("Shared cloud flow", () => {
-  it("creates a cloud agent and shows cloud success state", async () => {
-    mockAgentCreation("my-bot@agents.e2a.dev");
-    render(<GetStartedPage />);
-
-    // Wait for bootstrap then choose shared
-    await waitFor(() => { expect(screen.getByText("Shared e2a domain")).toBeInTheDocument(); });
-    fireEvent.click(screen.getByText("Shared e2a domain"));
-    await waitFor(() => {
-      expect(screen.getByText("Delivery mode")).toBeInTheDocument();
-    });
-
-    // Switch to cloud
-    fireEvent.click(screen.getByText("Cloud agent"));
-
-    // Webhook URL field should appear
-    await waitFor(() => {
-      expect(screen.getByPlaceholderText("https://your-agent.com/webhook")).toBeInTheDocument();
-    });
-
-    // Enter slug and webhook URL
-    await userEvent.type(screen.getByPlaceholderText("my-agent"), "my-bot");
-    await userEvent.type(
-      screen.getByPlaceholderText("https://your-agent.com/webhook"),
-      "https://example.com/hook",
-    );
-
-    // Submit
-    fireEvent.click(screen.getByText("Create agent"));
-
-    // Verify API call includes agent_mode: "cloud" and webhook_url
-    await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith(
-        "/v1/agents",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({
-            slug: "my-bot",
-            agent_mode: "cloud",
-            webhook_url: "https://example.com/hook",
-          }),
-        }),
-      );
-    });
-
-    // Should show cloud success state
-    await waitFor(() => {
-      expect(screen.getByText("Agent registered!")).toBeInTheDocument();
-    });
-    expect(screen.getByText("Connect your agent")).toBeInTheDocument();
-    // Should show the configured webhook URL
-    expect(screen.getByText("Webhook endpoint")).toBeInTheDocument();
-    expect(screen.getByText("https://example.com/hook")).toBeInTheDocument();
-    expect(screen.getByText("Install the e2a skill")).toBeInTheDocument();
-  });
-});
-
-// ── Webhook validation ───────────────────────────────────
-
-describe("Webhook validation for shared cloud", () => {
-  it("shows inline error for invalid webhook URL", async () => {
-    mockFreshUser();
-    render(<GetStartedPage />);
-
-    await waitFor(() => { expect(screen.getByText("Shared e2a domain")).toBeInTheDocument(); });
-    fireEvent.click(screen.getByText("Shared e2a domain"));
-    await waitFor(() => {
-      expect(screen.getByText("Cloud agent")).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByText("Cloud agent"));
-
-    await userEvent.type(screen.getByPlaceholderText("my-agent"), "my-bot");
-    await userEvent.type(
-      screen.getByPlaceholderText("https://your-agent.com/webhook"),
-      "http://example.com/hook",
-    );
-
-    fireEvent.click(screen.getByText("Create agent"));
-
-    await waitFor(() => {
-      expect(screen.getByText("Webhook URL must be a valid HTTPS URL.")).toBeInTheDocument();
-    });
-
-    expect(mockFetch).not.toHaveBeenCalledWith("/v1/agents", expect.anything());
-  });
-
+describe("Shared form validation", () => {
   it("shows inline error for invalid slug", async () => {
     mockFreshUser();
     render(<GetStartedPage />);
@@ -349,7 +261,7 @@ describe("Webhook validation for shared cloud", () => {
     });
 
     await userEvent.type(screen.getByPlaceholderText("my-agent"), "a");
-    fireEvent.click(screen.getByText("Create agent"));
+    fireEvent.click(screen.getByText("Create inbox"));
 
     await waitFor(() => {
       expect(screen.getByText(/Slug must be 2/)).toBeInTheDocument();
@@ -373,7 +285,7 @@ describe("Slug/server error handling", () => {
     });
 
     await userEvent.type(screen.getByPlaceholderText("my-agent"), "my-bot");
-    fireEvent.click(screen.getByText("Create agent"));
+    fireEvent.click(screen.getByText("Create inbox"));
 
     await waitFor(() => {
       expect(screen.getByText('slug "my-bot" is already taken')).toBeInTheDocument();
@@ -382,7 +294,7 @@ describe("Slug/server error handling", () => {
     // Slug field should still have the value
     expect(screen.getByPlaceholderText("my-agent")).toHaveValue("my-bot");
     // Should still be on the form
-    expect(screen.getByText("Create agent")).toBeInTheDocument();
+    expect(screen.getByText("Create inbox")).toBeInTheDocument();
   });
 });
 
@@ -395,7 +307,7 @@ describe("Query param support", () => {
 
     // Should skip the address choice and show the shared form
     expect(screen.queryByText("Give your agent an email address")).not.toBeInTheDocument();
-    expect(screen.getByText("Delivery mode")).toBeInTheDocument();
+    expect(screen.getByText("Create your inbox")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("my-agent")).toBeInTheDocument();
   });
 
@@ -414,7 +326,7 @@ describe("Query param support", () => {
     render(<GetStartedPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("Create your agent")).toBeInTheDocument();
+      expect(screen.getByText("Create your inbox")).toBeInTheDocument();
     });
     expect(screen.getByText("@verified.example.com")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("support")).toBeInTheDocument();
@@ -561,74 +473,20 @@ describe("Custom-domain flow: new domain -> DNS -> verify -> local agent", () =>
     // Verify domain
     fireEvent.click(screen.getByText("Verify domain"));
 
-    // Should show agent creation with mode choice
-    await waitFor(() => {
-      expect(screen.getByText("Create your agent")).toBeInTheDocument();
-    });
-    expect(screen.getByText("Delivery mode")).toBeInTheDocument();
-    expect(screen.getByText("Local agent")).toBeInTheDocument();
-    expect(screen.getByText("Cloud agent")).toBeInTheDocument();
-
-    // Local is default — enter local part and submit
-    await userEvent.type(screen.getByPlaceholderText("support"), "hello");
-    fireEvent.click(screen.getByText("Create agent"));
-
-    // Should show local success
-    await waitFor(() => {
-      expect(screen.getByText("Agent registered!")).toBeInTheDocument();
-    });
-    expect(screen.getByText("Connect your agent")).toBeInTheDocument();
-  });
-});
-
-describe("Custom-domain flow: new domain -> DNS -> verify -> cloud agent", () => {
-  it("completes the full custom cloud flow", async () => {
-    mockCustomDomainFlow();
-    render(<GetStartedPage />);
-
-    // Wait for bootstrap then choose custom domain
-    await waitFor(() => { expect(screen.getByText("Custom domain")).toBeInTheDocument(); });
-    fireEvent.click(screen.getByText("Custom domain"));
-    await waitFor(() => {
-      expect(screen.getByText("Choose a domain")).toBeInTheDocument();
-    });
-
-    // Register, DNS+verify shown together
-    await userEvent.type(screen.getByPlaceholderText("mail.yourcompany.com"), "mail.newco.com");
-    fireEvent.click(screen.getByText("Register domain"));
-    await waitFor(() => {
-      expect(screen.getByText("Configure DNS records")).toBeInTheDocument();
-      expect(screen.getByText("Verify domain ownership")).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByText("Verify domain"));
-
     // Should show agent creation
     await waitFor(() => {
-      expect(screen.getByText("Create your agent")).toBeInTheDocument();
+      expect(screen.getByText("Create your inbox")).toBeInTheDocument();
     });
 
-    // Switch to cloud
-    fireEvent.click(screen.getByText("Cloud agent"));
-
-    // Webhook field should appear
-    await waitFor(() => {
-      expect(screen.getByPlaceholderText("https://your-agent.com/webhook")).toBeInTheDocument();
-    });
-
-    // Enter local part and webhook
+    // Enter local part and submit
     await userEvent.type(screen.getByPlaceholderText("support"), "hello");
-    await userEvent.type(
-      screen.getByPlaceholderText("https://your-agent.com/webhook"),
-      "https://hook.newco.com/inbox",
-    );
-    fireEvent.click(screen.getByText("Create agent"));
+    fireEvent.click(screen.getByText("Create inbox"));
 
-    // Should show cloud success
+    // Should show success
     await waitFor(() => {
-      expect(screen.getByText("Agent registered!")).toBeInTheDocument();
+      expect(screen.getByText("Inbox created!")).toBeInTheDocument();
     });
     expect(screen.getByText("Connect your agent")).toBeInTheDocument();
-    expect(screen.getByText("https://hook.newco.com/inbox")).toBeInTheDocument();
   });
 });
 
@@ -660,16 +518,15 @@ describe("Custom-domain flow: existing verified domain -> create agent directly"
 
     // Should jump straight to agent creation
     await waitFor(() => {
-      expect(screen.getByText("Create your agent")).toBeInTheDocument();
+      expect(screen.getByText("Create your inbox")).toBeInTheDocument();
     });
-    expect(screen.getByText("Delivery mode")).toBeInTheDocument();
 
     // Create agent
     await userEvent.type(screen.getByPlaceholderText("support"), "bot");
-    fireEvent.click(screen.getByText("Create agent"));
+    fireEvent.click(screen.getByText("Create inbox"));
 
     await waitFor(() => {
-      expect(screen.getByText("Agent registered!")).toBeInTheDocument();
+      expect(screen.getByText("Inbox created!")).toBeInTheDocument();
     });
   });
 });
@@ -712,9 +569,8 @@ describe("Custom-domain flow: existing unverified domain -> resume verify", () =
 
     // Should advance to agent creation
     await waitFor(() => {
-      expect(screen.getByText("Create your agent")).toBeInTheDocument();
+      expect(screen.getByText("Create your inbox")).toBeInTheDocument();
     });
-    expect(screen.getByText("Delivery mode")).toBeInTheDocument();
   });
 });
 
@@ -887,7 +743,7 @@ describe("URL-driven step navigation", () => {
     setSearchParams({ step: "shared_form" });
     mockFreshUser();
     render(<GetStartedPage />);
-    expect(screen.getByText("Create your agent")).toBeInTheDocument();
+    expect(screen.getByText("Create your inbox")).toBeInTheDocument();
   });
 
   it("?step=custom_checklist renders the checklist directly", async () => {
@@ -905,7 +761,7 @@ describe("URL-driven step navigation", () => {
     setSearchParams({ step: "shared_form" });
     mockFreshUser();
     render(<GetStartedPage />);
-    await screen.findByText("Create your agent");
+    await screen.findByText("Create your inbox");
 
     fireEvent.click(screen.getByRole("button", { name: /back/i }));
 

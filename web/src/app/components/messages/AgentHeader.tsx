@@ -14,7 +14,6 @@ import { Chip } from "../loft/Chip";
 import { Dot } from "../loft/Dot";
 import { Eyebrow } from "../loft/Eyebrow";
 import { CounterpartyAvatar } from "./CounterpartyAvatar";
-import { formatRelativeAge } from "../../../lib/relativeTime";
 import type { DashboardAgent } from "../types";
 
 export type AgentTab = "messages" | "settings";
@@ -39,13 +38,6 @@ export function AgentHeader({
   agent: DashboardAgent;
   tab: AgentTab;
 }) {
-  const isCloud = agent.agent_mode !== "local";
-  // Suppress the meta sub-line "last delivery" segment when we have no
-  // timestamp — the shared helper returns "—" which would render as
-  // "· last delivery —", but the design omits the segment entirely.
-  const lastDelivery = agent.last_delivery_at
-    ? formatRelativeAge(agent.last_delivery_at)
-    : null;
   const emailQs = encodeURIComponent(agent.email);
 
   return (
@@ -59,7 +51,7 @@ export function AgentHeader({
       {/* Identity row */}
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 mb-3">
         <div className="min-w-0 flex-1">
-          <Eyebrow>Agent</Eyebrow>
+          <Eyebrow>Inbox</Eyebrow>
           <div className="flex items-center gap-3 mt-2 mb-1.5 flex-wrap">
             <CounterpartyAvatar email={agent.email} name={agent.name} size={28} />
             <h1
@@ -97,10 +89,6 @@ export function AgentHeader({
                 <Dot tone="warn" /> Unverified
               </Chip>
             )}
-            <Chip tone="neutral" mono>
-              {isCloud ? "Cloud" : "Local"}
-            </Chip>
-            {agent.hitl_enabled && <Chip tone="accent">HITL on</Chip>}
           </div>
           <div
             style={{
@@ -114,13 +102,6 @@ export function AgentHeader({
               month: "short",
               day: "numeric",
             })}
-            {agent.webhook_url && (
-              <>
-                {" · webhook "}
-                <span style={{ color: "var(--fg-muted)" }}>{agent.webhook_url}</span>
-              </>
-            )}
-            {lastDelivery && <> · last delivery {lastDelivery}</>}
           </div>
         </div>
       </div>
