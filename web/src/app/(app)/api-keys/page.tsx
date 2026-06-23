@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import type { APIKeyData } from "../../components/types";
+import { useAgents } from "../../components/hooks/useAgents";
 import { PageShell } from "../../components/loft/PageShell";
 import { Chip } from "../../components/loft/Chip";
 
@@ -10,9 +11,6 @@ type SortKey = "last_used" | "created" | "name";
 function isExpired(k: APIKeyData): boolean {
   return !!k.expires_at && new Date(k.expires_at).getTime() < Date.now();
 }
-
-// "Scopes" column intentionally omitted — keys are full-power workspace
-// keys today. Tracked as a deferred follow-up in the issue tracker.
 
 // formatRelative renders a "X ago" string for the Last used cell. Tight
 // here because the column needs to read at-a-glance on a wide table —
@@ -59,14 +57,20 @@ export default function APIKeysPage() {
   const [newKeyName, setNewKeyName] = useState("");
   const [creating, setCreating] = useState(false);
   const [createdKey, setCreatedKey] = useState<APIKeyData | null>(null);
+  const [createError, setCreateError] = useState("");
   const [sort, setSort] = useState<SortKey>("last_used");
   // expiresIn: "never" or a number of days from now. The backend
-  // accepts an RFC 3339 timestamp on POST /api/keys; we compute the
-  // absolute time from this relative choice at submit. Custom dates
+  // accepts an RFC 3339 timestamp on POST /v1/account/api-keys; we compute
+  // the absolute time from this relative choice at submit. Custom dates
   // are deferred — the four presets cover the bulk of real workflows.
   const [expiresIn, setExpiresIn] = useState<"never" | "30" | "90" | "365">(
     "never",
   );
+  // Credential scope: "account" (workspace admin, default) or "agent"
+  // (bound to a single inbox). When "agent", agentEmail names the inbox.
+  const [scope, setScope] = useState<"account" | "agent">("account");
+  const [agentEmail, setAgentEmail] = useState("");
+  const { agents } = useAgents();
 
   const sortedKeys = useMemo(() => {
     const arr = [...keys];
@@ -101,8 +105,11 @@ export default function APIKeysPage() {
 
   const fetchKeys = useCallback(async () => {
     try {
-      const res = await fetch("/api/keys", { credentials: "include" });
-      if (res.ok) setKeys(await res.json());
+      const res = await fetch("/v1/account/api-keys", { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        setKeys(data.items ?? []);
+      }
     } finally {
       setLoading(false);
     }
@@ -114,16 +121,24 @@ export default function APIKeysPage() {
 
   const handleCreate = async () => {
     setCreating(true);
+    setCreateError("");
     try {
-      const body: { name: string; expires_at?: string } = {
-        name: newKeyName || "Default",
-      };
+      const body: {
+        name: string;
+        expires_at?: string;
+        scope?: string;
+        agent?: string;
+      } = { name: newKeyName || "Default" };
       if (expiresIn !== "never") {
         const days = Number(expiresIn);
         const exp = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
         body.expires_at = exp.toISOString();
       }
-      const res = await fetch("/api/keys", {
+      if (scope === "agent" && agentEmail) {
+        body.scope = "agent";
+        body.agent = agentEmail;
+      }
+      const res = await fetch("/v1/account/api-keys", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -134,8 +149,15 @@ export default function APIKeysPage() {
         setCreatedKey(key);
         setNewKeyName("");
         setExpiresIn("never");
+        setScope("account");
+        setAgentEmail("");
         fetchKeys();
+      } else {
+        const msg = await res.text();
+        setCreateError(msg || `Could not create the key (HTTP ${res.status}).`);
       }
+    } catch {
+      setCreateError("Network error — check your connection and try again.");
     } finally {
       setCreating(false);
     }
@@ -148,7 +170,7 @@ export default function APIKeysPage() {
       )
     )
       return;
-    const res = await fetch(`/api/keys/${id}`, {
+    const res = await fetch(`/v1/account/api-keys/${id}`, {
       method: "DELETE",
       credentials: "include",
     });
@@ -195,6 +217,20 @@ export default function APIKeysPage() {
         </div>
       )}
 
+      {createError && (
+        <div
+          className="mb-6 p-3 text-[13px]"
+          style={{
+            background: "var(--danger-bg)",
+            color: "var(--danger-strong)",
+            border: "1px solid var(--danger-bg)",
+            borderRadius: "var(--r-md)",
+          }}
+        >
+          {createError}
+        </div>
+      )}
+
       {/* Create form. Stacks vertically on phones (single column),
           breaks into a row at md+ where name takes the leftover space
           and the select + button trail. */}
@@ -222,6 +258,65 @@ export default function APIKeysPage() {
             }}
           />
         </div>
+        <div className="md:min-w-[150px]">
+          <label
+            htmlFor="apikey-scope"
+            className="block text-[12px] font-medium mb-1"
+            style={{ color: "var(--fg-muted)" }}
+          >
+            Scope
+          </label>
+          <select
+            id="apikey-scope"
+            value={scope}
+            onChange={(e) => setScope(e.target.value as "account" | "agent")}
+            className="w-full px-3 py-2 text-[13px] cursor-pointer"
+            style={{
+              background: "var(--bg-panel)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--r-md)",
+              color: "var(--fg)",
+            }}
+          >
+            <option value="account">Account (admin)</option>
+            <option value="agent">Single inbox</option>
+          </select>
+        </div>
+        {scope === "agent" && (
+          <div className="md:min-w-[190px]">
+            <label
+              htmlFor="apikey-agent"
+              className="block text-[12px] font-medium mb-1"
+              style={{ color: "var(--fg-muted)" }}
+            >
+              Inbox
+            </label>
+            <select
+              id="apikey-agent"
+              value={agentEmail}
+              onChange={(e) => setAgentEmail(e.target.value)}
+              className="w-full px-3 py-2 text-[13px] cursor-pointer"
+              style={{
+                background: "var(--bg-panel)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--r-md)",
+                color: "var(--fg)",
+              }}
+            >
+              <option value="">Select an inbox…</option>
+              {agents.map((a) => (
+                <option key={a.id} value={a.email}>
+                  {a.email}
+                </option>
+              ))}
+            </select>
+            {agents.length === 0 && (
+              <p className="mt-1 text-[11px]" style={{ color: "var(--fg-subtle)" }}>
+                No inboxes yet — create one first.
+              </p>
+            )}
+          </div>
+        )}
         <div className="md:min-w-[140px]">
           <label
             htmlFor="apikey-expires"
@@ -254,7 +349,7 @@ export default function APIKeysPage() {
         </div>
         <button
           onClick={handleCreate}
-          disabled={creating}
+          disabled={creating || (scope === "agent" && !agentEmail)}
           className="w-full md:w-auto px-4 py-2 text-[13px] font-medium transition disabled:opacity-50"
           style={{
             background: "var(--accent-fill)",
@@ -335,6 +430,7 @@ export default function APIKeysPage() {
                 >
                   <th className="px-4 py-2.5 font-semibold">Name</th>
                   <th className="px-4 py-2.5 font-semibold">Prefix</th>
+                  <th className="px-4 py-2.5 font-semibold">Scope</th>
                   <th className="px-4 py-2.5 font-semibold">Created</th>
                   <th className="px-4 py-2.5 font-semibold">Last used</th>
                   <th className="px-4 py-2.5 font-semibold">Expires</th>
@@ -357,6 +453,15 @@ export default function APIKeysPage() {
                   </td>
                   <td className="px-4 py-3">
                     <Chip mono>{k.key_prefix}...</Chip>
+                  </td>
+                  <td className="px-4 py-3">
+                    {k.scope === "agent" ? (
+                      <Chip tone="accent" mono>
+                        {k.agent || "agent"}
+                      </Chip>
+                    ) : (
+                      <span style={{ color: "var(--fg-muted)" }}>Account</span>
+                    )}
                   </td>
                   <td
                     className="px-4 py-3 font-mono text-[12px]"

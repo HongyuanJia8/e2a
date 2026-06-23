@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "../../../test-utils/swr";
 import userEvent from "@testing-library/user-event";
 import APIKeysPage from "./page";
 
@@ -30,31 +30,37 @@ beforeEach(() => {
 // stageList mounts the page with a known initial list-keys response.
 // Returns the recorded fetch call list so individual tests can assert
 // on POST body shapes after a Create.
-function stageList(initial: unknown[] = []) {
+function stageList(initial: unknown[] = [], agentsList: unknown[] = []) {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   mockFetch.mockImplementation((url: string, init?: RequestInit) => {
     calls.push({ url, init });
-    if (url === "/api/keys" && (!init || !init.method || init.method === "GET")) {
+    if (url === "/v1/account/api-keys" && (!init || !init.method || init.method === "GET")) {
       return Promise.resolve({
         ok: true,
-        json: () => Promise.resolve(initial),
+        json: () => Promise.resolve({ items: initial }),
       });
     }
-    if (url === "/api/keys" && init?.method === "POST") {
+    if (url === "/v1/account/api-keys" && init?.method === "POST") {
       const body = JSON.parse(init.body as string);
       return Promise.resolve({
         ok: true,
+        status: 201,
         json: () =>
           Promise.resolve({
             id: "apk_new",
-            user_id: "usr",
             name: body.name,
             key_prefix: "e2a_abcd",
             key: "e2a_abcd_PLAINTEXT",
+            scope: body.scope ?? "account",
+            agent: body.agent,
             created_at: new Date().toISOString(),
             expires_at: body.expires_at ?? null,
           }),
       });
+    }
+    // useAgents() fetches the inbox list for the agent-scope dropdown.
+    if (url === "/v1/agents") {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: agentsList }) });
     }
     return Promise.resolve({
       ok: false,
@@ -68,7 +74,7 @@ function stageList(initial: unknown[] = []) {
 function lastCreateBody(calls: Array<{ url: string; init?: RequestInit }>) {
   const create = [...calls]
     .reverse()
-    .find((c) => c.url === "/api/keys" && c.init?.method === "POST");
+    .find((c) => c.url === "/v1/account/api-keys" && c.init?.method === "POST");
   return create ? JSON.parse(create.init!.body as string) : null;
 }
 
@@ -159,10 +165,10 @@ describe("API keys table — Expires column", () => {
 
   it("renders 'Never' for keys with no expires_at", async () => {
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
-      if (url === "/api/keys" && (!init || !init.method)) {
+      if (url === "/v1/account/api-keys" && (!init || !init.method)) {
         return Promise.resolve({
           ok: true,
-          json: async () => [{ ...baseKey, expires_at: null }],
+          json: async () => ({ items: [{ ...baseKey, expires_at: null }] }),
         });
       }
       return Promise.resolve({
@@ -184,10 +190,10 @@ describe("API keys table — Expires column", () => {
       Date.now() + 12 * 24 * 60 * 60 * 1000 + 60 * 60 * 1000,
     ).toISOString();
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
-      if (url === "/api/keys" && (!init || !init.method)) {
+      if (url === "/v1/account/api-keys" && (!init || !init.method)) {
         return Promise.resolve({
           ok: true,
-          json: async () => [{ ...baseKey, expires_at: future }],
+          json: async () => ({ items: [{ ...baseKey, expires_at: future }] }),
         });
       }
       return Promise.resolve({ ok: false, text: async () => "" });
@@ -200,10 +206,10 @@ describe("API keys table — Expires column", () => {
   it("renders 'expired' for past expires_at", async () => {
     const past = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
-      if (url === "/api/keys" && (!init || !init.method)) {
+      if (url === "/v1/account/api-keys" && (!init || !init.method)) {
         return Promise.resolve({
           ok: true,
-          json: async () => [{ ...baseKey, expires_at: past }],
+          json: async () => ({ items: [{ ...baseKey, expires_at: past }] }),
         });
       }
       return Promise.resolve({ ok: false, text: async () => "" });
@@ -211,5 +217,88 @@ describe("API keys table — Expires column", () => {
     render(<APIKeysPage />);
     await screen.findByText("ci-token");
     expect(screen.getByText("expired")).toBeInTheDocument();
+  });
+});
+
+describe("API keys — agent scope", () => {
+  const inbox = {
+    id: "support@acme.io",
+    domain: "acme.io",
+    email: "support@acme.io",
+    name: "Support",
+    domain_verified: true,
+    created_at: "2026-04-01T10:00:00Z",
+  };
+
+  it("create stays disabled until an inbox is picked, then enables", async () => {
+    stageList([], [inbox]);
+    render(<APIKeysPage />);
+    await screen.findByText(/No API keys yet/i);
+
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText(/^Scope$/i), "agent");
+    expect(
+      screen.getByRole("button", { name: /^create key$/i }),
+    ).toBeDisabled();
+
+    await screen.findByRole("option", { name: "support@acme.io" });
+    await user.selectOptions(screen.getByLabelText(/^Inbox$/i), "support@acme.io");
+    expect(
+      screen.getByRole("button", { name: /^create key$/i }),
+    ).toBeEnabled();
+  });
+
+  it("POSTs scope=agent + agent=<email> when an inbox is selected", async () => {
+    const calls = stageList([], [inbox]);
+    render(<APIKeysPage />);
+    await screen.findByText(/No API keys yet/i);
+
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText(/^Scope$/i), "agent");
+    await screen.findByRole("option", { name: "support@acme.io" });
+    await user.selectOptions(screen.getByLabelText(/^Inbox$/i), "support@acme.io");
+    await user.click(screen.getByRole("button", { name: /^create key$/i }));
+
+    await waitFor(() => {
+      const body = lastCreateBody(calls);
+      expect(body).not.toBeNull();
+      expect(body.scope).toBe("agent");
+      expect(body.agent).toBe("support@acme.io");
+    });
+  });
+
+  it("hints to create an inbox first when agent scope is picked with no inboxes", async () => {
+    stageList([], []);
+    render(<APIKeysPage />);
+    await screen.findByText(/No API keys yet/i);
+
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText(/^Scope$/i), "agent");
+    expect(await screen.findByText(/No inboxes yet/i)).toBeInTheDocument();
+  });
+
+  it("renders the Scope column: Account vs the bound inbox", async () => {
+    stageList([
+      {
+        id: "apk_a",
+        name: "admin",
+        key_prefix: "e2a_acct_x",
+        scope: "account",
+        created_at: "2026-04-01T10:00:00Z",
+      },
+      {
+        id: "apk_b",
+        name: "bot",
+        key_prefix: "e2a_agt_x",
+        scope: "agent",
+        agent: "bot@acme.io",
+        created_at: "2026-04-01T10:00:00Z",
+      },
+    ]);
+    render(<APIKeysPage />);
+    await screen.findByText("admin");
+    // Account-scoped row → "Account" cell; agent-scoped row → the bound inbox.
+    expect(screen.getByText("Account")).toBeInTheDocument();
+    expect(screen.getByText("bot@acme.io")).toBeInTheDocument();
   });
 });
