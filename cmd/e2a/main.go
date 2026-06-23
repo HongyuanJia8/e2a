@@ -330,7 +330,7 @@ func main() {
 		log.Printf("[oauth] provider enabled: issuer=%s", cfg.HTTP.PublicURL)
 	}
 
-	// Idempotency-Key support on /api/v1/send and /api/v1/agents/{email}/messages/{id}/reply.
+	// Idempotency-Key support on POST /v1/agents/{email}/messages (send) and .../reply.
 	// Replays the cached response on retry; closes the double-send window for callers
 	// behind at-least-once delivery (job queues, agent frameworks that retry tool calls,
 	// model-driven re-invocations). Always wired in production — keeping it optional in
@@ -410,9 +410,9 @@ func main() {
 	// v1 contract layer (api-v1-redesign Slice 1). The new chi + Huma surface
 	// owns the `/v1` prefix (OpenAPI-as-source-of-truth, standardized error
 	// envelope + cursor pagination + X-Request-Id), and falls back to the
-	// legacy gorilla/mux handlers for every route not yet ported (the
-	// strangler). Legacy `/api/v1` routes are deleted as each resource lands
-	// on Huma, within this same PR. The chi root is the process HTTP handler.
+	// legacy gorilla/mux for the remaining non-v1 routes (OAuth, session auth,
+	// health/feedback, magic-link pages). The `/api/v1` surface is fully retired.
+	// The chi root is the process HTTP handler.
 	v1 := apiserver.New(apiserver.Params{
 		API:             api,
 		Store:           store,
@@ -506,9 +506,9 @@ func main() {
 		outboxWorker.Start(subRetryCtx)
 	}()
 
-	// HITL expiration worker: transitions pending_approval messages that
-	// blew past their TTL into expired_approved (auto-send) or
-	// expired_rejected based on the owning agent's hitl_expiration_action.
+	// HITL expiration worker: transitions pending_review messages that
+	// blew past their TTL into review_expired_approved (auto-send/release) or
+	// review_expired_rejected based on the owning agent's hitl_expiration_action.
 	hitlWorker := hitlworker.New(store, sender, usageTracker, cfg.OutboundSMTP.FromDomain)
 	// Fire review_approved/review_rejected on TTL auto-resolution, so a hold
 	// resolved by timeout notifies subscribers exactly like a human-resolved one

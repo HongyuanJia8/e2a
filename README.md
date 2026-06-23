@@ -90,7 +90,7 @@ Save the key — it's only shown once. Register an agent and confirm it works:
 KEY=e2a_...
 curl -X POST http://localhost:8080/v1/agents \
   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-  -d '{"slug":"my-bot","agent_mode":"local"}'
+  -d '{"email":"my-bot@agents.e2a.dev"}'   # an email on the deployment shared domain (or a domain you've verified)
 
 curl -H "Authorization: Bearer $KEY" http://localhost:8080/v1/agents
 ```
@@ -111,16 +111,16 @@ Then register and verify the domain through the API (see [Domains](#domains)). W
 
 ## Concepts
 
-### Agent modes
+### Delivery channels
 
-Agents operate in one of two modes, set via `agent_mode` at registration:
+Inbound mail reaches you two complementary ways — chosen per integration, not set on the agent:
 
-| Mode | Delivery | Public URL needed? |
-|------|----------|---------------------|
-| `cloud` (default) | HTTPS webhook POST to `webhook_url` | Yes |
-| `local` | WebSocket notification + REST fetch | No |
+| Channel | How | Public URL needed? |
+|---------|-----|---------------------|
+| **Webhooks** | Account-level subscriptions (`POST /v1/webhooks`) — HTTPS POST per event, filterable by agent / conversation / event type | Yes |
+| **WebSocket** | Per-agent real-time notification stream (`/v1/agents/{address}/ws`) + REST fetch | No |
 
-Local-mode agents accumulate "unread" messages while disconnected; on reconnect, the server drains them as WebSocket notifications. Both modes can also poll messages via the REST API.
+A disconnected WebSocket client accumulates "unread" messages; on reconnect, the server drains them as notifications. Either channel can also poll messages via the REST API. (The old per-agent `agent_mode` / `webhook_url` fields were removed — webhooks are their own resource now.)
 
 ### Auth headers
 
@@ -185,21 +185,20 @@ First contact from a human arrives with `conversation_id: null` — the agent sh
 
 ### Human in the loop (HITL)
 
-When an agent has HITL enabled, outbound `send` and `reply` calls do **not** dispatch immediately. The message is stored with status `pending_approval` and the API returns HTTP `202 Accepted`. A reviewer must approve it before delivery; otherwise, after a configurable TTL, the message expires into `expired_approved` (auto-sent) or `expired_rejected` (discarded), depending on the agent's `hitl_expiration_action`.
+When an agent's protection config holds an outbound message for review, `send` and `reply` calls do **not** dispatch immediately. The message is stored with status `pending_review` and the API returns HTTP `202 Accepted`. A reviewer must approve it before delivery; otherwise, after a configurable TTL, the agent's `hitl_expiration_action` decides the terminal: auto-send (the message just goes out, terminal status `sent` — for outbound, approving *is* sending) or discard (`review_expired_rejected`). (Inbound messages can be held for review too — there, the auto-approve terminal is `review_expired_approved`, releasing the message to the inbox.)
 
 Reviewers can approve or reject via:
 
 - **Dashboard / API** — `POST /v1/agents/{address}/messages/{id}/approve` or `/reject`
-- **Magic-link email** — sent automatically when HITL fires; one-click `GET /v1/approve?t=…` and `/v1/reject?t=…` URLs (requires `E2A_PUBLIC_URL` and outbound SMTP configured)
-- **CLI** — `e2a pending` lists held messages
+- **Magic-link email** — sent automatically when a hold fires; one-click `GET /v1/approve?t=…` and `/v1/reject?t=…` URLs (requires `E2A_PUBLIC_URL` and outbound SMTP configured)
 
-Enable HITL on an agent via `PATCH /v1/agents/{address}` with `hitl_enabled: true` and an optional `hitl_expiration_action` and TTL.
+Enable review holds on an agent via `PUT /v1/agents/{address}/protection`: set the outbound gate action to `review` (or turn on the content scan), plus the hold TTL and `hitl_expiration_action`. (The old `hitl_enabled`/`hitl_mode` flags were retired in the screening cutover.)
 
 ## API
 
 All endpoints are under `/v1` unless noted. Auth is `Authorization: Bearer <api_key>` except for `/api/health`, `/v1/info`, `/api/feedback`, and the HITL magic-link routes. Path parameters containing `@` (agent emails) must be URL-encoded.
 
-The surface covers domain registration + verification, agent CRUD, inbound/outbound messages, HITL approve/reject (API key or signed magic-link token), GDPR-style export and deletion, and a WebSocket channel for local-mode agents.
+The surface covers domain registration + verification, agent CRUD, inbound/outbound messages, HITL approve/reject (API key or signed magic-link token), GDPR-style export and deletion, and a WebSocket channel for real-time inbound delivery.
 
 See [docs/api.md](docs/api.md) for the full endpoint reference, or [`api/openapi.yaml`](api/openapi.yaml) for the machine-readable spec.
 
@@ -319,7 +318,7 @@ Four things that aren't possible to bolt on without significant rework:
 
 3. **Slug provisioning on a shared domain.** Operators set `shared_domain: agents.e2a.dev` and users `POST {"slug": "my-agent"}` to immediately get `my-agent@agents.e2a.dev` with no DNS configuration. Possible because e2a *is* the SMTP relay claiming the domain — Resend / SendGrid are providers, not platforms, and can't multi-tenant a shared address space without you running the relay yourself.
 
-4. **Built-in HITL hold + auto-expiration.** A per-agent `hitl_enabled` flag holds outbound mail in `pending_approval` state. Reviewers approve via dashboard, magic-link email, or CLI; a background worker auto-acts on expired holds based on `hitl_expiration_action` config. Magic-link tokens are HMAC-encoded — stateless, no session backend. With Resend / SendGrid you'd hold the message in your own DB, build the timer, the approval UI, and the stateless review tokens.
+4. **Built-in review hold + auto-expiration.** A per-agent protection policy (outbound gate action `review`, or the content scan) holds mail in `pending_review` state. Reviewers approve via dashboard, magic-link email, or CLI; a background worker auto-acts on expired holds based on `hitl_expiration_action` config. Magic-link tokens are HMAC-encoded — stateless, no session backend. With Resend / SendGrid you'd hold the message in your own DB, build the timer, the approval UI, and the stateless review tokens.
 
 You can absolutely use SES / Resend / SendGrid as e2a's *outbound* SMTP for delivery to humans — that's what `outbound_smtp` in `config.yaml` is for. They complement e2a; they don't replace the inbound receiver, agent abstraction, or any of the layers above transport.
 

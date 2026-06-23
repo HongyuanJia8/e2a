@@ -22,7 +22,7 @@ make migrate            # apply SQL migrations to local DB
 
 Go tests that need the database use `E2A_TEST_DATABASE_URL="postgres://e2a:e2a@localhost:5433/e2a_test?sslmode=disable"`.
 
-**Outbound mail in dev (Mailpit catch-all).** `make docker-up` also starts [Mailpit](https://github.com/axllent/mailpit) — a single-binary SMTP server that captures every outbound message and exposes them at http://localhost:8025. The dockerized `e2a` service points at it automatically. For `make run` (host Go binary), uncomment the Mailpit block in `config.example.yaml`'s `outbound_smtp` section before copying to `config.yaml`, or set `E2A_OUTBOUND_SMTP_HOST=localhost`, `E2A_OUTBOUND_SMTP_PORT=1025`, `E2A_OUTBOUND_SMTP_FROM_DOMAIN=e2a.localhost`. Use this to exercise HITL approval notifications and the `/api/v1/agents/{email}/test` button locally without real SMTP creds.
+**Outbound mail in dev (Mailpit catch-all).** `make docker-up` also starts [Mailpit](https://github.com/axllent/mailpit) — a single-binary SMTP server that captures every outbound message and exposes them at http://localhost:8025. The dockerized `e2a` service points at it automatically. For `make run` (host Go binary), uncomment the Mailpit block in `config.example.yaml`'s `outbound_smtp` section before copying to `config.yaml`, or set `E2A_OUTBOUND_SMTP_HOST=localhost`, `E2A_OUTBOUND_SMTP_PORT=1025`, `E2A_OUTBOUND_SMTP_FROM_DOMAIN=e2a.localhost`. Use this to exercise HITL approval notifications and the `/v1/agents/{email}/test` button locally without real SMTP creds.
 
 ### TypeScript SDK & CLI (npm workspaces)
 ```bash
@@ -59,7 +59,7 @@ make generate-sdk   # regenerate the TS + Python SDK bases from api/openapi.yaml
 make generate       # both of the above
 ```
 
-After changing a `/v1` handler, run `make generate` and commit the regenerated `api/openapi.yaml` plus the SDK bases in `sdks/typescript/src/v1/generated/` and `sdks/python/src/e2a/v1/generated/`. CI (`spec-check` + `generate-sdk-check`) fails if either is stale. (`make swagger` regenerates the legacy `web/public/openapi.yaml` for the dashboard's API-reference page only; it no longer feeds the SDKs.)
+After changing a `/v1` handler, run `make generate` and commit the regenerated `api/openapi.yaml` plus the SDK bases in `sdks/typescript/src/v1/generated/` and `sdks/python/src/e2a/v1/generated/`. CI (`spec-check` + `generate-sdk-check`) fails if either is stale. (The legacy swag pipeline is gone — `web/public/openapi.yaml` is a frozen copy for the dashboard's API-reference page only and no longer feeds the SDKs.)
 
 ## Architecture
 
@@ -108,10 +108,10 @@ ergonomic layer (`client.ts` / `client.py` etc.) wired up via
 `.openapi-generator-ignore`. Regenerate + commit the `generated/` trees after
 any `/v1` handler change.
 
-The old swag-annotation pipeline (`make swagger` → `web/public/openapi.yaml`,
-Swagger 2.0) no longer feeds the SDKs and is unwired from `make generate`.
-`web/public/openapi.yaml` is retained only because the dashboard's API-reference
-page (`web/public/scalar.html`) renders it; it is frozen and not CI-checked.
+The old swag-annotation pipeline was fully retired (the `make swagger` target and
+its `internal/agent/api_docs.go` source are gone). `web/public/openapi.yaml` is
+retained only because the dashboard's API-reference page
+(`web/public/scalar.html`) renders it; it is a frozen copy and not CI-checked.
 
 ### TypeScript SDK (`sdks/typescript/`)
 
@@ -119,7 +119,7 @@ Layered: generated types → `E2AApi` (raw HTTP) → `E2AClient` (high-level wit
 
 ### CLI (`cli/`)
 
-Commands: login, agents, domains, inbox, read, reply, send, listen, config. Config stored in `~/.e2a/config.json`. The `listen` command supports `--forward` mode for proxying WebSocket messages to local HTTP endpoints.
+Commands: login, listen, config. Config stored in `~/.e2a/config.json`. The `listen` command supports `--forward` mode for proxying WebSocket messages to local HTTP endpoints.
 
 ### Web (`web/`)
 

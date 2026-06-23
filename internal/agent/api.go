@@ -168,7 +168,7 @@ type API struct {
 	// See config.Config.SharedDomain for the rationale.
 	sharedDomain string
 	// publicURL is the externally visible base URL of the API. Surfaced
-	// via GET /api/v1/info so CLI/SDK clients can populate absolute
+	// via GET /v1/info so CLI/SDK clients can populate absolute
 	// links without each user configuring it. Empty when the operator
 	// hasn't set http.public_url.
 	publicURL         string
@@ -201,22 +201,22 @@ type API struct {
 	// configured (the orphan reaper is the backstop either way).
 	domainTeardownHook func(ctx context.Context, tx pgx.Tx, domain string) error
 
-	// publisher routes email.sent / email.pending_approval /
-	// email.approved / email.rejected events to the webhooks
+	// publisher routes email.sent / email.pending_review /
+	// email.review_approved / email.review_rejected events to the webhooks
 	// resource — the sole push path since the legacy per-agent
 	// webhook_url was removed in slice 3. Optional — when nil, the
 	// trigger sites silently skip the publish step.
 	publisher webhookpub.Publisher
 	// outbox is the slice-4 transactional publisher for outbound
 	// events. When wired AND its FeatureFlag is enabled, post-side-
-	// effect events (email.sent, email.approved) fire via
+	// effect events (email.sent, email.review_approved) fire via
 	// PublishBestEffortTx so the outbox write never rolls back the
 	// already-committed SES.Send. Pre-side-effect HITL events stay on
 	// the legacy `go publisher.Publish` path per the §5.12 design
 	// limitation ("if we have it, keep it").
 	outbox webhookpub.Outbox
 	// eventsPool is the raw pgxpool used by the slice-6 events API.
-	// Optional — when nil, GET/POST /api/v1/events return 404.
+	// Optional — when nil, GET/POST /v1/events return 404.
 	eventsPool *pgxpool.Pool
 	// metrics is the slice 10 observability surface. Defaulted to
 	// NoOp; production wires telemetry.Log or a real backend.
@@ -367,7 +367,7 @@ func (a *API) publishPendingApproval(ctx context.Context, e webhookpub.Event, pe
 	}
 }
 
-// publishApproved fires email.approved via the outbox
+// publishApproved fires email.review_approved via the outbox
 // (PublishBestEffortTx — POST-side-effect: SES has already accepted
 // the approved send) AND the legacy goroutine.
 func (a *API) publishApproved(ctx context.Context, e webhookpub.Event, sentMsg *identity.Message) {
@@ -389,7 +389,7 @@ func (a *API) publishApproved(ctx context.Context, e webhookpub.Event, sentMsg *
 	}
 }
 
-// publishRejected fires email.rejected via the outbox (PublishTx —
+// publishRejected fires email.review_rejected via the outbox (PublishTx —
 // pre-side-effect: rejection is a row update, no SES involvement) AND
 // the legacy goroutine.
 func (a *API) publishRejected(ctx context.Context, e webhookpub.Event, rejectedMsgID string) {
@@ -663,7 +663,7 @@ func (a *API) AuthenticatePrincipal(r *http.Request) (*identity.Principal, error
 }
 
 // authenticateUser is the user-only convenience over authenticatePrincipal,
-// retained for the legacy /api/v1 handlers that don't enforce scope.
+// retained for the legacy mux handlers (OAuth / session auth) that do not enforce the v1 scope ceiling.
 func (a *API) authenticateUser(r *http.Request) (*identity.User, error) {
 	p, err := a.authenticatePrincipal(r)
 	if err != nil {
@@ -960,7 +960,7 @@ func checkDomainRecords(domain, smtpDomain, verificationToken, dkimSelector, dki
 }
 
 // holdForApproval persists a fully composed outbound SendRequest as a
-// pending_approval message and writes a 202 response. It is the shared
+// pending_review message and writes a 202 response. It is the shared
 // branch taken by handleSendEmail, handleReplyToMessage, and
 // handleSendTestEmail when outbound screening holds the message for review.
 //
@@ -1224,7 +1224,7 @@ func (a *API) SendTestCore(ctx context.Context, agent *identity.AgentIdentity) (
 
 // --- Send Email ---
 
-// ForwardRequest is the JSON body for /api/v1/agents/{email}/messages/{id}/forward.
+// ForwardRequest is the JSON body for /v1/agents/{email}/messages/{id}/forward.
 type ForwardRequest struct {
 	To             []string              `json:"to"`
 	CC             []string              `json:"cc,omitempty"`
