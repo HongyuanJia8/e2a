@@ -56,7 +56,7 @@ export function ThreadDetail({
 
   const stateChip = STATE_CHIP[thread.state];
   const pendingDraft = thread.messages.find(
-    (m) => m.hitl_status === "pending_approval",
+    (m) => m.review_status === "pending_review",
   );
 
   return (
@@ -174,7 +174,7 @@ export function ThreadDetail({
 
         {pendingDraft && (
           <PendingCallout
-            draftedBy="agent"
+            draftedBy="inbox"
             onReview={() => onOpenMessage(pendingDraft)}
           />
         )}

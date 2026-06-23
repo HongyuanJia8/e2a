@@ -36,17 +36,26 @@ type WebhookView = {
   previous_secret_expires_at?: string;
 };
 
-// The subset of event types a webhook can subscribe to. Mirrors the
-// EventJSON.type enum in api/openapi.yaml.
+// Event types a webhook can subscribe to. Must match the
+// CreateWebhookRequest.events enum in api/openapi.yaml exactly — the
+// server rejects unknown values (additionalProperties:false). The
+// review/screening events (pending_review, review_*, flagged, blocked)
+// are beta. Pre-v1 values (pending_approval/approved/rejected) were
+// dropped when holds unified on pending_review.
 const EVENT_TYPES = [
   "email.received",
   "email.sent",
-  "email.pending_approval",
-  "email.approved",
-  "email.rejected",
   "email.delivered",
   "email.bounced",
   "email.complained",
+  "email.pending_review",
+  "email.review_approved",
+  "email.review_rejected",
+  "email.flagged",
+  "email.blocked",
+  "domain.sending_verified",
+  "domain.sending_failed",
+  "domain.suppression_added",
 ] as const;
 
 // A revealed secret (from a create or a rotate). `kind` drives the
@@ -145,7 +154,7 @@ export default function WebhooksPage() {
         <>
           <span style={{ display: "block" }}>
             <strong style={{ color: "var(--fg)" }}>For webhook delivery.</strong>{" "}
-            When your agent receives mail via a webhook subscription, e2a
+            When your inbox receives mail via a webhook subscription, e2a
             HMAC-signs every payload it POSTs to the endpoint with that
             webhook&apos;s signing secret so your handler can confirm the
             request really came from e2a.
@@ -166,7 +175,7 @@ export default function WebhooksPage() {
               fontSize: 12,
             }}
           >
-            Local-mode agents pull messages via WebSocket and don&apos;t
+            Local-mode inboxes pull messages via WebSocket and don&apos;t
             need this — the WS auth handshake covers it.
           </span>
         </>

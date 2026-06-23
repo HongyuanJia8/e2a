@@ -21,7 +21,7 @@ export type DashboardAgent = {
 };
 
 // Aggregated client-side from `GET /v1/agents/{address}/messages?
-// direction=outbound` rows whose status === "pending_approval".
+// direction=outbound` rows whose review_status === "pending_review".
 // `/v1` has no cross-account pending endpoint, so the pending page
 // fans out over the account's agents and tags each row with the
 // owning agent's address (`agent_email`) — needed to drive the
@@ -78,9 +78,11 @@ export type PendingMessageInboundContext = {
 };
 
 // MessageSummaryView from `GET /v1/agents/{address}/messages`
-// (PageMessageSummaryView.items). `status` carries the lifecycle value:
-// for inbound rows "unread" | "read"; for outbound rows the HITL
-// lifecycle (sent | pending_approval | rejected | expired_*). The
+// (PageMessageSummaryView.items). v1 splits state into `delivery_status`
+// (the delivery rollup) and `review_status` (the review/HITL lifecycle:
+// pending_review | sent | review_rejected | review_expired_approved |
+// review_expired_rejected). The projection in api.ts maps those onto the
+// app's `status` (delivery) + `review_status` (review) fields below. The
 // dashboard inbox uses this projection directly.
 export type MessageSummary = {
   message_id: string;
@@ -92,11 +94,15 @@ export type MessageSummary = {
   recipient: string;
   subject: string;
   conversation_id?: string;
-  // Lifecycle status. Inbound: "unread" | "read". Outbound HITL:
-  // sent | pending_approval | rejected | expired_*.
+  // Delivery rollup (from v1 delivery_status): queued | sent | delivered
+  // | bounced | complained | deferred | failed. Empty on a held draft.
   status: string;
-  // Outbound HITL lifecycle (mirrors `status` on outbound rows).
-  hitl_status?: string;
+  // Review lifecycle (from v1 review_status): pending_review | sent |
+  // review_rejected | review_expired_approved | review_expired_rejected.
+  review_status?: string;
+  // Inbound read state (from v1 read_status): "unread" | "read". Empty on
+  // outbound rows. Drives the inbox's unread/bold affordance.
+  read_status?: string;
   // Outbound webhook delivery state.
   webhook_status?: string;
   webhook_error?: string;
@@ -185,7 +191,7 @@ export type UpdateDomainRequest = {
   is_primary?: boolean;
 };
 
-// Request body for POST /api/keys. expires_at is an RFC 3339
+// Request body for POST /v1/account/api-keys. expires_at is an RFC 3339
 // timestamp; omit or null to issue a never-expiring key.
 export type CreateAPIKeyRequest = {
   name: string;
