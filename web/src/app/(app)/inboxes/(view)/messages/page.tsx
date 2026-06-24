@@ -117,7 +117,10 @@ function AgentInboxContent() {
 
   const selectThread = (key: string) => {
     if (typeof window !== "undefined") {
-      window.history.replaceState(null, "", `#${key}`);
+      // pushState (not replace) so opening a conversation adds a history
+      // entry — the browser Back button then returns to the thread list
+      // instead of skipping it and jumping to the top-level inbox list.
+      window.history.pushState(null, "", `#${key}`);
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     }
   };
@@ -142,7 +145,7 @@ function AgentInboxContent() {
   const focusUrl = (m: MessageSummary, withHeaders: boolean) => {
     const pending = m.review_status === "pending_review" ? "&pending=1" : "";
     return (
-      `/dashboard/agents/messages/view?email=${encodeURIComponent(email)}` +
+      `/inboxes/messages/view?email=${encodeURIComponent(email)}` +
       `&id=${encodeURIComponent(m.message_id)}` +
       `&direction=${m.direction}${pending}` +
       (withHeaders ? "&headers=1" : "")

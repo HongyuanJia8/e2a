@@ -2,19 +2,20 @@
 //
 // Covers: required-param error, agent fetch, the three section
 // editors (mode switch / webhook URL / HITL) wire up to PUT
-// /api/dashboard/agents/{email}, and the danger-zone delete confirm
+// /api/inboxes/{email}, and the danger-zone delete confirm
 // flow (DELETE /v1/agents/{email}?confirm=DELETE) routes back to
-// /dashboard on success.
+// /inboxes on success.
 
 import { render, screen, waitFor, fireEvent } from "../../../../../test-utils/swr";
 import AgentSettingsPage from "./page";
 
 const mockUseSearchParams = jest.fn();
 const mockRouterPush = jest.fn();
+const mockRouterReplace = jest.fn();
 
 jest.mock("next/navigation", () => ({
   useSearchParams: () => mockUseSearchParams(),
-  useRouter: () => ({ push: mockRouterPush }),
+  useRouter: () => ({ push: mockRouterPush, replace: mockRouterReplace }),
 }));
 
 jest.mock("next/link", () => {
@@ -86,6 +87,7 @@ function mockAgent(agent: typeof baseAgent) {
 beforeEach(() => {
   mockFetch.mockReset();
   mockRouterPush.mockReset();
+  mockRouterReplace.mockReset();
   jest.spyOn(window, "confirm").mockReturnValue(true);
 });
 
@@ -175,7 +177,7 @@ describe("AgentSettingsPage", () => {
     expect(body.outbound.gate.policy).toBe("open");
   });
 
-  it("clicking 'Delete inbox' DELETEs and routes back to /dashboard", async () => {
+  it("clicking 'Delete inbox' DELETEs and routes back to /inboxes", async () => {
     setSearchParams({ email: baseAgent.email });
     let deleted = false;
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
@@ -206,7 +208,7 @@ describe("AgentSettingsPage", () => {
     await waitFor(() => {
       expect(deleted).toBe(true);
     });
-    expect(mockRouterPush).toHaveBeenCalledWith("/dashboard");
+    expect(mockRouterReplace).toHaveBeenCalledWith("/inboxes");
   });
 
   it("aborts deletion when the confirm prompt is cancelled", async () => {
@@ -240,6 +242,6 @@ describe("AgentSettingsPage", () => {
     // the negative assertion deterministic).
     await new Promise((r) => setTimeout(r, 10));
     expect(deleted).toBe(false);
-    expect(mockRouterPush).not.toHaveBeenCalled();
+    expect(mockRouterReplace).not.toHaveBeenCalled();
   });
 });
