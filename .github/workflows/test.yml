@@ -77,6 +77,51 @@ jobs:
         with:
           config: ./.testcoverage.yml
 
+  go-e2e:
+    name: Go e2e tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: e2a
+          POSTGRES_PASSWORD: e2a
+          POSTGRES_DB: e2a_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U e2a -d e2a_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+      # The e2e suite exercises outbound send/reply, which the relay routes to an
+      # upstream SMTP host. Mailpit (the same catch-all used in local dev via
+      # docker-compose) stands in for SES; the tests point WithOutboundSMTP at
+      # 127.0.0.1:1025.
+      mailpit:
+        image: axllent/mailpit:v1.30.0
+        ports:
+          - 1025:1025
+          - 8025:8025
+        options: >-
+          --health-cmd "wget --quiet --spider http://localhost:8025/api/v1/info || exit 1"
+          --health-interval 5s
+          --health-timeout 2s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache: true
+      # The internal/e2e suite (build tag `integration`) boots the real relay +
+      # HTTP API against the test DB and drives them over SMTP/HTTP. It is NOT
+      # run by `go test ./...` (no build tag) or `make cover` (no build tag) —
+      # this job is its only CI gate.
+      - name: Run e2e suite
+        run: make test-e2e
+
   web:
     name: Web tests
     runs-on: ubuntu-latest
