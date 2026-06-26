@@ -41,13 +41,20 @@ const PURPOSE_META: Record<
 
 // Maps a record purpose onto the matching field of the live verify probe so the
 // probe's found/missing result can be overlaid onto that record's row. Only the
-// inbound + dkim purposes have a live probe; the mail_from records are verified
-// by SES as a unit (surfaced via sending_status), not by this DNS probe.
+// inbound_mx + dkim purposes have a directly comparable live probe; the mail_from
+// records are verified by SES as a unit (surfaced via sending_status), not by
+// this DNS probe.
+//
+// ownership is deliberately NOT mapped: its probe counterpart is the SPF field,
+// which checks for a `v=spf1` record — a SEPARATE, optional TXT from the
+// `e2a-verify=` ownership token. Overlaying it made a verified domain whose owner
+// hadn't published SPF show the ownership row as "Missing". The ownership row now
+// falls back to its server-derived status, which already reflects whether the
+// ownership TXT is present (verified once the domain verifies).
 const PROBE_FIELD_BY_PURPOSE: Partial<
   Record<DNSRecordPurpose, "mx" | "spf" | "dkim">
 > = {
   inbound_mx: "mx",
-  ownership: "spf",
   dkim: "dkim",
 };
 
