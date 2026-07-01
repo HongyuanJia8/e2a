@@ -14,7 +14,9 @@ import (
 )
 
 const (
-	geminiDefaultModel    = "gemini-2.5-flash"
+	// geminiDefaultModel is the most cost/latency-efficient GA Gemini model as of
+	// this writing. Override via GeminiConfig.Model or GEMINI_EVAL_MODEL env var.
+	geminiDefaultModel    = "gemini-2.5-flash-lite"
 	geminiAPIBase         = "https://generativelanguage.googleapis.com/v1beta"
 	geminiMaxOutputTokens = 2048
 	geminiMaxBodyChars    = 4000
@@ -167,9 +169,9 @@ func (g *GeminiDetector) formatEmail(req Request) string {
 }
 
 // generate calls the Gemini REST API with exponential backoff on transient errors.
-// It tries thinking_budget=0 first (saves tokens / latency); if the model rejects
-// it with an HTTP 400 mentioning "budget" or "thinking", it retries once immediately
-// without the thinking config before entering the normal retry loop.
+// It sends the model-appropriate thinking config first (thinkingBudget=0 for Gemini
+// 2.x, thinkingLevel="low" for Gemini 3.x). If the model rejects the thinking
+// config with HTTP 400, it retries once without any thinking config.
 func (g *GeminiDetector) generate(ctx context.Context, emailText string) (string, error) {
 	disableThinking := true
 
@@ -218,7 +220,7 @@ func (g *GeminiDetector) generate(ctx context.Context, emailText string) (string
 // The third return value signals "retry without thinking config" when the model
 // rejects thinking_budget=0 (HTTP 400 + budget/thinking in body).
 func (g *GeminiDetector) callOnce(ctx context.Context, emailText string, disableThinking bool) (string, error, bool) {
-	payload := geminiMakeRequest(emailText, disableThinking)
+	payload := geminiMakeRequest(emailText, g.model, disableThinking)
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", err, false
@@ -262,11 +264,12 @@ func (g *GeminiDetector) callOnce(ctx context.Context, emailText string, disable
 		return gr.Candidates[0].Content.Parts[0].Text, nil, false
 	}
 
-	// HTTP 400 from thinking_budget=0 rejection.
+	// HTTP 400 from a rejected thinking config (thinkingBudget on 3.x, or
+	// thinkingLevel on 2.x). Retry with no thinking config at all.
 	if resp.StatusCode == http.StatusBadRequest && disableThinking {
 		s := string(respBody)
-		if strings.Contains(s, "budget") || strings.Contains(s, "hinking") {
-			return "", fmt.Errorf("thinking_budget=0 rejected"), true
+		if strings.Contains(s, "budget") || strings.Contains(s, "hinking") || strings.Contains(s, "level") {
+			return "", fmt.Errorf("thinking config rejected"), true
 		}
 	}
 
@@ -301,7 +304,12 @@ type geminiGenCfg struct {
 }
 
 type geminiThinkCfg struct {
-	ThinkingBudget int `json:"thinkingBudget"`
+	// Gemini 2.x: set to 0 to disable thinking. Must be a pointer so that
+	// the zero value is serialised as 0 rather than omitted.
+	ThinkingBudget *int `json:"thinkingBudget,omitempty"`
+	// Gemini 3.x: replaced thinkingBudget with a level enum ("low"|"high").
+	// "low" is the minimum cost option; there is no explicit "disabled" value.
+	ThinkingLevel string `json:"thinkingLevel,omitempty"`
 }
 
 type geminiAPIResp struct {
@@ -334,10 +342,21 @@ func geminiIsTransient(err error) bool {
 
 // — helpers —
 
-func geminiMakeRequest(emailText string, disableThinking bool) geminiAPIReq {
+// thinkingCfgFor returns the right "disable / minimise thinking" config for the
+// model family. Gemini 2.x uses thinkingBudget (integer, 0 = off); Gemini 3.x
+// replaced it with thinkingLevel (enum, "low" | "high" — no explicit "off").
+func thinkingCfgFor(model string) *geminiThinkCfg {
+	if strings.HasPrefix(model, "gemini-3") {
+		return &geminiThinkCfg{ThinkingLevel: "low"}
+	}
+	zero := 0
+	return &geminiThinkCfg{ThinkingBudget: &zero}
+}
+
+func geminiMakeRequest(emailText, model string, disableThinking bool) geminiAPIReq {
 	var thinkCfg *geminiThinkCfg
 	if disableThinking {
-		thinkCfg = &geminiThinkCfg{ThinkingBudget: 0}
+		thinkCfg = thinkingCfgFor(model)
 	}
 	return geminiAPIReq{
 		SystemInstruction: &geminiContent{
