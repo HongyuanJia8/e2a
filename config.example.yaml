@@ -127,3 +127,13 @@ limits:
   # billing_hook_url: "http://billing:9000/api/internal/billing/cancel"
   billing_hook_url: ""
 
+
+
+# — Content screening (piguard) ——————————————————————————————————————————————
+# The Gemini LLM-as-detector layer is enabled by setting the environment
+# variable GEMINI_API_KEY (or GOOGLE_API_KEY) to a Google AI Studio key.
+# When the variable is absent the Gemini detector is silently skipped and
+# the dependency-free heuristics detector runs alone.
+#
+# Obtain a key: https://aistudio.google.com/apikey
+# Model default: gemini-2.5-flash (change via GEMINI_EVAL_MODEL env var)

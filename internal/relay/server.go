@@ -95,7 +95,7 @@ func NewServer(cfg *config.Config, store *identity.Store, signer *headers.Signer
 		signer:             signer,
 		hub:                hub,
 		usage:              usage,
-		screen:             piguard.NewEngine(piguard.EngineConfig{}, piguard.NewHeuristicsDetector()),
+		screen:             buildScreenEngine(),
 		smtpDomain:         cfg.SMTP.Domain,
 		outboundFromDomain: cfg.OutboundSMTP.FromDomain,
 	}
@@ -120,6 +120,18 @@ func NewServer(cfg *config.Config, store *identity.Store, signer *headers.Signer
 
 	s.smtpServer = smtpSrv
 	return s
+}
+
+// buildScreenEngine constructs the piguard screening engine. The heuristics
+// detector is always included. The Gemini detector is added when GEMINI_API_KEY
+// or GOOGLE_API_KEY is set in the environment.
+func buildScreenEngine() *piguard.Engine {
+	detectors := []piguard.Detector{piguard.NewHeuristicsDetector()}
+	if d, err := piguard.NewGeminiDetector(piguard.GeminiConfig{}); err == nil {
+		detectors = append(detectors, d)
+		log.Printf("[piguard] Gemini detector enabled (model: gemini-2.5-flash)")
+	}
+	return piguard.NewEngine(piguard.EngineConfig{}, detectors...)
 }
 
 func (s *Server) ListenAndServe() error {

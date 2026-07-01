@@ -521,7 +521,7 @@ func NewAPI(store *identity.Store, sender *outbound.Sender, smtpRelay *outbound.
 	return &API{
 		store:        store,
 		sender:       sender,
-		screen:       piguard.NewEngine(piguard.EngineConfig{}, piguard.NewHeuristicsDetector()),
+		screen:       buildAgentScreenEngine(),
 		smtpRelay:    smtpRelay,
 		userAuth:     userAuth,
 		usage:        usage,
@@ -540,6 +540,18 @@ func NewAPI(store *identity.Store, sender *outbound.Sender, smtpRelay *outbound.
 		dcrLimit:      ratelimit.New(1*time.Hour, 10),    // 10 OAuth client registrations per IP per hour
 		downloadLimit: ratelimit.New(1*time.Minute, 120), // 120 attachment downloads per IP per minute
 	}
+}
+
+// buildAgentScreenEngine constructs the piguard screening engine for outbound agent
+// mail. The heuristics detector is always included. The Gemini detector is added when
+// GEMINI_API_KEY or GOOGLE_API_KEY is set in the environment.
+func buildAgentScreenEngine() *piguard.Engine {
+	detectors := []piguard.Detector{piguard.NewHeuristicsDetector()}
+	if d, err := piguard.NewGeminiDetector(piguard.GeminiConfig{}); err == nil {
+		detectors = append(detectors, d)
+		log.Printf("[piguard] Gemini detector enabled for agent outbound screening")
+	}
+	return piguard.NewEngine(piguard.EngineConfig{}, detectors...)
 }
 
 // SetAPIURL overrides the API/issuer base URL (default: publicURL). Set it
