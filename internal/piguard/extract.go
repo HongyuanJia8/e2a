@@ -22,6 +22,11 @@ import (
 // rather than treat "no finding" as safe. See design §5.
 const DefaultScanCapBytes = 1 << 20 // 1 MiB of extracted text
 
+// maxImagePartBytes is the per-image cap for SegmentImageData segments passed to
+// vision-capable detectors. Kept at 1 MiB; Gemini supports up to ~7 MiB per image
+// inline but most email images are far smaller and we want bounded memory per message.
+const maxImagePartBytes = 1 << 20 // 1 MiB per image
+
 // maxMIMEParts bounds part traversal independently of byte size — a deeply nested or
 // part-flooded message stops walking here.
 const maxMIMEParts = 200
@@ -243,8 +248,26 @@ func (e *extractor) leaf(mediaType, encoding, charset, disposition string, body 
 		// and "we couldn't read it" is not a safety guarantee).
 		if LooksTextual(decoded) {
 			e.add(SegmentAttachmentText, decoded, ref+"/attachment")
-		} else if strings.TrimSpace(decoded) != "" {
-			e.unscannable = true
+		} else {
+			if strings.HasPrefix(mediaType, "image/") && len(decoded) > 0 {
+				// Store raw image bytes for vision-capable detectors (e.g. Gemini).
+				// Image bytes do NOT charge the text scan budget.
+				imgData := []byte(decoded)
+				if len(imgData) > maxImagePartBytes {
+					imgData = imgData[:maxImagePartBytes]
+				}
+				e.segments = append(e.segments, Segment{
+					Type:     SegmentImageData,
+					Bytes:    imgData,
+					MIMEType: mediaType,
+					Ref:      ref + "/image",
+				})
+			}
+			// Always mark unscannable: text-only detectors cannot inspect this, so
+			// "no finding" from them is not a safety guarantee.
+			if strings.TrimSpace(decoded) != "" || strings.HasPrefix(mediaType, "image/") {
+				e.unscannable = true
+			}
 		}
 		if overflow {
 			e.full = true

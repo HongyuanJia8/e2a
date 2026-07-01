@@ -55,14 +55,23 @@ const (
 	SegmentAttachmentText SegmentType = "attachment_text"
 	// SegmentImageOCR is reserved by the contract but never produced in v1 (no OCR).
 	SegmentImageOCR SegmentType = "image_ocr"
+	// SegmentImageData carries raw image bytes for vision-capable detectors (e.g.
+	// Gemini). Content is always empty; Bytes holds the decoded image data and
+	// MIMEType holds the declared content-type (e.g. "image/jpeg").
+	SegmentImageData SegmentType = "image_data"
 )
 
 // Segment is one extracted unit of content. Ref is a stable locator (e.g.
 // "html#hidden[2]") used for span/offending-segment reporting.
+//
+// For text segments Content carries the decoded text and Bytes is nil.
+// For SegmentImageData segments Bytes carries the raw image and Content is empty.
 type Segment struct {
-	Type    SegmentType
-	Content string
-	Ref     string
+	Type     SegmentType
+	Content  string
+	Ref      string
+	Bytes    []byte // raw binary data; non-nil only for SegmentImageData
+	MIMEType string // declared MIME type; non-empty only for SegmentImageData
 }
 
 // DecodedSignals are the cheap, deterministic, near-zero-false-positive markers the

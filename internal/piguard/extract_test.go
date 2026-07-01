@@ -1,6 +1,7 @@
 package piguard
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 )
@@ -185,5 +186,80 @@ func TestExtract_SubjectDecoded(t *testing.T) {
 	subj, ok := segByType(segs, SegmentSubject)
 	if !ok || subj.Content != "Hello world" {
 		t.Errorf("encoded subject not decoded: %q", subj.Content)
+	}
+}
+
+func TestExtract_ImageAttachment(t *testing.T) {
+	// Build a multipart/mixed email with a base64-encoded JPEG attachment.
+	// Pad with null bytes so the control-byte ratio exceeds the 10% threshold in
+	// LooksTextual, ensuring the extractor treats the part as genuinely binary.
+	imgRaw := append([]byte("\xff\xd8\xff\xe0"), make([]byte, 50)...) // SOI + 50 NUL bytes
+	imgB64 := base64.StdEncoding.EncodeToString(imgRaw)
+
+	raw := "Subject: Check this image\r\n" +
+		"Content-Type: multipart/mixed; boundary=B\r\n\r\n" +
+		"--B\r\n" +
+		"Content-Type: text/plain\r\n\r\n" +
+		"See the attached screenshot.\r\n" +
+		"--B\r\n" +
+		"Content-Type: image/jpeg\r\n" +
+		"Content-Disposition: attachment; filename=screenshot.jpg\r\n" +
+		"Content-Transfer-Encoding: base64\r\n\r\n" +
+		imgB64 + "\r\n" +
+		"--B--\r\n"
+
+	segs, sig, err := Extract([]byte(raw), 0)
+	if err != nil {
+		t.Fatalf("Extract error: %v", err)
+	}
+
+	// Unscannable must be set: text-only detectors cannot read image bytes.
+	if !sig.Unscannable {
+		t.Error("expected Unscannable signal for image attachment")
+	}
+
+	imgSeg, ok := segByType(segs, SegmentImageData)
+	if !ok {
+		t.Fatalf("expected SegmentImageData segment; got %+v", segs)
+	}
+	if imgSeg.MIMEType != "image/jpeg" {
+		t.Errorf("MIMEType = %q, want %q", imgSeg.MIMEType, "image/jpeg")
+	}
+	if string(imgSeg.Bytes) != string(imgRaw) {
+		t.Errorf("image bytes mismatch: got %d bytes want %d bytes", len(imgSeg.Bytes), len(imgRaw))
+	}
+	if imgSeg.Content != "" {
+		t.Errorf("SegmentImageData Content should be empty, got %q", imgSeg.Content)
+	}
+
+	// Text part must still be present.
+	_, hasText := segByType(segs, SegmentTextPlain)
+	if !hasText {
+		t.Error("expected SegmentTextPlain for the text/plain part")
+	}
+}
+
+func TestExtract_NonImageBinaryNoImageSegment(t *testing.T) {
+	// A binary attachment that is NOT an image should NOT produce SegmentImageData.
+	binB64 := base64.StdEncoding.EncodeToString(append([]byte("\x7fELF\x02\x01\x01"), make([]byte, 50)...))
+
+	raw := "Subject: Binary\r\n" +
+		"Content-Type: multipart/mixed; boundary=B\r\n\r\n" +
+		"--B\r\n" +
+		"Content-Type: text/plain\r\n\r\nbody\r\n" +
+		"--B\r\n" +
+		"Content-Type: application/octet-stream\r\n" +
+		"Content-Disposition: attachment; filename=payload.bin\r\n" +
+		"Content-Transfer-Encoding: base64\r\n\r\n" +
+		binB64 + "\r\n" +
+		"--B--\r\n"
+
+	segs, sig, _ := Extract([]byte(raw), 0)
+	_, hasImg := segByType(segs, SegmentImageData)
+	if hasImg {
+		t.Error("SegmentImageData must NOT be produced for application/octet-stream")
+	}
+	if !sig.Unscannable {
+		t.Error("expected Unscannable for binary non-image attachment")
 	}
 }
