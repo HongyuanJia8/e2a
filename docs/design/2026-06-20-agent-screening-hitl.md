@@ -269,11 +269,19 @@ and the thing every future provider depends on. Split visible vs hidden HTML
 detect Unicode Tags-block (U+E0000–E007F), zero-width (U+200B–200D, U+FEFF),
 homoglyph ratio, fragmented/reassembly URLs, and `text/plain`↔`text/html` divergence.
 
-**Built-in `heuristics` detector** (`piguard/heuristics`): the only registered
-detector in v1. Deterministic, no network, near-zero false positives. Inbound:
-the obfuscation vectors above. Outbound: egress/exfil signatures — secret/key/PII
-regexes, suspicious egress URLs (markdown-image exfil), encoded blobs. Emits
-categories + a weighted score.
+**Built-in `heuristics` detector** (`piguard/heuristics`): deterministic, no
+network, near-zero false positives. Inbound: the obfuscation vectors above.
+Outbound: egress/exfil signatures — secret/key/PII regexes, suspicious egress
+URLs (markdown-image exfil), encoded blobs. Emits categories + a weighted score.
+
+**`GeminiDetector`** (`piguard/gemini`): optional LLM-as-detector layer backed by
+the Gemini REST API (stdlib `net/http`, no new module dependencies). Uses the same
+combined injection+phishing prompt as the e2a eval framework; `injection_confidence`
+is the primary piguard score, `phishing_confidence` surfaces as a Category for audit.
+Enabled by setting `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) in the environment;
+silently absent otherwise (heuristics-only, no behaviour change). Tries
+`thinkingBudget=0` for speed/cost; falls back automatically if the model rejects it.
+Retries 429/5xx with exponential backoff (3 attempts, 1/2/4 s).
 
 **Aggregator** (`piguard.Engine`): runs registered detectors **in parallel**,
 combines into one `Result`:
@@ -549,6 +557,9 @@ deployment-level.
   gives the data to auto-tune later.
 - **Stay narrow for v1**: one detector, no OCR, no external providers, no RBAC — the
   contract is built to absorb all of them without reshaping.
+- **Gemini detector (shipped post-v1)**: `GeminiDetector` in `piguard/gemini.go`
+  implements the seam without reshaping the contract; wired in alongside heuristics
+  when `GEMINI_API_KEY` is set.
 
 ## 7. Verification strategy
 
