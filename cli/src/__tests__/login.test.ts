@@ -140,6 +140,7 @@ describe("login", () => {
 
     expect(mockSaveConfig).toHaveBeenCalledWith({
       api_key: "e2a_browser_key",
+      key_scope: "account",
       agent_email: "bot@agents.e2a.dev",
       shared_domain: "agents.e2a.dev",
     });
@@ -168,10 +169,11 @@ describe("login", () => {
 
     expect(mockSaveConfig).toHaveBeenCalledWith({
       api_key: "e2a_browser_key",
+      key_scope: "account",
       agent_email: "",
       shared_domain: "agents.e2a.dev",
     });
-    expect(mockStderr).toHaveBeenCalledWith("No agents found yet. Create one at https://e2a.dev/get-started\n");
+    expect(mockStderr).toHaveBeenCalledWith("No agents found yet. Run: e2a agents create <name>@<shared-domain> — or visit https://e2a.dev/get-started\n");
   });
 
   it("unrefs the browser child process so Node can exit", async () => {
@@ -233,6 +235,7 @@ describe("login", () => {
     // shared_domain absent — older deployment couldn't be discovered
     expect(mockSaveConfig).toHaveBeenCalledWith({
       api_key: "e2a_browser_key",
+      key_scope: "account",
       agent_email: "bot@example.com",
     });
   });
@@ -291,6 +294,7 @@ describe("login", () => {
 
     expect(mockSaveConfig).toHaveBeenCalledWith({
       api_key: "e2a_self",
+      key_scope: "account",
       agent_email: "bot@agents.acme.test",
       shared_domain: "agents.acme.test",
     });
