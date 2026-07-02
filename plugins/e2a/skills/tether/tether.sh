@@ -4,7 +4,8 @@
 #   tether.sh start <email> [--title "<work>"] [--for 2h|8h|30m|1d] [--until <ISO>]  open + arm
 #   tether.sh update "<message>"   send a threaded update ("as you see fit")
 #   tether.sh update --html <file> send an HTML update (+ auto text fallback)
-#   tether.sh ask "<question>"     email a question and BLOCK until the reply
+#   tether.sh update --attach <f>  attach a file (repeatable; 15 MB total cap)
+#   tether.sh ask "<question>" [--attach <f>]...  email a question and BLOCK until the reply
 #   tether.sh listen [--awake]     poll until a reply OR the window ends (bg it)
 #   tether.sh poll                 print any new replies since last poll (exit 0)
 #   tether.sh status               show tether state
@@ -66,6 +67,7 @@ question or instruction; reply \"stop\" to end early.
       exit 1
     fi
     t_state_set armed 1 to "$to" conversation_id "$conv" last_message_id "$mid" \
+      intro_id "$mid" \
       last_poll "$(t_now_iso)" project "$proj" started_at "$(t_now_iso)" expires_at "$expires"
     echo "tether: started — thread ${conv} → ${to} (intro ${mid}); window: ${window}${expires:+ (until ${expires})}"
     ;;
@@ -73,12 +75,14 @@ question or instruction; reply \"stop\" to end early.
   update)
     # update "<text>"                       plain-text update
     # update --html <file> [--text "<t>"]   HTML update (+ optional text fallback)
+    # either form: [--attach <file>]...     attach files (repeatable)
     need_config; need_armed
-    htmlfile=""; textarg=""; msg=""
+    htmlfile=""; textarg=""; msg=""; attach=()
     while [ $# -gt 0 ]; do
       case "$1" in
         --html) htmlfile="${2:-}"; shift 2;;
         --text) textarg="${2:-}"; shift 2;;
+        --attach) attach+=("${2:-}"); shift 2;;
         *) msg="$1"; shift;;
       esac
     done
@@ -90,16 +94,16 @@ question or instruction; reply \"stop\" to end early.
       [ -n "$msg" ] || msg="$textarg"
       [ -n "$msg" ] || msg="$(printf '%s' "$html" | t_html_to_text)"
     fi
-    [ -n "$msg" ] || { echo "usage: tether.sh update \"<text>\"  |  update --html <file> [--text \"<fallback>\"]"; exit 2; }
-    rid="$(t_state_get last_message_id)"
-    mid="$(t_api_reply "$rid" "$msg" "$html")"; rc=$?
+    [ -n "$msg" ] || { echo "usage: tether.sh update \"<text>\"  |  update --html <file> [--text \"<fallback>\"]  (either form: [--attach <file>]...)"; exit 2; }
+    if [ "${#attach[@]}" -gt 0 ]; then t_attach_check "${attach[@]}" || exit $?; fi
+    mid="$(t_reply_anchored "$msg" "$html" ${attach[@]+"${attach[@]}"})"; rc=$?
     if [ -z "$mid" ]; then echo "tether: update send failed"; exit 1; fi
     t_state_set last_message_id "$mid"
     if [ "$rc" = "2" ]; then
       echo "tether: WARNING update HELD for review (pending_review) — it did NOT reach the user. Disable send-side protection on ${E2A_AGENT_EMAIL}."
       exit 2
     fi
-    echo "tether: update sent (${mid})$([ -n "$html" ] && echo ' [html]')"
+    echo "tether: update sent (${mid})$([ -n "$html" ] && echo ' [html]')$([ "${#attach[@]}" -gt 0 ] && echo " [${#attach[@]} attachment(s)]")"
     ;;
 
   poll)
@@ -135,8 +139,12 @@ question or instruction; reply \"stop\" to end early.
       if t_ask_active; then
         s="$interval"; [ "$rem" -lt "$s" ] && s="$rem"; sleep "$s"; continue
       fi
-      out="$(t_poll_once)"
-      if [ "$out" != "(no new replies)" ]; then echo "REPLY_RECEIVED:"; echo "$out"; exit 0; fi
+      out="$(t_poll_once)" || out=""
+      # Empty out = a transient poll failure (curl blip), NOT a reply — without
+      # this guard it exits REPLY_RECEIVED with nothing, killing the listen.
+      if [ -n "$out" ] && [ "$out" != "(no new replies)" ]; then
+        echo "REPLY_RECEIVED:"; echo "$out"; exit 0
+      fi
       s="$interval"; [ "$rem" -lt "$s" ] && s="$rem"
       sleep "$s"
     done
@@ -148,15 +156,22 @@ question or instruction; reply \"stop\" to end early.
     # over email, never a terminal prompt the AFK user can't see. Run it in the
     # background and wait for the completion notification.
     need_config; need_armed
-    q="${1:-}"; [ -n "$q" ] || { echo "usage: tether.sh ask \"<question>\""; exit 2; }
+    q=""; attach=()
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --attach) attach+=("${2:-}"); shift 2;;
+        *) q="$1"; shift;;
+      esac
+    done
+    [ -n "$q" ] || { echo "usage: tether.sh ask \"<question>\" [--attach <file>]..."; exit 2; }
+    if [ "${#attach[@]}" -gt 0 ]; then t_attach_check "${attach[@]}" || exit $?; fi
     # Hold the ask lock for this whole invocation so a background `listen` pauses
     # and doesn't steal the answer; released on any exit (reply, timeout, error).
     trap 't_ask_end' EXIT INT TERM
     t_ask_begin
-    rid="$(t_state_get last_message_id)"
-    mid="$(t_api_reply "$rid" "❓ ${q}
+    mid="$(t_reply_anchored "❓ ${q}
 
-(Reply to this email with your answer — I'll wait for it.)")"; rc=$?
+(Reply to this email with your answer — I'll wait for it.)" "" ${attach[@]+"${attach[@]}"})"; rc=$?
     [ -n "$mid" ] || { echo "tether: ask send failed"; exit 1; }
     t_state_set last_message_id "$mid"
     if [ "$rc" = "2" ]; then
@@ -167,8 +182,9 @@ question or instruction; reply \"stop\" to end early.
     max="${E2A_TETHER_ASK_TIMEOUT:-1800}"; interval="${E2A_TETHER_POLL_INTERVAL:-20}"; elapsed=0
     while [ "$elapsed" -lt "$max" ]; do
       sleep "$interval"; elapsed=$((elapsed + interval))
-      out="$(t_poll_once)"
-      [ "$out" = "(no new replies)" ] || { echo "$out"; exit 0; }
+      out="$(t_poll_once)" || out=""
+      # Empty out = transient poll failure, not an answer (same guard as listen).
+      if [ -n "$out" ] && [ "$out" != "(no new replies)" ]; then echo "$out"; exit 0; fi
     done
     echo "tether: ask timed out after ${max}s with no answer"; exit 3
     ;;
@@ -193,8 +209,7 @@ question or instruction; reply \"stop\" to end early.
 
   stop)
     if [ "$(t_state_get armed)" = "1" ] && t_load_config; then
-      rid="$(t_state_get last_message_id)"
-      [ -n "$rid" ] && t_api_reply "$rid" "Tether ended. Session is no longer listening." >/dev/null 2>&1 || true
+      t_reply_anchored "Tether ended. Session is no longer listening." >/dev/null 2>&1 || true
     fi
     t_state_clear
     echo "tether: stopped"
@@ -227,6 +242,26 @@ question or instruction; reply \"stop\" to end early.
       t_ask_end;   ! t_ask_active || { echo "FAIL: lock present after end"; exit 1; }
       echo "ok: ask lock begin/active/end" ) || fail=1
     rm -f /tmp/tether-selftest-lock.json /tmp/ask.lock
+
+    echo "# attachments:"
+    af=/tmp/tether-selftest-att.txt; printf 'hello attachment' > "$af"
+    pj=/tmp/tether-selftest-payload.json
+    t_reply_payload "$pj" "the body" "" "$af" || { echo "FAIL: payload build errored"; fail=1; }
+    ck "payload: body + encoded attachment" "$(python3 -c 'import json,base64
+d=json.load(open("/tmp/tether-selftest-payload.json"));a=d["attachments"][0]
+print(d["body"]=="the body" and "html_body" not in d
+      and a["filename"]=="tether-selftest-att.txt" and a["content_type"]=="text/plain"
+      and base64.b64decode(a["data"]).decode()=="hello attachment")')" "True"
+    t_reply_payload "$pj" "b" "<b>h</b>" || { echo "FAIL: no-attachment payload errored"; fail=1; }
+    ck "payload: no files → no attachments key" "$(python3 -c 'import json
+d=json.load(open("/tmp/tether-selftest-payload.json"))
+print("attachments" not in d and d["html_body"]=="<b>h</b>")')" "True"
+    t_attach_check "$af" || { echo "FAIL: attach check on a real file"; fail=1; }
+    t_attach_check /nonexistent-tether-file 2>/dev/null; ck "missing file → exit 3" "$?" "3"
+    big=/tmp/tether-selftest-big.bin
+    python3 -c 'f=open("/tmp/tether-selftest-big.bin","wb");f.seek(16*1024*1024-1);f.write(b"\0")'
+    t_attach_check "$big" 2>/dev/null; ck "16 MB → exit 4 (over cap)" "$?" "4"
+    rm -f "$af" "$pj" "$big"
 
     bash -n "${here}/lib.sh" && bash -n "${here}/tether.sh" && echo "# syntax OK"
     [ "$fail" = "0" ] && echo "# selftest PASS" || { echo "# selftest FAIL"; exit 1; }
