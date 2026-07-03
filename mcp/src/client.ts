@@ -25,6 +25,14 @@ import type {
   CreateWebhookRequest,
   UpdateWebhookRequest,
   TestWebhookRequest,
+  TemplateView,
+  TemplateSummaryView,
+  CreateTemplateRequest,
+  UpdateTemplateRequest,
+  ValidateTemplateRequest,
+  ValidateTemplateResponse,
+  StarterTemplateView,
+  StarterTemplateDetailView,
   Page,
 } from "@e2a/sdk/v1";
 import type { McpConfig } from "./config.js";
@@ -144,9 +152,15 @@ export class McpClient {
   send(
     body: {
       to: Array<string>;
-      subject: string;
-      body: string;
+      // Literal content — required on the wire unless a template reference
+      // (templateId XOR templateAlias) is used; the server enforces the
+      // mutual exclusivity and returns 400 invalid_request on conflicts.
+      subject?: string;
+      body?: string;
       htmlBody?: string;
+      templateId?: string;
+      templateAlias?: string;
+      templateData?: Record<string, unknown>;
       cc?: Array<string>;
       bcc?: Array<string>;
       attachments?: Array<Attachment>;
@@ -422,6 +436,45 @@ export class McpClient {
       .toArray({ limit: params.limit ?? DEFAULT_LIST_LIMIT });
   }
 
+  // ── Templates (beta) ────────────────────────────────────────────
+  //
+  // SDK-backed (sdk.templates): same retry layer, typed E2AError mapping,
+  // and camelCase views as every other tool. Both list endpoints are
+  // single-page by contract (no cursor param), so the wrapper collapses
+  // the pager to a flat array like listAgents/listWebhooks.
+
+  listTemplates(): Promise<TemplateSummaryView[]> {
+    return this.sdk.templates.list().toArray({ limit: DEFAULT_LIST_LIMIT });
+  }
+
+  getTemplate(id: string): Promise<TemplateView> {
+    return this.sdk.templates.get(id);
+  }
+
+  createTemplate(body: CreateTemplateRequest): Promise<TemplateView> {
+    return this.sdk.templates.create(body);
+  }
+
+  updateTemplate(id: string, patch: UpdateTemplateRequest): Promise<TemplateView> {
+    return this.sdk.templates.update(id, patch);
+  }
+
+  async deleteTemplate(id: string): Promise<void> {
+    await this.sdk.templates.delete(id);
+  }
+
+  validateTemplate(body: ValidateTemplateRequest): Promise<ValidateTemplateResponse> {
+    return this.sdk.templates.validate(body);
+  }
+
+  listStarterTemplates(): Promise<StarterTemplateView[]> {
+    return this.sdk.templates.listStarters().toArray({ limit: DEFAULT_LIST_LIMIT });
+  }
+
+  getStarterTemplate(alias: string): Promise<StarterTemplateDetailView> {
+    return this.sdk.templates.getStarter(alias);
+  }
+
   // ── Events ──────────────────────────────────────────────────────
 
   listEvents(params: {
@@ -455,5 +508,5 @@ export function makeClient(cfg: McpConfig): McpClient {
     apiKey: cfg.apiKey,
     ...(cfg.baseUrl ? { baseUrl: cfg.baseUrl } : {}),
   });
-  return new McpClient(sdk, cfg.agentEmail ?? "");
+  return new McpClient(sdk, cfg.agentEmail ?? "", "account");
 }

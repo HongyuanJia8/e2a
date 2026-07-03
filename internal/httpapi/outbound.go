@@ -92,16 +92,24 @@ func recipientCountError(groups ...[]string) *ErrorEnvelope {
 	return nil
 }
 
-// SendEmailRequest is the new-thread send body. to/subject/body are required
-// (MSG-3): RFC 5321 requires ≥1 recipient (From/Date are server-set), and a
-// usable new email needs a subject + body. html_body is an optional addition.
+// SendEmailRequest is the new-thread send body. `to` is required (RFC 5321
+// requires ≥1 recipient; From/Date are server-set). Content comes in one of
+// two mutually exclusive shapes: literal subject + body (+ optional
+// html_body) — both required at the handler for a usable new email (MSG-3) —
+// or a template reference (template_id XOR template_alias, + template_data),
+// which the server renders into subject/body/html_body before any further
+// processing. subject/body moved from schema-required to handler-enforced so
+// the template shape can omit them.
 type SendEmailRequest struct {
 	To             []string              `json:"to" nullable:"false"`
 	CC             []string              `json:"cc,omitempty" nullable:"false"`
 	BCC            []string              `json:"bcc,omitempty" nullable:"false"`
-	Subject        string                `json:"subject"`
-	Body           string                `json:"body"`
-	HTMLBody       string                `json:"html_body,omitempty"`
+	Subject        string                `json:"subject,omitempty" doc:"Literal subject. Required unless a template reference is used (mutually exclusive with template_id/template_alias)."`
+	Body           string                `json:"body,omitempty" doc:"Literal plain-text body. Required unless a template reference is used (mutually exclusive with template_id/template_alias)."`
+	HTMLBody       string                `json:"html_body,omitempty" doc:"Literal HTML body. Mutually exclusive with template_id/template_alias."`
+	TemplateID     string                `json:"template_id,omitempty" doc:"Send using a stored template (rendered server-side, before any review hold). Mutually exclusive with template_alias and with literal subject/body/html_body. Beta: templates are unstable — their shape may change before they are declared stable."`
+	TemplateAlias  string                `json:"template_alias,omitempty" doc:"Send using a stored template resolved by its per-user alias. Mutually exclusive with template_id and with literal subject/body/html_body. Beta: templates are unstable — their shape may change before they are declared stable."`
+	TemplateData   TemplateData          `json:"template_data,omitempty" doc:"Variables for the referenced template ({{name}}, dot paths into nested objects). Missing variables render as empty strings. Beta: templates are unstable — their shape may change before they are declared stable."`
 	ConversationID string                `json:"conversation_id,omitempty"`
 	Attachments    []outbound.Attachment `json:"attachments,omitempty" nullable:"false"`
 }
@@ -302,7 +310,7 @@ func (s *Server) handleReply(ctx context.Context, in *replyInput) (*sendOutput, 
 	if env := recipientCountError(req.To, req.CC, req.BCC); env != nil {
 		return nil, env
 	}
-	return s.deliver(ctx, user, ag, req, "reply", parentMessageID, "/v1/reply/"+in.ID, in.IdempotencyKey, in.RawBody, msg)
+	return s.deliver(ctx, user, ag, literalRequest(req), "reply", parentMessageID, "/v1/reply/"+in.ID, in.IdempotencyKey, in.RawBody, msg)
 }
 
 // replyRecipients resolves a reply's To/CC from the referenced message,
@@ -386,7 +394,7 @@ func (s *Server) handleForward(ctx context.Context, in *forwardInput) (*sendOutp
 	}
 	req.CC = agent.StripAgentSelfAliases(req.CC, ag.EmailAddress())
 	req.BCC = agent.StripAgentSelfAliases(req.BCC, ag.EmailAddress())
-	return s.deliver(ctx, user, ag, req, "forward", msg.ThreadMessageID(), "/v1/forward/"+in.ID, in.IdempotencyKey, in.RawBody, msg)
+	return s.deliver(ctx, user, ag, literalRequest(req), "forward", msg.ThreadMessageID(), "/v1/forward/"+in.ID, in.IdempotencyKey, in.RawBody, msg)
 }
 
 // validateOutboundBody runs the shared pre-send validation.
@@ -439,30 +447,44 @@ func validateAttachments(atts []outbound.Attachment) *ErrorEnvelope {
 	return nil
 }
 
-// deliver runs the domain-verified + enforce-cap checks then DeliverOutbound
-// under the idempotency handshake, mapping the OutboundResult to the wire view.
-func (s *Server) deliver(ctx context.Context, user *identity.User, ag *identity.AgentIdentity, req outbound.SendRequest, msgType, replyTo, route, idemKey string, rawBody []byte, referenced *identity.Message) (*sendOutput, error) {
-	if env := validateAttachments(req.Attachments); env != nil {
-		return nil, env
-	}
-	if env := s.checkSendLimit(ag.ID); env != nil {
-		return nil, env
-	}
-	if !ag.DomainVerified {
-		return nil, NewError(http.StatusForbidden, "domain_not_verified", "agent domain must be verified before sending")
-	}
-	if s.deps.EnforceMessageSend != nil {
-		if err := s.deps.EnforceMessageSend(ctx, user.ID); err != nil {
-			if env, ok := limitEnvelope(err); ok {
-				return nil, env
-			}
-			return nil, NewError(http.StatusInternalServerError, "internal_error", "limits check failed")
-		}
-	}
+// deliver runs the idempotency handshake, then — inside the claimed
+// execution — builds the request via prepare, runs the send-limit /
+// domain-verified / enforce-cap checks, and calls DeliverOutbound, mapping
+// the OutboundResult to the wire view.
+//
+// Everything that consults MUTABLE state (template resolution inside
+// prepare, rate limits, plan caps) runs after the Claim so a keyed retry
+// replays the cached response instead of re-evaluating state that may have
+// changed since the first attempt (deleted template, exhausted quota, …).
+// Failures inside the closure happen strictly before the DeliverOutbound
+// side effect, so runIdempotent releases the key and a retry can proceed —
+// exactly fn's documented contract.
+func (s *Server) deliver(ctx context.Context, user *identity.User, ag *identity.AgentIdentity, prepare func() (outbound.SendRequest, *ErrorEnvelope), msgType, replyTo, route, idemKey string, rawBody []byte, referenced *identity.Message) (*sendOutput, error) {
 	if s.deps.DeliverOutbound == nil {
 		return nil, NewError(http.StatusInternalServerError, "internal_error", "outbound delivery unavailable")
 	}
 	status, view, err := runIdempotent(s, ctx, user.ID, idemKey, route, rawBody, func() (int, SendResultView, error) {
+		req, env := prepare()
+		if env != nil {
+			return 0, SendResultView{}, env
+		}
+		if env := validateAttachments(req.Attachments); env != nil {
+			return 0, SendResultView{}, env
+		}
+		if env := s.checkSendLimit(ag.ID); env != nil {
+			return 0, SendResultView{}, env
+		}
+		if !ag.DomainVerified {
+			return 0, SendResultView{}, NewError(http.StatusForbidden, "domain_not_verified", "agent domain must be verified before sending")
+		}
+		if s.deps.EnforceMessageSend != nil {
+			if err := s.deps.EnforceMessageSend(ctx, user.ID); err != nil {
+				if env, ok := limitEnvelope(err); ok {
+					return 0, SendResultView{}, env
+				}
+				return 0, SendResultView{}, NewError(http.StatusInternalServerError, "internal_error", "limits check failed")
+			}
+		}
 		res, derr := s.deps.DeliverOutbound(ctx, user, ag, req, msgType, replyTo, referenced)
 		if derr != nil {
 			return 0, SendResultView{}, NewError(derr.Status, derr.Code, derr.Msg)
@@ -476,6 +498,13 @@ func (s *Server) deliver(ctx context.Context, user *identity.User, ag *identity.
 		return nil, err
 	}
 	return &sendOutput{Status: status, Body: view}, nil
+}
+
+// literalRequest wraps an already-built SendRequest as a deliver prepare
+// closure — used by reply/forward, whose request is fully derived from the
+// request bytes plus the (already-loaded) referenced message.
+func literalRequest(req outbound.SendRequest) func() (outbound.SendRequest, *ErrorEnvelope) {
+	return func() (outbound.SendRequest, *ErrorEnvelope) { return req, nil }
 }
 
 // checkSendLimit applies the per-agent outbound rate limit (mirrors the
@@ -509,20 +538,38 @@ func (s *Server) handleCreateMessage(ctx context.Context, in *createMessageInput
 		return nil, uerr
 	}
 	b := in.Body
-	if env := s.validateOutboundBody(b.Subject, b.Body, b.To, b.CC, b.BCC, b.ConversationID); env != nil {
+	// The deterministic template-shape checks (mutual exclusions) depend only
+	// on the request bytes, so they stay in the prologue. Resolution +
+	// rendering consult the mutable templates table and therefore run inside
+	// the idempotent execution (in prepare, below).
+	if env := validateSendTemplateShape(&b); env != nil {
 		return nil, env
-	}
-	// The sender is the path agent (decision 3) — there is no body `from`; the
-	// agent is the path and auth scopes the sender, so no spoofing is possible.
-	req := outbound.SendRequest{
-		From: ag.EmailAddress(), To: b.To, CC: b.CC, BCC: b.BCC, Subject: b.Subject,
-		Body: b.Body, HTMLBody: b.HTMLBody, ConversationID: b.ConversationID, Attachments: b.Attachments,
 	}
 	// The agent moved from the body (`from`) to the path, so fold the agent id
 	// into the idempotency route — otherwise two agents owned by the same user
 	// could collide on an identical key+body (the body hash alone no longer
 	// separates them).
 	route := "/v1/agents/" + ag.ID + "/messages"
+	prepare := func() (outbound.SendRequest, *ErrorEnvelope) {
+		// Resolve + render any template reference FIRST (in place), so the
+		// rendered subject/body flow through the exact same validation below
+		// and any HITL hold persists rendered content (see resolveSendTemplate
+		// for both ordering invariants: after the idempotency claim, before
+		// the hold).
+		if env := s.resolveSendTemplate(ctx, user.ID, &b); env != nil {
+			return outbound.SendRequest{}, env
+		}
+		if env := s.validateOutboundBody(b.Subject, b.Body, b.To, b.CC, b.BCC, b.ConversationID); env != nil {
+			return outbound.SendRequest{}, env
+		}
+		// The sender is the path agent (decision 3) — there is no body `from`;
+		// the agent is the path and auth scopes the sender, so no spoofing is
+		// possible.
+		return outbound.SendRequest{
+			From: ag.EmailAddress(), To: b.To, CC: b.CC, BCC: b.BCC, Subject: b.Subject,
+			Body: b.Body, HTMLBody: b.HTMLBody, ConversationID: b.ConversationID, Attachments: b.Attachments,
+		}, nil
+	}
 	// A cold send has no referenced inbound (nil) — it's not a reply/forward.
-	return s.deliver(ctx, user, ag, req, "send", "", route, in.IdempotencyKey, in.RawBody, nil)
+	return s.deliver(ctx, user, ag, prepare, "send", "", route, in.IdempotencyKey, in.RawBody, nil)
 }

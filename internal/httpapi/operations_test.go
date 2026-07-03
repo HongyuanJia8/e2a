@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/Mnexa-AI/e2a/internal/identity"
 	"github.com/Mnexa-AI/e2a/internal/limits"
 	"github.com/Mnexa-AI/e2a/internal/outbound"
+	"github.com/Mnexa-AI/e2a/internal/startertemplates"
 	"github.com/Mnexa-AI/e2a/internal/webhook"
 )
 
@@ -30,6 +32,41 @@ func sampleAgent() identity.AgentIdentity {
 		CreatedAt:            time.Unix(1700000000, 0).UTC(),
 		HITLTTLSeconds:       604800,
 		HITLExpirationAction: "reject",
+	}
+}
+
+// lastDelivered captures the most recent SendRequest handed to the fake
+// DeliverOutbound so template-send tests can assert RENDERED content reached
+// the delivery seam (the same seam that persists a HITL draft). The mutex
+// makes the cross-goroutine handoff (server handler goroutine → test
+// goroutine) race-detector clean.
+var lastDelivered struct {
+	mu  sync.Mutex
+	req outbound.SendRequest
+}
+
+func recordDelivered(req outbound.SendRequest) {
+	lastDelivered.mu.Lock()
+	defer lastDelivered.mu.Unlock()
+	lastDelivered.req = req
+}
+
+func lastDeliveredReq() outbound.SendRequest {
+	lastDelivered.mu.Lock()
+	defer lastDelivered.mu.Unlock()
+	return lastDelivered.req
+}
+
+// sampleTemplate is the canonical fixture template owned by user u_1. Its
+// subject/body/html exercise escaped, raw and dot-path interpolation.
+func sampleTemplate() identity.Template {
+	return identity.Template{
+		ID: "tmpl_1", UserID: "u_1", Name: "Welcome", Alias: "welcome",
+		Subject:   "Hello {{name}}",
+		Body:      "Hi {{name}}, your plan is {{plan.tier}}.",
+		HTMLBody:  "<p>Hi {{name}}: {{{markup}}}</p>",
+		CreatedAt: time.Unix(1700000000, 0).UTC(),
+		UpdatedAt: time.Unix(1700000000, 0).UTC(),
 	}
 }
 
@@ -61,6 +98,116 @@ func testServer(t *testing.T) *httptest.Server {
 				return &a, nil
 			}
 			return nil, errors.New("not found")
+		},
+		CreateTemplate: func(ctx context.Context, userID string, in identity.TemplateCreate) (*identity.Template, error) {
+			// "welcome" is held by the fixture template tmpl_1, so a create
+			// defaulting to a starter's alias collides exactly like "taken".
+			if in.Alias == "taken" || in.Alias == "welcome" {
+				return nil, identity.ErrTemplateAliasTaken
+			}
+			if userID == "u_overcap" {
+				return nil, identity.ErrTemplateLimitReached
+			}
+			return &identity.Template{
+				ID: "tmpl_new", UserID: userID, Name: in.Name, Alias: in.Alias,
+				Subject: in.Subject, Body: in.Body, HTMLBody: in.HTMLBody,
+				FromStarterAlias: in.FromStarterAlias, FromStarterVersion: in.FromStarterVersion,
+				CreatedAt: time.Unix(1700000000, 0).UTC(), UpdatedAt: time.Unix(1700000000, 0).UTC(),
+			}, nil
+		},
+		ListTemplates: func(ctx context.Context, userID string) ([]identity.TemplateSummary, error) {
+			tp := sampleTemplate()
+			return []identity.TemplateSummary{{
+				ID: tp.ID, UserID: tp.UserID, Name: tp.Name, Alias: tp.Alias,
+				Subject: tp.Subject, CreatedAt: tp.CreatedAt, UpdatedAt: tp.UpdatedAt,
+			}}, nil
+		},
+		GetTemplate: func(ctx context.Context, templateID, userID string) (*identity.Template, error) {
+			switch {
+			case userID != "u_1":
+				return nil, identity.ErrTemplateNotFound
+			case templateID == "tmpl_1":
+				tp := sampleTemplate()
+				return &tp, nil
+			case templateID == "tmpl_stale":
+				// A stored row whose source no longer parses (simulates a
+				// pre-tightening legacy row) — the send path must map its
+				// parse failure to template_render_failed.
+				tp := sampleTemplate()
+				tp.ID = "tmpl_stale"
+				tp.Body = "{{#section}}"
+				return &tp, nil
+			case templateID == "tmpl_onlyvar":
+				// Subject is a single variable — empty template_data renders
+				// an empty subject, the template_rendered_empty case.
+				tp := sampleTemplate()
+				tp.ID = "tmpl_onlyvar"
+				tp.Subject = "{{name}}"
+				tp.Body = "static body"
+				tp.HTMLBody = ""
+				return &tp, nil
+			case templateID == "tmpl_dberr":
+				// A store failure that is NOT a miss — handlers must 500,
+				// never collapse it to 404.
+				return nil, context.DeadlineExceeded
+			default:
+				return nil, identity.ErrTemplateNotFound
+			}
+		},
+		GetTemplateByAlias: func(ctx context.Context, alias, userID string) (*identity.Template, error) {
+			if alias == "welcome" && userID == "u_1" {
+				tp := sampleTemplate()
+				return &tp, nil
+			}
+			if alias == "starter-welcome" && userID == "u_1" {
+				// A user template created from the `welcome` starter (the
+				// from_starter copy is verbatim) — the end-to-end templated
+				// send fixture.
+				m, ok := startertemplates.Get("welcome")
+				if !ok {
+					return nil, identity.ErrTemplateNotFound
+				}
+				return &identity.Template{
+					ID: "tmpl_starter", UserID: "u_1", Name: m.Name, Alias: "starter-welcome",
+					Subject: m.Subject, Body: m.TextBody, HTMLBody: m.HTMLBody,
+					CreatedAt: time.Unix(1700000000, 0).UTC(), UpdatedAt: time.Unix(1700000000, 0).UTC(),
+				}, nil
+			}
+			return nil, identity.ErrTemplateNotFound
+		},
+		UpdateTemplate: func(ctx context.Context, templateID, userID string, u identity.TemplateUpdate) (*identity.Template, error) {
+			if templateID != "tmpl_1" || userID != "u_1" {
+				return nil, identity.ErrTemplateNotFound
+			}
+			if u.Alias != nil && *u.Alias == "taken" {
+				return nil, identity.ErrTemplateAliasTaken
+			}
+			// Apply ALL five pointer fields, mirroring the real store —
+			// including clear-to-"" for Alias/HTMLBody (stored as NULL,
+			// round-tripped as "").
+			tp := sampleTemplate()
+			if u.Name != nil {
+				tp.Name = *u.Name
+			}
+			if u.Alias != nil {
+				tp.Alias = *u.Alias
+			}
+			if u.Subject != nil {
+				tp.Subject = *u.Subject
+			}
+			if u.Body != nil {
+				tp.Body = *u.Body
+			}
+			if u.HTMLBody != nil {
+				tp.HTMLBody = *u.HTMLBody
+			}
+			return &tp, nil
+		},
+		DeleteTemplate: func(ctx context.Context, templateID, userID string) error {
+			if templateID == "tmpl_1" && userID == "u_1" {
+				return nil
+			}
+			return identity.ErrTemplateNotFound
 		},
 		CreateScopedAPIKey: func(ctx context.Context, userID, name, scope, agentID string, expiresAt *time.Time) (*identity.APIKey, error) {
 			if userID != "u_1" {
@@ -407,6 +554,7 @@ func testServer(t *testing.T) *httptest.Server {
 			return nil, errors.New("not found")
 		},
 		DeliverOutbound: func(ctx context.Context, user *identity.User, ag *identity.AgentIdentity, req outbound.SendRequest, msgType, replyTo string, referenced *identity.Message) (*agent.OutboundResult, *agent.OutboundError) {
+			recordDelivered(req)
 			switch {
 			case strings.Contains(req.Subject, "HOLD"):
 				exp := time.Unix(1700090000, 0).UTC()

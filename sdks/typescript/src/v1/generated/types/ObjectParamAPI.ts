@@ -19,6 +19,7 @@ import { ConversationSummaryView } from '../models/ConversationSummaryView.js';
 import { CreateAPIKeyRequest } from '../models/CreateAPIKeyRequest.js';
 import { CreateAPIKeyResponse } from '../models/CreateAPIKeyResponse.js';
 import { CreateAgentRequest } from '../models/CreateAgentRequest.js';
+import { CreateTemplateRequest } from '../models/CreateTemplateRequest.js';
 import { CreateWebhookRequest } from '../models/CreateWebhookRequest.js';
 import { CreateWebhookResponse } from '../models/CreateWebhookResponse.js';
 import { DNSRecord } from '../models/DNSRecord.js';
@@ -46,7 +47,9 @@ import { PageDomainView } from '../models/PageDomainView.js';
 import { PageEventJSON } from '../models/PageEventJSON.js';
 import { PageMessageSummaryView } from '../models/PageMessageSummaryView.js';
 import { PageReviewView } from '../models/PageReviewView.js';
+import { PageStarterTemplateView } from '../models/PageStarterTemplateView.js';
 import { PageSuppression } from '../models/PageSuppression.js';
+import { PageTemplateSummaryView } from '../models/PageTemplateSummaryView.js';
 import { PageWebhookDeliveryView } from '../models/PageWebhookDeliveryView.js';
 import { PageWebhookView } from '../models/PageWebhookView.js';
 import { ProtectionConfigView } from '../models/ProtectionConfigView.js';
@@ -61,23 +64,33 @@ import { RedeliverView } from '../models/RedeliverView.js';
 import { RegisterDomainRequest } from '../models/RegisterDomainRequest.js';
 import { RejectRequest } from '../models/RejectRequest.js';
 import { RejectResultView } from '../models/RejectResultView.js';
+import { RenderedTemplateView } from '../models/RenderedTemplateView.js';
 import { ReplyRequest } from '../models/ReplyRequest.js';
 import { Result } from '../models/Result.js';
 import { ReviewView } from '../models/ReviewView.js';
 import { RotateSecretResponse } from '../models/RotateSecretResponse.js';
 import { SendEmailRequest } from '../models/SendEmailRequest.js';
 import { SendResultView } from '../models/SendResultView.js';
+import { StarterTemplateDetailView } from '../models/StarterTemplateDetailView.js';
+import { StarterTemplateVariableView } from '../models/StarterTemplateVariableView.js';
+import { StarterTemplateView } from '../models/StarterTemplateView.js';
 import { Suppression } from '../models/Suppression.js';
 import { SuppressionExportEntry } from '../models/SuppressionExportEntry.js';
+import { TemplatePartError } from '../models/TemplatePartError.js';
+import { TemplateSummaryView } from '../models/TemplateSummaryView.js';
+import { TemplateView } from '../models/TemplateView.js';
 import { TestWebhookRequest } from '../models/TestWebhookRequest.js';
 import { TestWebhookResponse } from '../models/TestWebhookResponse.js';
 import { UpdateAgentRequest } from '../models/UpdateAgentRequest.js';
 import { UpdateMessageRequest } from '../models/UpdateMessageRequest.js';
 import { UpdateMessageResultView } from '../models/UpdateMessageResultView.js';
+import { UpdateTemplateRequest } from '../models/UpdateTemplateRequest.js';
 import { UpdateWebhookRequest } from '../models/UpdateWebhookRequest.js';
 import { UsageEventEntry } from '../models/UsageEventEntry.js';
 import { UserExport } from '../models/UserExport.js';
 import { UserExportUser } from '../models/UserExportUser.js';
+import { ValidateTemplateRequest } from '../models/ValidateTemplateRequest.js';
+import { ValidateTemplateResponse } from '../models/ValidateTemplateResponse.js';
 import { VerifyDomainView } from '../models/VerifyDomainView.js';
 import { WebhookDeliveryView } from '../models/WebhookDeliveryView.js';
 import { WebhookFiltersView } from '../models/WebhookFiltersView.js';
@@ -1588,6 +1601,232 @@ export class ObjectReviewsApi {
      */
     public rejectReview(param: ReviewsApiRejectReviewRequest, options?: ConfigurationOptions): Promise<RejectResultView> {
         return this.api.rejectReview(param.id, param.rejectRequest,  options).toPromise();
+    }
+
+}
+
+import { ObservableTemplatesApi } from "./ObservableAPI.js";
+import { TemplatesApiRequestFactory, TemplatesApiResponseProcessor} from "../apis/TemplatesApi.js";
+
+export interface TemplatesApiCreateTemplateRequest {
+    /**
+     * 
+     * @type CreateTemplateRequest
+     * @memberof TemplatesApicreateTemplate
+     */
+    createTemplateRequest: CreateTemplateRequest
+}
+
+export interface TemplatesApiDeleteTemplateRequest {
+    /**
+     * 
+     * Defaults to: undefined
+     * @type string
+     * @memberof TemplatesApideleteTemplate
+     */
+    id: string
+}
+
+export interface TemplatesApiGetStarterTemplateRequest {
+    /**
+     * The starter template\&#39;s alias, e.g. welcome.
+     * Defaults to: undefined
+     * @type string
+     * @memberof TemplatesApigetStarterTemplate
+     */
+    alias: string
+}
+
+export interface TemplatesApiGetTemplateRequest {
+    /**
+     * 
+     * Defaults to: undefined
+     * @type string
+     * @memberof TemplatesApigetTemplate
+     */
+    id: string
+}
+
+export interface TemplatesApiListStarterTemplatesRequest {
+}
+
+export interface TemplatesApiListTemplatesRequest {
+}
+
+export interface TemplatesApiUpdateTemplateRequest {
+    /**
+     * 
+     * Defaults to: undefined
+     * @type string
+     * @memberof TemplatesApiupdateTemplate
+     */
+    id: string
+    /**
+     * 
+     * @type UpdateTemplateRequest
+     * @memberof TemplatesApiupdateTemplate
+     */
+    updateTemplateRequest: UpdateTemplateRequest
+}
+
+export interface TemplatesApiValidateTemplateRequest {
+    /**
+     * 
+     * @type ValidateTemplateRequest
+     * @memberof TemplatesApivalidateTemplate
+     */
+    validateTemplateRequest: ValidateTemplateRequest
+}
+
+export class ObjectTemplatesApi {
+    private api: ObservableTemplatesApi
+
+    public constructor(configuration: Configuration, requestFactory?: TemplatesApiRequestFactory, responseProcessor?: TemplatesApiResponseProcessor) {
+        this.api = new ObservableTemplatesApi(configuration, requestFactory, responseProcessor);
+    }
+
+    /**
+     * Create a reusable email template. subject and body (and html_body when present) must parse: {{variable}} interpolation with dot paths; {{{variable}}} renders raw in the HTML part. Alternatively set from_starter to copy a starter template verbatim. Beta: templates are unstable — their shape may change before they are declared stable.
+     * Create a template (beta)
+     * @param param the request object
+     */
+    public createTemplateWithHttpInfo(param: TemplatesApiCreateTemplateRequest, options?: ConfigurationOptions): Promise<HttpInfo<TemplateView>> {
+        return this.api.createTemplateWithHttpInfo(param.createTemplateRequest,  options).toPromise();
+    }
+
+    /**
+     * Create a reusable email template. subject and body (and html_body when present) must parse: {{variable}} interpolation with dot paths; {{{variable}}} renders raw in the HTML part. Alternatively set from_starter to copy a starter template verbatim. Beta: templates are unstable — their shape may change before they are declared stable.
+     * Create a template (beta)
+     * @param param the request object
+     */
+    public createTemplate(param: TemplatesApiCreateTemplateRequest, options?: ConfigurationOptions): Promise<TemplateView> {
+        return this.api.createTemplate(param.createTemplateRequest,  options).toPromise();
+    }
+
+    /**
+     * Delete a template. In-flight sends are unaffected (rendering happens at send time). Beta: templates are unstable — their shape may change before they are declared stable.
+     * Delete a template (beta)
+     * @param param the request object
+     */
+    public deleteTemplateWithHttpInfo(param: TemplatesApiDeleteTemplateRequest, options?: ConfigurationOptions): Promise<HttpInfo<void>> {
+        return this.api.deleteTemplateWithHttpInfo(param.id,  options).toPromise();
+    }
+
+    /**
+     * Delete a template. In-flight sends are unaffected (rendering happens at send time). Beta: templates are unstable — their shape may change before they are declared stable.
+     * Delete a template (beta)
+     * @param param the request object
+     */
+    public deleteTemplate(param: TemplatesApiDeleteTemplateRequest, options?: ConfigurationOptions): Promise<void> {
+        return this.api.deleteTemplate(param.id,  options).toPromise();
+    }
+
+    /**
+     * Fetch one starter template by alias, including its full plain-text and HTML body sources. Beta: templates are unstable — their shape may change before they are declared stable.
+     * Get a starter template (beta)
+     * @param param the request object
+     */
+    public getStarterTemplateWithHttpInfo(param: TemplatesApiGetStarterTemplateRequest, options?: ConfigurationOptions): Promise<HttpInfo<StarterTemplateDetailView>> {
+        return this.api.getStarterTemplateWithHttpInfo(param.alias,  options).toPromise();
+    }
+
+    /**
+     * Fetch one starter template by alias, including its full plain-text and HTML body sources. Beta: templates are unstable — their shape may change before they are declared stable.
+     * Get a starter template (beta)
+     * @param param the request object
+     */
+    public getStarterTemplate(param: TemplatesApiGetStarterTemplateRequest, options?: ConfigurationOptions): Promise<StarterTemplateDetailView> {
+        return this.api.getStarterTemplate(param.alias,  options).toPromise();
+    }
+
+    /**
+     * Fetch one template by id. Beta: templates are unstable — their shape may change before they are declared stable.
+     * Get a template (beta)
+     * @param param the request object
+     */
+    public getTemplateWithHttpInfo(param: TemplatesApiGetTemplateRequest, options?: ConfigurationOptions): Promise<HttpInfo<TemplateView>> {
+        return this.api.getTemplateWithHttpInfo(param.id,  options).toPromise();
+    }
+
+    /**
+     * Fetch one template by id. Beta: templates are unstable — their shape may change before they are declared stable.
+     * Get a template (beta)
+     * @param param the request object
+     */
+    public getTemplate(param: TemplatesApiGetTemplateRequest, options?: ConfigurationOptions): Promise<TemplateView> {
+        return this.api.getTemplate(param.id,  options).toPromise();
+    }
+
+    /**
+     * List the pre-built starter templates shipped with the deployment, sorted by alias. Returns catalog metadata only; fetch one by alias for the full body sources, or copy one into your library with from_starter on POST /v1/templates. Beta: templates are unstable — their shape may change before they are declared stable.
+     * List starter templates (beta)
+     * @param param the request object
+     */
+    public listStarterTemplatesWithHttpInfo(param: TemplatesApiListStarterTemplatesRequest = {}, options?: ConfigurationOptions): Promise<HttpInfo<PageStarterTemplateView>> {
+        return this.api.listStarterTemplatesWithHttpInfo( options).toPromise();
+    }
+
+    /**
+     * List the pre-built starter templates shipped with the deployment, sorted by alias. Returns catalog metadata only; fetch one by alias for the full body sources, or copy one into your library with from_starter on POST /v1/templates. Beta: templates are unstable — their shape may change before they are declared stable.
+     * List starter templates (beta)
+     * @param param the request object
+     */
+    public listStarterTemplates(param: TemplatesApiListStarterTemplatesRequest = {}, options?: ConfigurationOptions): Promise<PageStarterTemplateView> {
+        return this.api.listStarterTemplates( options).toPromise();
+    }
+
+    /**
+     * List the account\'s templates, newest first. Returns metadata only (no body/html_body); fetch one by id for the full sources. Beta: templates are unstable — their shape may change before they are declared stable.
+     * List templates (beta)
+     * @param param the request object
+     */
+    public listTemplatesWithHttpInfo(param: TemplatesApiListTemplatesRequest = {}, options?: ConfigurationOptions): Promise<HttpInfo<PageTemplateSummaryView>> {
+        return this.api.listTemplatesWithHttpInfo( options).toPromise();
+    }
+
+    /**
+     * List the account\'s templates, newest first. Returns metadata only (no body/html_body); fetch one by id for the full sources. Beta: templates are unstable — their shape may change before they are declared stable.
+     * List templates (beta)
+     * @param param the request object
+     */
+    public listTemplates(param: TemplatesApiListTemplatesRequest = {}, options?: ConfigurationOptions): Promise<PageTemplateSummaryView> {
+        return this.api.listTemplates( options).toPromise();
+    }
+
+    /**
+     * Partial update. Changed template parts are re-parsed; set alias or html_body to \"\" to clear them. Beta: templates are unstable — their shape may change before they are declared stable.
+     * Update a template (beta)
+     * @param param the request object
+     */
+    public updateTemplateWithHttpInfo(param: TemplatesApiUpdateTemplateRequest, options?: ConfigurationOptions): Promise<HttpInfo<TemplateView>> {
+        return this.api.updateTemplateWithHttpInfo(param.id, param.updateTemplateRequest,  options).toPromise();
+    }
+
+    /**
+     * Partial update. Changed template parts are re-parsed; set alias or html_body to \"\" to clear them. Beta: templates are unstable — their shape may change before they are declared stable.
+     * Update a template (beta)
+     * @param param the request object
+     */
+    public updateTemplate(param: TemplatesApiUpdateTemplateRequest, options?: ConfigurationOptions): Promise<TemplateView> {
+        return this.api.updateTemplate(param.id, param.updateTemplateRequest,  options).toPromise();
+    }
+
+    /**
+     * Dry-run template source without persisting: reports per-part parse errors, a rendered preview (against test_data when provided), and suggested_data — a placeholder value for every variable the source references. Beta: templates are unstable — their shape may change before they are declared stable.
+     * Validate template source (beta)
+     * @param param the request object
+     */
+    public validateTemplateWithHttpInfo(param: TemplatesApiValidateTemplateRequest, options?: ConfigurationOptions): Promise<HttpInfo<ValidateTemplateResponse>> {
+        return this.api.validateTemplateWithHttpInfo(param.validateTemplateRequest,  options).toPromise();
+    }
+
+    /**
+     * Dry-run template source without persisting: reports per-part parse errors, a rendered preview (against test_data when provided), and suggested_data — a placeholder value for every variable the source references. Beta: templates are unstable — their shape may change before they are declared stable.
+     * Validate template source (beta)
+     * @param param the request object
+     */
+    public validateTemplate(param: TemplatesApiValidateTemplateRequest, options?: ConfigurationOptions): Promise<ValidateTemplateResponse> {
+        return this.api.validateTemplate(param.validateTemplateRequest,  options).toPromise();
     }
 
 }

@@ -52,3 +52,54 @@ describe("McpClient review routing (tier-correct endpoints)", () => {
     expect(sdk.reviews.get).not.toHaveBeenCalled();
   });
 });
+
+// Templates (beta) ride the SDK's `templates` resource through the shared
+// E2AClient — same retries/typed errors/camelCase views as every other tool.
+// These pin the delegation: every McpClient template method must route to
+// sdk.templates (no parallel HTTP stack), collapsing the single-page list
+// pagers to flat arrays.
+describe("McpClient templates (SDK-backed)", () => {
+  function mockTemplatesSdk() {
+    return {
+      templates: {
+        list: vi.fn(() => ({ toArray: async () => [{ id: "tmpl_1", name: "Welcome" }] })),
+        get: vi.fn(async (id: string) => ({ id, name: "Welcome", htmlBody: "<p>Hi</p>" })),
+        create: vi.fn(async () => ({ id: "tmpl_new", name: "Approvals" })),
+        update: vi.fn(async (id: string) => ({ id, name: "Welcome" })),
+        delete: vi.fn(async () => undefined),
+        validate: vi.fn(async () => ({ valid: true, errors: [], suggestedData: { name: "example" } })),
+        listStarters: vi.fn(() => ({ toArray: async () => [{ alias: "welcome" }] })),
+        getStarter: vi.fn(async (alias: string) => ({ alias, body: "Hi {{name}}" })),
+      },
+    };
+  }
+
+  it("routes every template method through sdk.templates", async () => {
+    const sdk = mockTemplatesSdk();
+    const c = new McpClient(sdk as never, "", "account");
+
+    expect(await c.listTemplates()).toEqual([{ id: "tmpl_1", name: "Welcome" }]);
+    expect(sdk.templates.list).toHaveBeenCalledOnce();
+
+    await c.getTemplate("tmpl_1");
+    expect(sdk.templates.get).toHaveBeenCalledWith("tmpl_1");
+
+    await c.createTemplate({ fromStarter: "welcome", alias: "my-welcome" });
+    expect(sdk.templates.create).toHaveBeenCalledWith({ fromStarter: "welcome", alias: "my-welcome" });
+
+    await c.updateTemplate("tmpl_1", { subject: "New {{x}}", htmlBody: "" });
+    expect(sdk.templates.update).toHaveBeenCalledWith("tmpl_1", { subject: "New {{x}}", htmlBody: "" });
+
+    await c.deleteTemplate("tmpl_1");
+    expect(sdk.templates.delete).toHaveBeenCalledWith("tmpl_1");
+
+    await c.validateTemplate({ subject: "Hi {{name}}", testData: { name: "Ada" } });
+    expect(sdk.templates.validate).toHaveBeenCalledWith({ subject: "Hi {{name}}", testData: { name: "Ada" } });
+
+    expect(await c.listStarterTemplates()).toEqual([{ alias: "welcome" }]);
+    expect(sdk.templates.listStarters).toHaveBeenCalledOnce();
+
+    await c.getStarterTemplate("welcome");
+    expect(sdk.templates.getStarter).toHaveBeenCalledWith("welcome");
+  });
+});
