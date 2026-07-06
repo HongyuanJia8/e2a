@@ -24,6 +24,7 @@ import (
 	"github.com/Mnexa-AI/e2a/internal/hitlworker"
 	"github.com/Mnexa-AI/e2a/internal/idempotency"
 	"github.com/Mnexa-AI/e2a/internal/identity"
+	"github.com/Mnexa-AI/e2a/internal/jobs"
 	"github.com/Mnexa-AI/e2a/internal/limits"
 	"github.com/Mnexa-AI/e2a/internal/oauth"
 	"github.com/Mnexa-AI/e2a/internal/outbound"
@@ -145,10 +146,11 @@ func main() {
 	if err := identity.RunMigrations(ctx, pool, migrations.FS, migrationMode); err != nil {
 		log.Fatalf("Schema migration failed: %v", err)
 	}
-	// River's own schema (job queue) for the sender-identity workers
-	// (decision 4 / Slice 4). Tracked in River's river_migration table,
-	// separate from e2a's schema_migrations; idempotent.
-	if err := senderidentity.Migrate(ctx, pool); err != nil {
+	// River's own schema (the shared job queue, internal/jobs). Tracked in
+	// River's river_migration table, separate from e2a's schema_migrations;
+	// idempotent. Applied unconditionally so river_job exists for every domain
+	// that registers on the shared client.
+	if err := jobs.Migrate(ctx, pool); err != nil {
 		log.Fatalf("River schema migration failed: %v", err)
 	}
 
@@ -251,25 +253,37 @@ func main() {
 	// domain delete enqueues a teardown job in the delete tx. Without SES the
 	// interface stays a true nil (sending_status never leaves "none").
 	var senderEnqueuer apiserver.SenderIdentityEnqueuer
+	// jobsClient is the shared River client. Hoisted so the shutdown sequence
+	// can drain it under the same bounded deadline as the HTTP server + workers
+	// (nil when SES is off — nothing registers on it yet).
+	var jobsClient *jobs.Client
 	if region := cfg.SenderIdentity.SESRegion; region != "" {
 		provider, perr := senderidentity.NewSESProviderFromConfig(ctx, region)
 		if perr != nil {
 			log.Fatalf("sender identity: build SES provider: %v", perr)
 		}
-		senderMgr, merr := senderidentity.NewManager(
-			pool,
+		senderMgr := senderidentity.NewManager(
 			senderidentity.NewStoreAdapter(store),
 			provider,
 			senderIdentityEventFirer(webhookPublisher),
 			senderidentity.Config{},
 		)
-		if merr != nil {
-			log.Fatalf("sender identity: build manager: %v", merr)
+		// Build the shared River client with senderidentity as its (currently
+		// only) registrar; as outbound/webhook/HITL move onto River they join
+		// this same jobs.New call. Inject the client back so the manager's
+		// Enqueue* methods can insert.
+		jc, jerr := jobs.New(pool, jobs.Config{}, senderMgr)
+		if jerr != nil {
+			log.Fatalf("jobs: build shared river client: %v", jerr)
 		}
-		if serr := senderMgr.Start(ctx); serr != nil {
-			log.Fatalf("sender identity: start manager: %v", serr)
+		jobsClient = jc
+		senderMgr.SetEnqueuer(jobsClient)
+		if serr := jobsClient.Start(ctx); serr != nil {
+			log.Fatalf("jobs: start shared river client: %v", serr)
 		}
-		defer senderMgr.Stop(context.Background())
+		// Stop is driven from the shutdown sequence under the shared deadline,
+		// not a context.Background() defer (which would drain unbounded, past
+		// the platform grace period).
 		senderEnqueuer = senderMgr
 		log.Printf("[sender-identity] SES provisioning enabled (region=%s)", region)
 	}
@@ -655,6 +669,22 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownBudget)
 	defer shutdownCancel()
 
+	// Drain the shared River client concurrently with HTTP shutdown, under the
+	// SAME deadline. Stop() halts claiming new jobs immediately (so a
+	// terminating replica stops picking up fresh work, like the cancelled
+	// workers above) and drains in-flight jobs; bounding it by shutdownCtx means
+	// a job stuck in an SES/network call is abandoned when the shared budget
+	// expires rather than blocking process exit past the platform grace period.
+	riverDone := make(chan struct{})
+	go func() {
+		if jobsClient != nil {
+			if err := jobsClient.Stop(shutdownCtx); err != nil && shutdownCtx.Err() == nil {
+				log.Printf("River client stop: %v", err)
+			}
+		}
+		close(riverDone)
+	}()
+
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Printf("HTTP server shutdown error: %v", err)
 	}
@@ -674,4 +704,7 @@ func main() {
 	case <-shutdownCtx.Done():
 		log.Println("Background workers did not drain within shutdown budget; exiting anyway.")
 	}
+	// River drain is bounded by the same shutdownCtx, so this returns by the
+	// deadline regardless.
+	<-riverDone
 }
