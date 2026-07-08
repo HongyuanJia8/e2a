@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -10,9 +11,11 @@ import (
 	"time"
 
 	"github.com/Mnexa-AI/e2a/internal/agent"
+	"github.com/Mnexa-AI/e2a/internal/idempotency"
 	"github.com/Mnexa-AI/e2a/internal/identity"
 	"github.com/Mnexa-AI/e2a/internal/outbound"
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/jackc/pgx/v5"
 )
 
 // jsonResponse builds an extra OpenAPI response entry for an operation whose
@@ -312,7 +315,7 @@ func (s *Server) handleReply(ctx context.Context, in *replyInput) (*sendOutput, 
 	if env := recipientCountError(req.To, req.CC, req.BCC); env != nil {
 		return nil, env
 	}
-	return s.deliver(ctx, user, ag, literalRequest(req), "reply", parentMessageID, "/v1/reply/"+in.ID, in.IdempotencyKey, in.RawBody, msg)
+	return s.deliver(ctx, user, ag, literalRequest(req), "reply", parentMessageID, "/v1/reply/"+in.ID, in.IdempotencyKey, in.Wait, in.RawBody, msg)
 }
 
 // replyRecipients resolves a reply's To/CC from the referenced message,
@@ -397,7 +400,7 @@ func (s *Server) handleForward(ctx context.Context, in *forwardInput) (*sendOutp
 	}
 	req.CC = agent.StripAgentSelfAliases(req.CC, ag.EmailAddress())
 	req.BCC = agent.StripAgentSelfAliases(req.BCC, ag.EmailAddress())
-	return s.deliver(ctx, user, ag, literalRequest(req), "forward", msg.ThreadMessageID(), "/v1/forward/"+in.ID, in.IdempotencyKey, in.RawBody, msg)
+	return s.deliver(ctx, user, ag, literalRequest(req), "forward", msg.ThreadMessageID(), "/v1/forward/"+in.ID, in.IdempotencyKey, in.Wait, in.RawBody, msg)
 }
 
 // validateOutboundBody runs the shared pre-send validation.
@@ -462,9 +465,33 @@ func validateAttachments(atts []outbound.Attachment) *ErrorEnvelope {
 // Failures inside the closure happen strictly before the DeliverOutbound
 // side effect, so runIdempotent releases the key and a retry can proceed —
 // exactly fn's documented contract.
-func (s *Server) deliver(ctx context.Context, user *identity.User, ag *identity.AgentIdentity, prepare func() (outbound.SendRequest, *ErrorEnvelope), msgType, replyTo, route, idemKey string, rawBody []byte, referenced *identity.Message) (*sendOutput, error) {
+func (s *Server) deliver(ctx context.Context, user *identity.User, ag *identity.AgentIdentity, prepare func() (outbound.SendRequest, *ErrorEnvelope), msgType, replyTo, route, idemKey, wait string, rawBody []byte, referenced *identity.Message) (*sendOutput, error) {
 	if s.deps.DeliverOutbound == nil {
 		return nil, NewError(http.StatusInternalServerError, "internal_error", "outbound delivery unavailable")
+	}
+	// idemCompleteTx lets the async accept-tx (agent.DeliverOutbound) commit this
+	// request's idempotency-key completion in the SAME transaction as the message
+	// insert + send-job enqueue — so a crash after that commit replays 'accepted'
+	// instead of re-persisting. It caches the EXACT wire body deliver() returns for
+	// an accepted result (built below), keeping replay byte-faithful. nil when the
+	// request carries no Idempotency-Key or no store is wired (then agent skips it,
+	// and the synchronous path is unaffected). Uses the same user namespace + key
+	// runIdempotent Claims/Completes under, so its in-tx Complete and runIdempotent's
+	// post-hoc Complete address the same row (the latter no-ops on the in_progress
+	// guard once this has run).
+	var idemCompleteTx agent.AcceptIdemCompleter
+	if idemKey != "" && s.deps.Idempotency != nil {
+		nsKey := idemUserNS + idemKey
+		uid := user.ID
+		idemCompleteTx = func(ctx context.Context, tx pgx.Tx, messageID string) error {
+			raw, mErr := json.Marshal(acceptedView(messageID))
+			if mErr != nil {
+				raw = []byte("{}")
+			}
+			return s.deps.Idempotency.CompleteTx(ctx, tx, uid, nsKey, idempotency.CachedResponse{
+				StatusCode: http.StatusOK, ContentType: "application/json", Body: raw,
+			})
+		}
 	}
 	status, view, err := runIdempotent(s, ctx, user.ID, idemKey, route, rawBody, func() (int, SendResultView, error) {
 		req, env := prepare()
@@ -488,19 +515,70 @@ func (s *Server) deliver(ctx context.Context, user *identity.User, ag *identity.
 				return 0, SendResultView{}, NewError(http.StatusInternalServerError, "internal_error", "limits check failed")
 			}
 		}
-		res, derr := s.deps.DeliverOutbound(ctx, user, ag, req, msgType, replyTo, referenced)
+		res, derr := s.deps.DeliverOutbound(ctx, user, ag, req, msgType, replyTo, referenced, idemCompleteTx)
 		if derr != nil {
 			return 0, SendResultView{}, NewError(derr.Status, derr.Code, derr.Msg)
 		}
 		if res.Held {
 			return http.StatusAccepted, SendResultView{Status: "pending_review", MessageID: res.PendingMessageID, ApprovalExpiresAt: res.ApprovalExpiresAt}, nil
 		}
+		// Async accept (slice C): 200 with status=accepted. The body MUST match
+		// acceptedView (the idempotency cache is keyed to it) — no provider id /
+		// sent_as yet (the send hasn't happened; they surface via GET / webhooks).
+		if res.Status == "accepted" {
+			return http.StatusOK, acceptedView(res.MessageID), nil
+		}
 		return http.StatusOK, SendResultView{Status: "sent", MessageID: res.MessageID, ProviderMessageID: res.ProviderMessageID, SentAs: res.SentAs, Method: res.Method}, nil
 	})
 	if err != nil {
 		return nil, err
 	}
+	// wait=sent (contract §2): after an async accept, hold the request until the
+	// send reaches sent/failed or the ceiling, then return that state. The
+	// idempotency cache already holds the accept-time 'accepted' body (§2.4), so a
+	// replay does NOT re-wait — only this live caller sees the polled outcome.
+	if wait == "sent" && view.Status == "accepted" && s.deps.PollSendOutcome != nil {
+		status, view = s.waitForSent(ctx, status, view)
+	}
 	return &sendOutput{Status: status, Body: view}, nil
+}
+
+const (
+	waitSentCeiling = 15 * time.Second // below the 20s contract ceiling (§2.3) + proxy timeouts
+	waitSentPoll    = 250 * time.Millisecond
+)
+
+// waitForSent polls the async send's delivery_status until sent/failed or the
+// ceiling. Timeout → the accepted view (the caller polls GET / waits for the event).
+func (s *Server) waitForSent(ctx context.Context, acceptedStatus int, accepted SendResultView) (int, SendResultView) {
+	deadline := time.Now().Add(waitSentCeiling)
+	for {
+		if o, err := s.deps.PollSendOutcome(ctx, accepted.MessageID); err == nil {
+			switch o.DeliveryStatus {
+			case "sent", "delivered", "deferred", "bounced", "complained":
+				return http.StatusOK, SendResultView{Status: "sent", MessageID: accepted.MessageID, ProviderMessageID: o.ProviderMessageID, SentAs: o.SentAs, Method: accepted.Method}
+			case "failed":
+				return http.StatusOK, SendResultView{Status: "failed", MessageID: accepted.MessageID, Method: accepted.Method}
+			}
+		}
+		if time.Now().After(deadline) {
+			return acceptedStatus, accepted // still in flight
+		}
+		select {
+		case <-ctx.Done():
+			return acceptedStatus, accepted
+		case <-time.After(waitSentPoll):
+		}
+	}
+}
+
+// acceptedView is the single source of the async-accept wire body (slice C). Both
+// the live response and the idempotency cache entry are built from it, so a replay
+// is byte-identical. Deliberately minimal — status + message_id + method; the
+// provider id / sent_as / delivery outcome are not known at accept time and surface
+// later via GET /v1/messages/{id} and the email.sent / email.failed webhooks.
+func acceptedView(messageID string) SendResultView {
+	return SendResultView{Status: "accepted", MessageID: messageID, Method: "smtp"}
 }
 
 // literalRequest wraps an already-built SendRequest as a deliver prepare
@@ -574,5 +652,5 @@ func (s *Server) handleCreateMessage(ctx context.Context, in *createMessageInput
 		}, nil
 	}
 	// A cold send has no referenced inbound (nil) — it's not a reply/forward.
-	return s.deliver(ctx, user, ag, prepare, "send", "", route, in.IdempotencyKey, in.RawBody, nil)
+	return s.deliver(ctx, user, ag, prepare, "send", "", route, in.IdempotencyKey, in.Wait, in.RawBody, nil)
 }
