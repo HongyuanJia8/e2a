@@ -42,6 +42,7 @@ type Config struct {
 	OutboundSMTP     OutboundSMTPConfig     `yaml:"outbound_smtp"`
 	Outbound         OutboundConfig         `yaml:"outbound"`
 	Inbound          InboundConfig          `yaml:"inbound"`
+	WebhookFanout    WebhookFanoutConfig    `yaml:"webhook_fanout"`
 	SenderIdentity   SenderIdentityConfig   `yaml:"sender_identity"`
 	DeliveryFeedback DeliveryFeedbackConfig `yaml:"delivery_feedback"`
 	Limits           LimitsConfig           `yaml:"limits"`
@@ -148,6 +149,18 @@ type InboundConfig struct {
 	Mode string `yaml:"mode"`
 }
 
+// WebhookFanoutConfig selects the webhook fan-out execution model (webhook-fanout-
+// river-migration.md). Mode="legacy" (the default) drains webhook_events →
+// webhook_subscriber_deliveries via the in-process webhookpub.OutboxWorker
+// (LISTEN/NOTIFY + poll + SKIP-LOCKED lease). Mode="river" opts into the River
+// pipeline: PublishTx/PublishBestEffortTx enqueue a webhook_fan_out job in the event's
+// tx and the webhookpub.FanOutWorker does the match/insert/enqueue off the drain loop.
+// Override with E2A_WEBHOOK_FANOUT_MODE. Any value other than "river" is treated as
+// "legacy" (fail-safe to the unchanged path). Wired in Slice 2; unused under legacy.
+type WebhookFanoutConfig struct {
+	Mode string `yaml:"mode"`
+}
+
 // DeliveryFeedbackConfig controls outbound delivery feedback (decision 9 /
 // Slice 4b). When SESConfigurationSet is set, outbound mail is tagged so SES
 // publishes delivery/bounce/complaint events; SNSTopicARNs is the fail-closed
@@ -233,9 +246,10 @@ func Load(path string) (*Config, error) {
 			MaxStorageBytes:  1 << 50, // 1 PiB
 			CacheTTLSeconds:  60,
 		},
-		Outbound: OutboundConfig{Mode: "sync"},
-		Inbound:  InboundConfig{Mode: "sync"},
-		Env:      "development",
+		Outbound:      OutboundConfig{Mode: "sync"},
+		Inbound:       InboundConfig{Mode: "sync"},
+		WebhookFanout: WebhookFanoutConfig{Mode: "legacy"},
+		Env:           "development",
 	}
 
 	if err := yaml.Unmarshal(data, cfg); err != nil {
@@ -289,6 +303,9 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("E2A_INBOUND_MODE"); v != "" {
 		cfg.Inbound.Mode = v
+	}
+	if v := os.Getenv("E2A_WEBHOOK_FANOUT_MODE"); v != "" {
+		cfg.WebhookFanout.Mode = v
 	}
 	if v := os.Getenv("E2A_OUTBOUND_SMTP_REQUIRE_TLS"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
