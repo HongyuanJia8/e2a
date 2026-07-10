@@ -82,7 +82,7 @@ func TestWorkerAutoRejectsExpiredPending(t *testing.T) {
 	msg, err := store.CreatePendingOutboundMessage(ctx, agent.ID,
 		[]string{"alice@example.com"}, nil, nil,
 		"Held", "body", "<p>html</p>", nil,
-		"send", "", "", 60)
+		"send", "", "", "", 60)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestWorkerAutoApprovesExpiredPending(t *testing.T) {
 	msg, _ := store.CreatePendingOutboundMessage(ctx, agent.ID,
 		[]string{"alice@example.com"}, nil, nil,
 		"Auto-send subject", "plain body", "<p>html body</p>", nil,
-		"send", "", "", 60)
+		"send", "", "", "", 60)
 	backdateExpiry(t, pool, msg.ID)
 
 	w.RunOnce(ctx)
@@ -161,6 +161,37 @@ func TestWorkerAutoApprovesExpiredPending(t *testing.T) {
 	}
 }
 
+// TestWorkerAutoApproveCarriesReplyTo pins the Reply-To override through the
+// SYNC TTL auto-approve path end-to-end: pending row with a caller override →
+// TTL expiry → ExpireApproveAndSend recompose → composed SMTP bytes carry the
+// override, not the agent's own address. This is the exact seam where a missing
+// reply_to in ExpireApproveAndSend's locked SELECT silently dropped the override.
+func TestWorkerAutoApproveCarriesReplyTo(t *testing.T) {
+	w, store, pool, smtpDone := setupWorker(t)
+	ctx := context.Background()
+
+	agent := prepareAgent(t, store, "auto-approve-rt", identity.HITLExpirationApprove)
+	const override = "Support <support@acme.com>"
+	msg, _ := store.CreatePendingOutboundMessage(ctx, agent.ID,
+		[]string{"alice@example.com"}, nil, nil,
+		"RT subject", "plain body", "", nil,
+		"send", "", "", override, 60)
+	backdateExpiry(t, pool, msg.ID)
+
+	w.RunOnce(ctx)
+
+	msgs := smtpDone()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 SMTP message, got %d", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Data, "Reply-To: "+override) {
+		t.Errorf("SMTP body missing overridden Reply-To %q:\n%s", override, msgs[0].Data)
+	}
+	if strings.Contains(msgs[0].Data, "Reply-To: "+agent.EmailAddress()) {
+		t.Errorf("SMTP body fell back to agent-address Reply-To — override was dropped:\n%s", msgs[0].Data)
+	}
+}
+
 // TestWorkerAutoApproveSelfSendDeliversViaLoopback: a held self-send
 // whose TTL expires with the agent's hitl_expiration_action="approve"
 // must be auto-approved via the loopback path — outbound.Sender.Send
@@ -178,7 +209,7 @@ func TestWorkerAutoApproveSelfSendDeliversViaLoopback(t *testing.T) {
 	msg, err := store.CreatePendingOutboundMessage(ctx, agent.ID,
 		[]string{agent.EmailAddress()}, nil, nil,
 		"self auto-approve", "note to self body", "", nil,
-		"send", "", "", 60)
+		"send", "", "", "", 60)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +270,7 @@ func TestWorkerAutoApproveSendFailureFallsBackToRejected(t *testing.T) {
 	agent := prepareAgent(t, store, "auto-approve-fail", identity.HITLExpirationApprove)
 	msg, _ := store.CreatePendingOutboundMessage(ctx, agent.ID,
 		[]string{"alice@example.com"}, nil, nil,
-		"x", "body", "", nil, "send", "", "", 60)
+		"x", "body", "", nil, "send", "", "", "", 60)
 	backdateExpiry(t, pool, msg.ID)
 
 	w.RunOnce(ctx)
@@ -279,7 +310,7 @@ func TestWorkerAutoApproveUnverifiedAgentRejects(t *testing.T) {
 
 	msg, _ := store.CreatePendingOutboundMessage(ctx, a.ID,
 		[]string{"alice@example.com"}, nil, nil,
-		"x", "body", "", nil, "send", "", "", 60)
+		"x", "body", "", nil, "send", "", "", "", 60)
 	backdateExpiry(t, pool, msg.ID)
 
 	w.RunOnce(ctx)
@@ -307,7 +338,7 @@ func TestWorkerSkipsFreshPending(t *testing.T) {
 	agent := prepareAgent(t, store, "skip-fresh", identity.HITLExpirationReject)
 	msg, _ := store.CreatePendingOutboundMessage(ctx, agent.ID,
 		[]string{"alice@example.com"}, nil, nil,
-		"fresh", "b", "", nil, "send", "", "", 3600)
+		"fresh", "b", "", nil, "send", "", "", "", 3600)
 
 	w.RunOnce(ctx)
 

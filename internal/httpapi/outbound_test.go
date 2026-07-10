@@ -76,6 +76,48 @@ func TestSendInvalidRecipient(t *testing.T) {
 	}
 }
 
+// TestSendReplyToPropagates: a valid reply_to reaches the delivery layer verbatim
+// (display name preserved), so the composer can set the Reply-To header.
+func TestSendReplyToPropagates(t *testing.T) {
+	srv := testServer(t)
+	code, body := postJSON(t, srv.URL+sendURL, "good", map[string]any{
+		"to": []string{"alice@x.com"}, "subject": "Hi", "body": "hello",
+		"reply_to": "Support <support@acme.com>",
+	})
+	if code != 200 || body["status"] != "sent" {
+		t.Fatalf("want 200 sent, got %d %v", code, body)
+	}
+	if got := lastDeliveredReq().ReplyTo; got != "Support <support@acme.com>" {
+		t.Fatalf("delivered ReplyTo = %q, want %q", got, "Support <support@acme.com>")
+	}
+}
+
+// TestSendInvalidReplyTo: a non-address reply_to is rejected at the edge (400)
+// rather than silently mangled by the composer or bounced by the relay.
+func TestSendInvalidReplyTo(t *testing.T) {
+	srv := testServer(t)
+	code, body := postJSON(t, srv.URL+sendURL, "good", map[string]any{
+		"to": []string{"alice@x.com"}, "subject": "Hi", "body": "hello",
+		"reply_to": "not an address",
+	})
+	if code != 400 || errCode(body) != "invalid_request" {
+		t.Fatalf("want 400 invalid_request for bad reply_to, got %d %v", code, body)
+	}
+}
+
+// TestSendMultiReplyToRejected: Reply-To carries a single mailbox in our contract;
+// a comma list is rejected so callers don't rely on unspecified multi-address behavior.
+func TestSendMultiReplyToRejected(t *testing.T) {
+	srv := testServer(t)
+	code, body := postJSON(t, srv.URL+sendURL, "good", map[string]any{
+		"to": []string{"alice@x.com"}, "subject": "Hi", "body": "hello",
+		"reply_to": "a@x.com, b@x.com",
+	})
+	if code != 400 || errCode(body) != "invalid_request" {
+		t.Fatalf("want 400 invalid_request for multi reply_to, got %d %v", code, body)
+	}
+}
+
 // TestSendSetsAgentAsSender: there is no body `from` — the sender is the path
 // agent and auth scopes it. A plain send (no `from`) succeeds.
 func TestSendSetsAgentAsSender(t *testing.T) {
@@ -145,6 +187,52 @@ func TestReplySent(t *testing.T) {
 	code, body := postJSON(t, srv.URL+"/v1/agents/support%40acme.com/messages/msg_in1/reply", "good", map[string]any{"body": "thanks"})
 	if code != 200 || body["status"] != "sent" {
 		t.Fatalf("want 200 sent, got %d %v", code, body)
+	}
+}
+
+// TestReplyReplyToPropagates / TestForwardReplyToPropagates: reply and forward
+// each build their own outbound.SendRequest literal, so a dropped ReplyTo mapping
+// there wouldn't be caught by the send-path test. Assert the override reaches the
+// delivery layer on both.
+func TestReplyReplyToPropagates(t *testing.T) {
+	srv := testServer(t)
+	code, _ := postJSON(t, srv.URL+"/v1/agents/support%40acme.com/messages/msg_in1/reply", "good",
+		map[string]any{"body": "thanks", "reply_to": "Support <support@acme.com>"})
+	if code != 200 {
+		t.Fatalf("want 200, got %d", code)
+	}
+	if got := lastDeliveredReq().ReplyTo; got != "Support <support@acme.com>" {
+		t.Fatalf("reply delivered ReplyTo = %q, want override", got)
+	}
+}
+
+func TestReplyInvalidReplyTo(t *testing.T) {
+	srv := testServer(t)
+	code, body := postJSON(t, srv.URL+"/v1/agents/support%40acme.com/messages/msg_in1/reply", "good",
+		map[string]any{"body": "thanks", "reply_to": "not an address"})
+	if code != 400 || errCode(body) != "invalid_request" {
+		t.Fatalf("want 400 invalid_request, got %d %v", code, body)
+	}
+}
+
+func TestForwardReplyToPropagates(t *testing.T) {
+	srv := testServer(t)
+	code, _ := postJSON(t, srv.URL+"/v1/agents/support%40acme.com/messages/msg_in1/forward", "good",
+		map[string]any{"to": []string{"newperson@x.com"}, "body": "fyi", "reply_to": "Support <support@acme.com>"})
+	if code != 200 {
+		t.Fatalf("want 200, got %d", code)
+	}
+	if got := lastDeliveredReq().ReplyTo; got != "Support <support@acme.com>" {
+		t.Fatalf("forward delivered ReplyTo = %q, want override", got)
+	}
+}
+
+func TestForwardInvalidReplyTo(t *testing.T) {
+	srv := testServer(t)
+	code, body := postJSON(t, srv.URL+"/v1/agents/support%40acme.com/messages/msg_in1/forward", "good",
+		map[string]any{"to": []string{"newperson@x.com"}, "body": "fyi", "reply_to": "a@x.com, b@x.com"})
+	if code != 400 || errCode(body) != "invalid_request" {
+		t.Fatalf("want 400 invalid_request for multi reply_to, got %d %v", code, body)
 	}
 }
 

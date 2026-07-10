@@ -52,8 +52,7 @@ func TestGetOutboundMessageForUser(t *testing.T) {
 		"Draft", "plain", "<p>html</p>",
 		atts,
 		"send", "conv_1", "",
-		3600,
-	)
+		"", 3600)
 	if err != nil {
 		t.Fatalf("CreatePendingOutboundMessage: %v", err)
 	}
@@ -100,8 +99,7 @@ func TestGetOutboundMessageForUserCrossUserIsNotFound(t *testing.T) {
 		ctx, a.ID,
 		[]string{"alice@example.com"}, nil, nil,
 		"Draft", "b", "", nil,
-		"send", "", "", 3600,
-	)
+		"send", "", "", "", 3600)
 
 	_, err = store.GetOutboundMessageForUser(ctx, msg.ID, otherUser.ID)
 	if !errors.Is(err, identity.ErrMessageNotFound) {
@@ -118,17 +116,17 @@ func TestListPendingOutboundForUser(t *testing.T) {
 
 	// Three pending messages with different expiries
 	_, err := store.CreatePendingOutboundMessage(ctx, a.ID,
-		[]string{"c@example.com"}, nil, nil, "C", "x", "", nil, "send", "", "", 7200)
+		[]string{"c@example.com"}, nil, nil, "C", "x", "", nil, "send", "", "", "", 7200)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = store.CreatePendingOutboundMessage(ctx, a.ID,
-		[]string{"a@example.com"}, nil, nil, "A", "x", "", nil, "send", "", "", 600)
+		[]string{"a@example.com"}, nil, nil, "A", "x", "", nil, "send", "", "", "", 600)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = store.CreatePendingOutboundMessage(ctx, a.ID,
-		[]string{"b@example.com"}, nil, nil, "B", "x", "", nil, "send", "", "", 3600)
+		[]string{"b@example.com"}, nil, nil, "B", "x", "", nil, "send", "", "", "", 3600)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,9 +170,9 @@ func TestListPendingOutboundForUserScoping(t *testing.T) {
 	_, agentB := setupPendingAgent(t, store, "scope-b")
 
 	_, _ = store.CreatePendingOutboundMessage(ctx, agentA.ID,
-		[]string{"x@example.com"}, nil, nil, "A-msg", "b", "", nil, "send", "", "", 3600)
+		[]string{"x@example.com"}, nil, nil, "A-msg", "b", "", nil, "send", "", "", "", 3600)
 	_, _ = store.CreatePendingOutboundMessage(ctx, agentB.ID,
-		[]string{"x@example.com"}, nil, nil, "B-msg", "b", "", nil, "send", "", "", 3600)
+		[]string{"x@example.com"}, nil, nil, "B-msg", "b", "", nil, "send", "", "", "", 3600)
 
 	got, err := store.ListPendingOutboundForUser(ctx, userA.ID, 50)
 	if err != nil {
@@ -182,6 +180,37 @@ func TestListPendingOutboundForUserScoping(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Subject != "A-msg" {
 		t.Errorf("userA should see only A-msg; got %+v", got)
+	}
+}
+
+// TestApproveAndSendCarriesReplyTo pins that a caller Reply-To override survives
+// ApproveAndSend's own locked SELECT/scan (a third hand-maintained query, distinct
+// from GetOutboundMessageForUser and LoadOutboundDraft) and reaches the send
+// callback's message. A dropped reply_to column here silently strips the override
+// on every human-approved send.
+func TestApproveAndSendCarriesReplyTo(t *testing.T) {
+	pool := testutil.TestDB(t)
+	store := identity.NewStore(pool)
+	ctx := context.Background()
+
+	user, a := setupPendingAgent(t, store, "approve-rt")
+	const override = "Support <support@acme.com>"
+	msg, _ := store.CreatePendingOutboundMessage(ctx, a.ID,
+		[]string{"alice@example.com"}, nil, nil,
+		"Draft", "body", "", nil,
+		"send", "", "", override, 3600)
+
+	var got []string
+	_, err := store.ApproveAndSend(ctx, msg.ID, user.ID, identity.PendingApprovalEdit{},
+		func(m *identity.Message) (identity.SendResult, error) {
+			got = m.ReplyTo
+			return identity.SendResult{ProviderMessageID: "<x@ses>", Method: "smtp", To: m.ToRecipients}, nil
+		})
+	if err != nil {
+		t.Fatalf("ApproveAndSend: %v", err)
+	}
+	if len(got) != 1 || got[0] != override {
+		t.Errorf("send callback ReplyTo = %v, want [%q]", got, override)
 	}
 }
 
@@ -196,7 +225,7 @@ func TestApproveAndSendHappyPath(t *testing.T) {
 		[]string{"alice@example.com"}, []string{"carol@example.com"}, nil,
 		"Draft", "body", "<p>body</p>",
 		[]byte(`[{"filename":"x.txt","content_type":"text/plain","data":"aGk="}]`),
-		"send", "conv_h", "", 3600)
+		"send", "conv_h", "", "", 3600)
 
 	var receivedSubject string
 	var receivedBody string
@@ -277,7 +306,7 @@ func TestApproveAndSend_RecordsReviewedBy(t *testing.T) {
 
 	msg, _ := store.CreatePendingOutboundMessage(ctx, a.ID,
 		[]string{"alice@example.com"}, nil, nil,
-		"With reviewer", "body", "", nil, "send", "", "", 3600)
+		"With reviewer", "body", "", nil, "send", "", "", "", 3600)
 
 	sent, err := store.ApproveAndSend(ctx, msg.ID, user.ID, identity.PendingApprovalEdit{},
 		func(m *identity.Message) (identity.SendResult, error) {
@@ -313,7 +342,7 @@ func TestRejectPending_RecordsReviewedBy(t *testing.T) {
 	user, a := setupPendingAgent(t, store, "reject-reviewer")
 	msg, _ := store.CreatePendingOutboundMessage(ctx, a.ID,
 		[]string{"alice@example.com"}, nil, nil,
-		"to-reject", "body", "", nil, "send", "", "", 3600)
+		"to-reject", "body", "", nil, "send", "", "", "", 3600)
 
 	rejected, err := store.RejectPending(ctx, msg.ID, user.ID, "wrong tone")
 	if err != nil {
@@ -339,7 +368,7 @@ func TestExpireApprove_ReviewedByNil(t *testing.T) {
 	user, a := setupPendingAgent(t, store, "expire-no-reviewer")
 	msg, _ := store.CreatePendingOutboundMessage(ctx, a.ID,
 		[]string{"alice@example.com"}, nil, nil,
-		"to-expire", "body", "", nil, "send", "", "", 3600)
+		"to-expire", "body", "", nil, "send", "", "", "", 3600)
 	// Backdate so ExpireApproveAndSend's pending+expired predicate fires.
 	pool.Exec(ctx, `UPDATE messages SET approval_expires_at = $1 WHERE id = $2`,
 		time.Now().Add(-5*time.Minute), msg.ID)
@@ -373,7 +402,7 @@ func TestApproveAndSendWithEdits(t *testing.T) {
 	msg, _ := store.CreatePendingOutboundMessage(ctx, a.ID,
 		[]string{"alice@example.com"}, nil, nil,
 		"Draft", "orig body", "", nil,
-		"send", "", "", 3600)
+		"send", "", "", "", 3600)
 
 	newSubject := "Edited subject"
 	newBody := "Edited body"
@@ -442,7 +471,7 @@ func TestApproveAndSendSendFailureRollsBack(t *testing.T) {
 	msg, _ := store.CreatePendingOutboundMessage(ctx, a.ID,
 		[]string{"alice@example.com"}, nil, nil,
 		"Draft", "body", "", nil,
-		"send", "", "", 3600)
+		"send", "", "", "", 3600)
 
 	sendErr := errors.New("smtp unavailable")
 	_, err := store.ApproveAndSend(ctx, msg.ID, user.ID, identity.PendingApprovalEdit{},
@@ -506,7 +535,7 @@ func TestApproveAndSendConcurrentApprovers(t *testing.T) {
 	msg, _ := store.CreatePendingOutboundMessage(ctx, a.ID,
 		[]string{"alice@example.com"}, nil, nil,
 		"Draft", "body", "", nil,
-		"send", "", "", 3600)
+		"send", "", "", "", 3600)
 
 	// Barrier: both goroutines enter ApproveAndSend, then their send
 	// callbacks wait on `release` before returning. The DB row lock makes
@@ -588,7 +617,7 @@ func TestApproveAndSendClearsAttachmentsWhenEditsSetEmpty(t *testing.T) {
 	msg, _ := store.CreatePendingOutboundMessage(ctx, a.ID,
 		[]string{"alice@example.com"}, nil, nil,
 		"Draft", "body", "", []byte(`[{"filename":"x","content_type":"text/plain","data":"aA=="}]`),
-		"send", "", "", 3600)
+		"send", "", "", "", 3600)
 
 	var sawAttachments int
 	clearEdit := identity.PendingApprovalEdit{
@@ -632,7 +661,7 @@ func TestApproveAndSendPreservesPriorEditedFlag(t *testing.T) {
 	msg, _ := store.CreatePendingOutboundMessage(ctx, a.ID,
 		[]string{"alice@example.com"}, nil, nil,
 		"Draft", "body", "", nil,
-		"send", "", "", 3600)
+		"send", "", "", "", 3600)
 
 	// Simulate a prior edit flag on the stored row.
 	if _, err := pool.Exec(ctx,
@@ -676,7 +705,7 @@ func TestApproveAndSendCrossUser(t *testing.T) {
 
 	msg, _ := store.CreatePendingOutboundMessage(ctx, a.ID,
 		[]string{"alice@example.com"}, nil, nil,
-		"Draft", "b", "", nil, "send", "", "", 3600)
+		"Draft", "b", "", nil, "send", "", "", "", 3600)
 
 	_, err := store.ApproveAndSend(ctx, msg.ID, otherUser.ID, identity.PendingApprovalEdit{},
 		func(m *identity.Message) (identity.SendResult, error) {
@@ -699,7 +728,7 @@ func TestRejectPendingHappyPath(t *testing.T) {
 		[]string{"alice@example.com"}, nil, nil,
 		"Draft", "bodyX", "<p>htmlX</p>",
 		[]byte(`[{"filename":"x.txt","content_type":"text/plain","data":"aA=="}]`),
-		"send", "", "", 3600)
+		"send", "", "", "", 3600)
 
 	got, err := store.RejectPending(ctx, msg.ID, user.ID, "inappropriate tone")
 	if err != nil {
@@ -746,7 +775,7 @@ func TestRejectPendingAlreadyRejected(t *testing.T) {
 
 	msg, _ := store.CreatePendingOutboundMessage(ctx, a.ID,
 		[]string{"alice@example.com"}, nil, nil,
-		"Draft", "b", "", nil, "send", "", "", 3600)
+		"Draft", "b", "", nil, "send", "", "", "", 3600)
 
 	if _, err := store.RejectPending(ctx, msg.ID, user.ID, "first time"); err != nil {
 		t.Fatalf("first reject: %v", err)
@@ -767,7 +796,7 @@ func TestRejectPendingCrossUser(t *testing.T) {
 
 	msg, _ := store.CreatePendingOutboundMessage(ctx, a.ID,
 		[]string{"alice@example.com"}, nil, nil,
-		"Draft", "b", "", nil, "send", "", "", 3600)
+		"Draft", "b", "", nil, "send", "", "", "", 3600)
 
 	_, err := store.RejectPending(ctx, msg.ID, otherUser.ID, "nope")
 	if !errors.Is(err, identity.ErrMessageNotFound) {
