@@ -22,7 +22,12 @@ import (
 // River delivery workers.
 func TestSelftestAll_AgainstRealServer(t *testing.T) {
 	pool := testutil.TestDB(t)
-	ts := testutil.TestServer(t, pool, testutil.WithOutboundSMTP("127.0.0.1", 1025, "test.e2a.dev"))
+	// In-process fake SMTP so the outbound_send scenario has a reachable relay
+	// without depending on an external Mailpit — the unit/coverage jobs run this
+	// test (no `integration` tag) but don't start Mailpit. The fake accepts the
+	// message and returns a Message-ID, so the real outbound path + email.sent fire.
+	fakeSMTP, _ := testutil.FakeSMTPServer(t)
+	ts := testutil.TestServer(t, pool, testutil.WithOutboundSMTP(fakeSMTP.Host, fakeSMTP.Port, "test.e2a.dev"))
 	ctx := context.Background()
 
 	// --- seed a system-class probe account + agent ---
@@ -54,8 +59,11 @@ func TestSelftestAll_AgainstRealServer(t *testing.T) {
 	sink := selftest.NewHTTPSink()
 	sinkSrv := httptest.NewServer(sink)
 	defer sinkSrv.Close()
+	// Subscribe to both event types the battery asserts on — email.received for
+	// the inbound round-trip and email.sent for the outbound-send scenario —
+	// mirroring what cmd/e2a-prober seed provisions.
 	wh, err := ts.Store.CreateWebhook(ctx, user.ID, sinkSrv.URL+"/sink", "selftest",
-		[]string{"email.received"}, identity.WebhookFilters{})
+		[]string{"email.received", "email.sent"}, identity.WebhookFilters{})
 	if err != nil {
 		t.Fatalf("CreateWebhook: %v", err)
 	}
