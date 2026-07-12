@@ -396,7 +396,7 @@ class MessagesApi:
     ) -> SendResultView:
         """Forward a message
 
-        Forward a message (inbound or outbound) to new recipients; the original is quoted and its attachments are carried over by default. Any attachments[] you supply are added on top of the originals. 202 when held for HITL.
+        Forward a message (inbound or outbound) to new recipients; the original is quoted and its attachments are carried over by default. Any attachments[] you supply are added on top of the originals. 202 when held for HITL. Attachment limits apply to the combined set (carried-over originals + supplied): at most 10 attachments, each ≤ 10 MB decoded, ≤ 25 MB decoded combined (over-count → 400 invalid_request; over-size → 413 payload_too_large).
 
         :param email: (required)
         :type email: str
@@ -445,7 +445,9 @@ class MessagesApi:
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "SendResultView",
             '202': "SendResultView",
+            '400': "ErrorEnvelope",
             '402': "LimitExceededEnvelope",
+            '413': "ErrorEnvelope",
         }
         response_data = await self.api_client.call_api(
             *_param,
@@ -481,7 +483,7 @@ class MessagesApi:
     ) -> ApiResponse[SendResultView]:
         """Forward a message
 
-        Forward a message (inbound or outbound) to new recipients; the original is quoted and its attachments are carried over by default. Any attachments[] you supply are added on top of the originals. 202 when held for HITL.
+        Forward a message (inbound or outbound) to new recipients; the original is quoted and its attachments are carried over by default. Any attachments[] you supply are added on top of the originals. 202 when held for HITL. Attachment limits apply to the combined set (carried-over originals + supplied): at most 10 attachments, each ≤ 10 MB decoded, ≤ 25 MB decoded combined (over-count → 400 invalid_request; over-size → 413 payload_too_large).
 
         :param email: (required)
         :type email: str
@@ -530,7 +532,9 @@ class MessagesApi:
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "SendResultView",
             '202': "SendResultView",
+            '400': "ErrorEnvelope",
             '402': "LimitExceededEnvelope",
+            '413': "ErrorEnvelope",
         }
         response_data = await self.api_client.call_api(
             *_param,
@@ -566,7 +570,7 @@ class MessagesApi:
     ) -> RESTResponseType:
         """Forward a message
 
-        Forward a message (inbound or outbound) to new recipients; the original is quoted and its attachments are carried over by default. Any attachments[] you supply are added on top of the originals. 202 when held for HITL.
+        Forward a message (inbound or outbound) to new recipients; the original is quoted and its attachments are carried over by default. Any attachments[] you supply are added on top of the originals. 202 when held for HITL. Attachment limits apply to the combined set (carried-over originals + supplied): at most 10 attachments, each ≤ 10 MB decoded, ≤ 25 MB decoded combined (over-count → 400 invalid_request; over-size → 413 payload_too_large).
 
         :param email: (required)
         :type email: str
@@ -615,7 +619,9 @@ class MessagesApi:
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "SendResultView",
             '202': "SendResultView",
+            '400': "ErrorEnvelope",
             '402': "LimitExceededEnvelope",
+            '413': "ErrorEnvelope",
         }
         response_data = await self.api_client.call_api(
             *_param,
@@ -2079,7 +2085,7 @@ class MessagesApi:
     ) -> SendResultView:
         """Reply to a message
 
-        Reply to a message (inbound or outbound); recipients and threading are derived from the original. Replying to a message the agent received targets its sender; replying to a message the agent sent continues the thread to its original recipients (`reply_all` also re-includes the original Cc). 202 when held for HITL.
+        Reply to a message (inbound or outbound); recipients and threading are derived from the original. Replying to a message the agent received targets its sender; replying to a message the agent sent continues the thread to its original recipients (`reply_all` also re-includes the original Cc). 202 when held for HITL. Attachment limits: at most 10 attachments, each ≤ 10 MB decoded, ≤ 25 MB decoded combined (over-count → 400 invalid_request; over-size → 413 payload_too_large).
 
         :param email: (required)
         :type email: str
@@ -2128,7 +2134,9 @@ class MessagesApi:
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "SendResultView",
             '202': "SendResultView",
+            '400': "ErrorEnvelope",
             '402': "LimitExceededEnvelope",
+            '413': "ErrorEnvelope",
         }
         response_data = await self.api_client.call_api(
             *_param,
@@ -2164,7 +2172,7 @@ class MessagesApi:
     ) -> ApiResponse[SendResultView]:
         """Reply to a message
 
-        Reply to a message (inbound or outbound); recipients and threading are derived from the original. Replying to a message the agent received targets its sender; replying to a message the agent sent continues the thread to its original recipients (`reply_all` also re-includes the original Cc). 202 when held for HITL.
+        Reply to a message (inbound or outbound); recipients and threading are derived from the original. Replying to a message the agent received targets its sender; replying to a message the agent sent continues the thread to its original recipients (`reply_all` also re-includes the original Cc). 202 when held for HITL. Attachment limits: at most 10 attachments, each ≤ 10 MB decoded, ≤ 25 MB decoded combined (over-count → 400 invalid_request; over-size → 413 payload_too_large).
 
         :param email: (required)
         :type email: str
@@ -2213,7 +2221,9 @@ class MessagesApi:
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "SendResultView",
             '202': "SendResultView",
+            '400': "ErrorEnvelope",
             '402': "LimitExceededEnvelope",
+            '413': "ErrorEnvelope",
         }
         response_data = await self.api_client.call_api(
             *_param,
@@ -2249,7 +2259,7 @@ class MessagesApi:
     ) -> RESTResponseType:
         """Reply to a message
 
-        Reply to a message (inbound or outbound); recipients and threading are derived from the original. Replying to a message the agent received targets its sender; replying to a message the agent sent continues the thread to its original recipients (`reply_all` also re-includes the original Cc). 202 when held for HITL.
+        Reply to a message (inbound or outbound); recipients and threading are derived from the original. Replying to a message the agent received targets its sender; replying to a message the agent sent continues the thread to its original recipients (`reply_all` also re-includes the original Cc). 202 when held for HITL. Attachment limits: at most 10 attachments, each ≤ 10 MB decoded, ≤ 25 MB decoded combined (over-count → 400 invalid_request; over-size → 413 payload_too_large).
 
         :param email: (required)
         :type email: str
@@ -2298,7 +2308,9 @@ class MessagesApi:
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "SendResultView",
             '202': "SendResultView",
+            '400': "ErrorEnvelope",
             '402': "LimitExceededEnvelope",
+            '413': "ErrorEnvelope",
         }
         response_data = await self.api_client.call_api(
             *_param,
@@ -2421,7 +2433,7 @@ class MessagesApi:
     ) -> SendResultView:
         """Send a new email
 
-        Send a new email from the agent named in the path (a new thread). The sender is the path agent — `reply`/`forward` are their own sub-resources. 202 + pending_review when the agent has HITL enabled. Honors Idempotency-Key.
+        Send a new email from the agent named in the path (a new thread). The sender is the path agent — `reply`/`forward` are their own sub-resources. 202 + pending_review when the agent has HITL enabled. Honors Idempotency-Key. Attachment limits: at most 10 attachments, each ≤ 10 MB decoded, ≤ 25 MB decoded combined (over-count → 400 invalid_request; over-size → 413 payload_too_large).
 
         :param email: (required)
         :type email: str
@@ -2467,7 +2479,9 @@ class MessagesApi:
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "SendResultView",
             '202': "SendResultView",
+            '400': "ErrorEnvelope",
             '402': "LimitExceededEnvelope",
+            '413': "ErrorEnvelope",
         }
         response_data = await self.api_client.call_api(
             *_param,
@@ -2502,7 +2516,7 @@ class MessagesApi:
     ) -> ApiResponse[SendResultView]:
         """Send a new email
 
-        Send a new email from the agent named in the path (a new thread). The sender is the path agent — `reply`/`forward` are their own sub-resources. 202 + pending_review when the agent has HITL enabled. Honors Idempotency-Key.
+        Send a new email from the agent named in the path (a new thread). The sender is the path agent — `reply`/`forward` are their own sub-resources. 202 + pending_review when the agent has HITL enabled. Honors Idempotency-Key. Attachment limits: at most 10 attachments, each ≤ 10 MB decoded, ≤ 25 MB decoded combined (over-count → 400 invalid_request; over-size → 413 payload_too_large).
 
         :param email: (required)
         :type email: str
@@ -2548,7 +2562,9 @@ class MessagesApi:
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "SendResultView",
             '202': "SendResultView",
+            '400': "ErrorEnvelope",
             '402': "LimitExceededEnvelope",
+            '413': "ErrorEnvelope",
         }
         response_data = await self.api_client.call_api(
             *_param,
@@ -2583,7 +2599,7 @@ class MessagesApi:
     ) -> RESTResponseType:
         """Send a new email
 
-        Send a new email from the agent named in the path (a new thread). The sender is the path agent — `reply`/`forward` are their own sub-resources. 202 + pending_review when the agent has HITL enabled. Honors Idempotency-Key.
+        Send a new email from the agent named in the path (a new thread). The sender is the path agent — `reply`/`forward` are their own sub-resources. 202 + pending_review when the agent has HITL enabled. Honors Idempotency-Key. Attachment limits: at most 10 attachments, each ≤ 10 MB decoded, ≤ 25 MB decoded combined (over-count → 400 invalid_request; over-size → 413 payload_too_large).
 
         :param email: (required)
         :type email: str
@@ -2629,7 +2645,9 @@ class MessagesApi:
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "SendResultView",
             '202': "SendResultView",
+            '400': "ErrorEnvelope",
             '402': "LimitExceededEnvelope",
+            '413': "ErrorEnvelope",
         }
         response_data = await self.api_client.call_api(
             *_param,

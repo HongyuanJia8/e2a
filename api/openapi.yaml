@@ -257,6 +257,7 @@ components:
             - application/pdf
           type: string
         data:
+          description: Base64-encoded file content. Each attachment must be ≤ 10 MB decoded; a message may carry at most 10 attachments totaling ≤ 25 MB decoded.
           examples:
             - base64-encoded-content
           type: string
@@ -871,7 +872,7 @@ components:
       additionalProperties: false
       properties:
         attachments:
-          description: Additional attachments to include alongside the forwarded message's original attachments, which are carried over automatically.
+          description: "Additional attachments to include alongside the forwarded message's original attachments, which are carried over automatically. Limits apply to the combined set (originals + these): at most 10 attachments, each ≤ 10 MB decoded, and ≤ 25 MB decoded combined. Exceeding the count → 400 invalid_request; exceeding a size → 413 payload_too_large."
           items:
             $ref: "#/components/schemas/Attachment"
           type: array
@@ -1733,6 +1734,7 @@ components:
       additionalProperties: false
       properties:
         attachments:
+          description: "File attachments (base64 in each item's data). Limits: at most 10 attachments, each ≤ 10 MB decoded, and ≤ 25 MB decoded combined. Exceeding the count → 400 invalid_request; exceeding a size → 413 payload_too_large."
           items:
             $ref: "#/components/schemas/Attachment"
           type: array
@@ -1831,6 +1833,7 @@ components:
       additionalProperties: false
       properties:
         attachments:
+          description: "File attachments (base64 in each item's data). Limits: at most 10 attachments, each ≤ 10 MB decoded, and ≤ 25 MB decoded combined. Exceeding the count → 400 invalid_request; exceeding a size → 413 payload_too_large."
           items:
             $ref: "#/components/schemas/Attachment"
           type: array
@@ -3107,7 +3110,7 @@ paths:
       tags:
         - messages
     post:
-      description: Send a new email from the agent named in the path (a new thread). The sender is the path agent — `reply`/`forward` are their own sub-resources. 202 + pending_review when the agent has HITL enabled. Honors Idempotency-Key.
+      description: "Send a new email from the agent named in the path (a new thread). The sender is the path agent — `reply`/`forward` are their own sub-resources. 202 + pending_review when the agent has HITL enabled. Honors Idempotency-Key. Attachment limits: at most 10 attachments, each ≤ 10 MB decoded, ≤ 25 MB decoded combined (over-count → 400 invalid_request; over-size → 413 payload_too_large)."
       operationId: sendMessage
       parameters:
         - in: path
@@ -3150,12 +3153,24 @@ paths:
               schema:
                 $ref: "#/components/schemas/SendResultView"
           description: "Accepted — durably accepted but not yet delivered: status=accepted (queued for async submission; terminal outcome via GET/webhook events) or status=pending_review (held for human approval)."
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Bad Request — request-shape/validation failure. error.code includes invalid_request (e.g. more than 10 attachments), too_many_recipients, invalid_recipient, invalid_attachment (undecodable base64).
         "402":
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/LimitExceededEnvelope"
           description: Payment required — a per-account resource cap was hit (code limit_exceeded). error.details.resource is the AccountView usage/limits field stem (agents, domains, messages_month, storage_bytes), so the client can key it to usage.<resource> / limits.max_<resource>.
+        "413":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Payload Too Large — an attachment exceeds 10 MB decoded, or the combined attachments exceed 25 MB decoded. error.code = payload_too_large; error.details carries the offending size and the limit.
         default:
           content:
             application/json:
@@ -3340,7 +3355,7 @@ paths:
         - messages
   /v1/agents/{email}/messages/{id}/forward:
     post:
-      description: Forward a message (inbound or outbound) to new recipients; the original is quoted and its attachments are carried over by default. Any attachments[] you supply are added on top of the originals. 202 when held for HITL.
+      description: "Forward a message (inbound or outbound) to new recipients; the original is quoted and its attachments are carried over by default. Any attachments[] you supply are added on top of the originals. 202 when held for HITL. Attachment limits apply to the combined set (carried-over originals + supplied): at most 10 attachments, each ≤ 10 MB decoded, ≤ 25 MB decoded combined (over-count → 400 invalid_request; over-size → 413 payload_too_large)."
       operationId: forwardMessage
       parameters:
         - in: path
@@ -3388,12 +3403,24 @@ paths:
               schema:
                 $ref: "#/components/schemas/SendResultView"
           description: "Accepted — durably accepted but not yet delivered: status=accepted (queued for async submission; terminal outcome via GET/webhook events) or status=pending_review (held for human approval)."
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Bad Request — request-shape/validation failure. error.code includes invalid_request (e.g. more than 10 attachments), too_many_recipients, invalid_recipient, invalid_attachment (undecodable base64).
         "402":
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/LimitExceededEnvelope"
           description: Payment required — a per-account resource cap was hit (code limit_exceeded). error.details.resource is the AccountView usage/limits field stem (agents, domains, messages_month, storage_bytes), so the client can key it to usage.<resource> / limits.max_<resource>.
+        "413":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Payload Too Large — an attachment exceeds 10 MB decoded, or the combined attachments exceed 25 MB decoded. error.code = payload_too_large; error.details carries the offending size and the limit.
         default:
           content:
             application/json:
@@ -3447,7 +3474,7 @@ paths:
         - messages
   /v1/agents/{email}/messages/{id}/reply:
     post:
-      description: Reply to a message (inbound or outbound); recipients and threading are derived from the original. Replying to a message the agent received targets its sender; replying to a message the agent sent continues the thread to its original recipients (`reply_all` also re-includes the original Cc). 202 when held for HITL.
+      description: "Reply to a message (inbound or outbound); recipients and threading are derived from the original. Replying to a message the agent received targets its sender; replying to a message the agent sent continues the thread to its original recipients (`reply_all` also re-includes the original Cc). 202 when held for HITL. Attachment limits: at most 10 attachments, each ≤ 10 MB decoded, ≤ 25 MB decoded combined (over-count → 400 invalid_request; over-size → 413 payload_too_large)."
       operationId: replyToMessage
       parameters:
         - in: path
@@ -3495,12 +3522,24 @@ paths:
               schema:
                 $ref: "#/components/schemas/SendResultView"
           description: "Accepted — durably accepted but not yet delivered: status=accepted (queued for async submission; terminal outcome via GET/webhook events) or status=pending_review (held for human approval)."
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Bad Request — request-shape/validation failure. error.code includes invalid_request (e.g. more than 10 attachments), too_many_recipients, invalid_recipient, invalid_attachment (undecodable base64).
         "402":
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/LimitExceededEnvelope"
           description: Payment required — a per-account resource cap was hit (code limit_exceeded). error.details.resource is the AccountView usage/limits field stem (agents, domains, messages_month, storage_bytes), so the client can key it to usage.<resource> / limits.max_<resource>.
+        "413":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Payload Too Large — an attachment exceeds 10 MB decoded, or the combined attachments exceed 25 MB decoded. error.code = payload_too_large; error.details carries the offending size and the limit.
         default:
           content:
             application/json:
