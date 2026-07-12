@@ -2541,7 +2541,7 @@ paths:
           in: query
           name: limit
           schema:
-            default: 50
+            default: 100
             description: Maximum number of items to return (1-100).
             format: int64
             maximum: 100
@@ -2669,7 +2669,7 @@ paths:
           in: query
           name: limit
           schema:
-            default: 50
+            default: 100
             description: Maximum number of items to return (1-100).
             format: int64
             maximum: 100
@@ -2744,7 +2744,7 @@ paths:
           in: query
           name: limit
           schema:
-            default: 50
+            default: 100
             description: Maximum number of items to return (1-100).
             format: int64
             maximum: 100
@@ -3083,7 +3083,7 @@ paths:
           in: query
           name: limit
           schema:
-            default: 50
+            default: 100
             format: int64
             maximum: 100
             minimum: 1
@@ -3636,7 +3636,7 @@ paths:
           in: query
           name: limit
           schema:
-            default: 50
+            default: 100
             description: Maximum number of items to return (1-100).
             format: int64
             maximum: 100
@@ -3834,9 +3834,9 @@ paths:
           in: query
           name: limit
           schema:
-            default: 50
+            default: 100
             format: int64
-            maximum: 200
+            maximum: 100
             minimum: 1
             type: integer
       responses:
@@ -3955,7 +3955,7 @@ paths:
           in: query
           name: limit
           schema:
-            default: 50
+            default: 100
             description: Maximum number of items to return (1-100).
             format: int64
             maximum: 100
@@ -4101,7 +4101,7 @@ paths:
           in: query
           name: limit
           schema:
-            default: 50
+            default: 100
             description: Maximum number of items to return (1-100).
             format: int64
             maximum: 100
@@ -4172,7 +4172,7 @@ paths:
           in: query
           name: limit
           schema:
-            default: 50
+            default: 100
             description: Maximum number of items to return (1-100).
             format: int64
             maximum: 100
@@ -4362,7 +4362,7 @@ paths:
           in: query
           name: limit
           schema:
-            default: 50
+            default: 100
             description: Maximum number of items to return (1-100).
             format: int64
             maximum: 100
@@ -4537,7 +4537,7 @@ paths:
           schema:
             default: 100
             format: int64
-            maximum: 500
+            maximum: 100
             minimum: 1
             type: integer
       responses:

@@ -860,7 +860,7 @@ class WebhooksApi:
         id: StrictStr,
         status: Optional[StrictStr] = None,
         cursor: Annotated[Optional[StrictStr], Field(description="Opaque pagination cursor from a previous response's next_cursor. Continuation requests must not change the status filter.")] = None,
-        limit: Optional[Annotated[int, Field(le=500, strict=True, ge=1)]] = None,
+        limit: Optional[Annotated[int, Field(le=100, strict=True, ge=1)]] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -939,7 +939,7 @@ class WebhooksApi:
         id: StrictStr,
         status: Optional[StrictStr] = None,
         cursor: Annotated[Optional[StrictStr], Field(description="Opaque pagination cursor from a previous response's next_cursor. Continuation requests must not change the status filter.")] = None,
-        limit: Optional[Annotated[int, Field(le=500, strict=True, ge=1)]] = None,
+        limit: Optional[Annotated[int, Field(le=100, strict=True, ge=1)]] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1018,7 +1018,7 @@ class WebhooksApi:
         id: StrictStr,
         status: Optional[StrictStr] = None,
         cursor: Annotated[Optional[StrictStr], Field(description="Opaque pagination cursor from a previous response's next_cursor. Continuation requests must not change the status filter.")] = None,
-        limit: Optional[Annotated[int, Field(le=500, strict=True, ge=1)]] = None,
+        limit: Optional[Annotated[int, Field(le=100, strict=True, ge=1)]] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
