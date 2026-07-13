@@ -289,13 +289,26 @@ export class WSStream extends EventEmitter<WSListenerEvents>
     this.listener.on("open", () => this.emit("open"));
     this.listener.on("close", (code, reason) => this.emit("close", code, reason));
     this.listener.on("error", (err) => {
-      this.emit("error", err);
-      // A typed (fatal) error — e.g. an auth/4xx handshake rejection — ends the
-      // stream: the listener has stopped reconnecting, so mark closed too, then
-      // reject in-flight awaits so the for-await throws the typed error rather
-      // than hanging on a stream that will never deliver again (F6).
-      if (err instanceof E2AError) this.closed = true;
-      this.drainWaitersWithError(err);
+      // Node's EventEmitter THROWS when "error" is emitted with no registered
+      // "error" listener. The documented usage is `for await (const e of
+      // stream)`, which registers async-iterator *waiters*, not an EventEmitter
+      // listener — so emitting unconditionally would crash the whole process on
+      // a routine transient disconnect. Only emit when someone is listening.
+      if (this.listenerCount("error") > 0) this.emit("error", err);
+      // Only a typed (fatal) error ends the stream — e.g. an auth/4xx handshake
+      // rejection or a terminal server close code. The listener has stopped
+      // reconnecting, so mark closed and reject in-flight awaits so the
+      // for-await throws the typed error rather than hanging (F6).
+      //
+      // Transient errors (network blips, a single malformed frame) ride
+      // alongside an automatic reconnect in WSListener — swallow them here so
+      // the async iterator keeps waiting for the reconnected stream, matching
+      // the Python SDK, which logs-and-reconnects and never surfaces transient
+      // failures to `async for`.
+      if (err instanceof E2AError) {
+        this.closed = true;
+        this.drainWaitersWithError(err);
+      }
     });
 
     this.listener.on("event", (notif) => {

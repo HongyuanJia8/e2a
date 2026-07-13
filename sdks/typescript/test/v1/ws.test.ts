@@ -217,3 +217,107 @@ describe("E2AClient.listen()", () => {
     expect(() => c.listen("")).toThrow(/email is required/);
   });
 });
+
+describe("WSStream error handling (async-iterator consumers)", () => {
+  // The documented usage is `for await (const e of client.listen(addr))` with
+  // NO `.on("error")` listener. Node's EventEmitter throws if "error" is emitted
+  // with no registered listener, so the stream must not emit unconditionally,
+  // and transient failures must not end iteration (the socket reconnects).
+  type Handler = (...args: unknown[]) => void;
+  class FakeWS {
+    static instances: FakeWS[] = [];
+    handlers = new Map<string, Handler>();
+    constructor(
+      public url: string,
+      public opts: unknown,
+    ) {
+      FakeWS.instances.push(this);
+    }
+    on(event: string, fn: Handler) {
+      this.handlers.set(event, fn);
+      return this;
+    }
+    close() {}
+    serverOpen() {
+      this.handlers.get("open")?.();
+    }
+    serverError(err: Error) {
+      this.handlers.get("error")?.(err);
+    }
+    serverMessage(obj: unknown) {
+      this.handlers.get("message")?.(Buffer.from(JSON.stringify(obj)));
+    }
+    serverClose(code: number, reason: string) {
+      this.handlers.get("close")?.(code, Buffer.from(reason));
+    }
+  }
+
+  async function makeStream(reconnectDelay = 10) {
+    FakeWS.instances = [];
+    vi.resetModules();
+    vi.doMock("ws", () => ({ default: FakeWS }));
+    const ws = await import("../../src/v1/ws.js");
+    const errors = await import("../../src/v1/errors.js");
+    const stream = new ws.WSStream({
+      apiKey: "k",
+      agentEmail: "bot@x.dev",
+      reconnect: true,
+      reconnectDelay,
+    });
+    return { stream, errors };
+  }
+
+  it("does not crash on a transient transport error under for-await (no error listener) and keeps streaming after reconnect", async () => {
+    vi.useFakeTimers();
+    const { stream } = await makeStream(10);
+
+    // Iterate, register NO EventEmitter "error" listener (the documented path).
+    const iterator = stream[Symbol.asyncIterator]();
+    const nextP = iterator.next(); // registers a waiter
+    const first = FakeWS.instances[0];
+    first.serverOpen();
+
+    // Pre-fix: emit("error") with no listener throws out of the `ws` callback and
+    // crashes the process. Post-fix: a transient error is swallowed — no throw.
+    expect(() => first.serverError(new Error("ECONNREFUSED"))).not.toThrow();
+
+    // ...and a transient error must NOT end iteration; the socket reconnects.
+    first.serverClose(1006, ""); // abnormal close → schedule redial
+    await vi.advanceTimersByTimeAsync(50);
+    expect(FakeWS.instances.length).toBeGreaterThan(1); // redialed
+
+    // The reconnected socket delivers an event → the pending waiter resolves.
+    const latest = FakeWS.instances[FakeWS.instances.length - 1];
+    latest.serverMessage({
+      type: "email.received",
+      id: "evt_1",
+      schema_version: "1",
+      created_at: "2026-07-01T10:30:00Z",
+      data: {},
+    });
+    const res = await nextP;
+    expect(res.done).toBe(false);
+    expect((res.value as { id: string }).id).toBe("evt_1");
+
+    stream.close();
+    vi.useRealTimers();
+    vi.doUnmock("ws");
+    vi.resetModules();
+  });
+
+  it("rejects the for-await iterator with the typed error on a fatal close (4000 replaced) and does not reconnect", async () => {
+    const { stream, errors } = await makeStream();
+    const iterator = stream[Symbol.asyncIterator]();
+    const nextP = iterator.next();
+
+    // Fatal terminal close with no `.on("error")` listener registered. Pre-fix
+    // this crashed the process; post-fix the typed error surfaces to `for await`.
+    FakeWS.instances[0].serverClose(4000, "replaced");
+
+    await expect(nextP).rejects.toBeInstanceOf(errors.E2AConnectionReplacedError);
+    expect(FakeWS.instances).toHaveLength(1); // never redialed
+
+    vi.doUnmock("ws");
+    vi.resetModules();
+  });
+});
