@@ -154,6 +154,10 @@ export class WSListener extends EventEmitter<WSListenerEvents> {
   private readonly initialDelayMs: number;
   private readonly maxBackoffMs: number;
   private currentBackoffMs: number;
+  // Handle of a pending reconnect timer, so close() can cancel it. Without
+  // this, a close() issued during the backoff window leaves the timer armed and
+  // dial() opens a fresh socket after the caller thought the stream was closed.
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly opts: WSListenerOptions) {
     super();
@@ -176,6 +180,12 @@ export class WSListener extends EventEmitter<WSListenerEvents> {
   /** Close the connection permanently (no reconnect). */
   close(): void {
     this.closed = true;
+    // Cancel a pending reconnect so a close() during the backoff window can't
+    // resurrect the connection after the caller is done with it.
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.ws) {
       this.ws.close(1000, "client close");
       this.ws = null;
@@ -183,6 +193,9 @@ export class WSListener extends EventEmitter<WSListenerEvents> {
   }
 
   private dial(): void {
+    // A reconnect scheduled before close() may still fire; bail if we're closed
+    // so we never open a socket the caller has already torn down.
+    if (this.closed) return;
     // Auth rides in the handshake header, never the URL — keeps the long-lived
     // API key out of access logs / proxy traces. Node's `ws` supports handshake
     // headers (a browser WebSocket could not, which is why this SDK targets Node).
@@ -251,7 +264,10 @@ export class WSListener extends EventEmitter<WSListenerEvents> {
         }
       }
       if (!this.closed && this.shouldReconnect) {
-        setTimeout(() => this.dial(), this.currentBackoffMs);
+        this.reconnectTimer = setTimeout(() => {
+          this.reconnectTimer = null;
+          this.dial();
+        }, this.currentBackoffMs);
         // Double the delay for the next reconnect, capped. Same shape
         // as Python's listen() backoff: 1s, 2s, 4s, 8s, …, capped.
         this.currentBackoffMs = Math.min(
@@ -272,6 +288,15 @@ export class WSListener extends EventEmitter<WSListenerEvents> {
 }
 
 /**
+ * Hard cap on notifications buffered by a {@link WSStream} while no iterator is
+ * awaiting. Beyond this, the oldest un-yielded event is dropped (with a one-time
+ * warning) so a stalled consumer can't exhaust memory. Notifications are
+ * advisory — the underlying message stays fetchable via REST — so bounded loss
+ * under sustained backpressure is preferable to an OOM.
+ */
+export const WS_MAX_BUFFERED_EVENTS = 1000;
+
+/**
  * Hybrid AsyncIterable + EventEmitter returned by {@link E2AClient.listen}.
  *
  * Iterate for the happy path — each item is a {@link WSEvent} envelope:
@@ -287,9 +312,12 @@ export class WSListener extends EventEmitter<WSListenerEvents> {
 export class WSStream extends EventEmitter<WSListenerEvents>
   implements AsyncIterable<WSEvent> {
   private readonly listener: WSListener;
-  // Buffered notifications waiting to be yielded. Modest bound; if a
-  // consumer is far behind we'd rather log loudly than balloon memory.
+  // Notifications waiting to be yielded when no iterator is currently awaiting.
+  // Hard-capped at WS_MAX_BUFFERED_EVENTS — a stalled consumer drops the OLDEST
+  // event (logging once) rather than ballooning memory.
   private readonly buffer: WSEvent[] = [];
+  // One-time latch so the overflow warning fires once, not on every drop.
+  private bufferOverflowed = false;
   // Pending iterator promises waiting for the next notification.
   private readonly waiters: Array<{
     resolve: (value: IteratorResult<WSEvent>) => void;
@@ -407,8 +435,21 @@ export class WSStream extends EventEmitter<WSListenerEvents>
   private deliver(notif: WSEvent): void {
     if (this.waiters.length > 0) {
       this.waiters.shift()!.resolve({ value: notif, done: false });
-    } else {
-      this.buffer.push(notif);
+      return;
+    }
+    this.buffer.push(notif);
+    if (this.buffer.length > WS_MAX_BUFFERED_EVENTS) {
+      // A consumer that stalls (e.g. awaits a slow fetch inside the loop) must
+      // not grow this without bound. Drop the oldest un-yielded event — the WS
+      // frame is advisory (the message stays fetchable via REST / reconcilable
+      // via list) — and warn once so the backpressure is loud, not silent.
+      this.buffer.shift();
+      if (!this.bufferOverflowed) {
+        this.bufferOverflowed = true;
+        console.warn(
+          `[e2a] WSStream dropped events: more than ${WS_MAX_BUFFERED_EVENTS} un-consumed notifications buffered. The consumer is not keeping up — do less work inside the for-await loop or fetch out of band.`,
+        );
+      }
     }
   }
 
