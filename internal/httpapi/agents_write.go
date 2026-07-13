@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"regexp"
 	"strings"
@@ -9,7 +10,18 @@ import (
 	"github.com/Mnexa-AI/e2a/internal/identity"
 	"github.com/Mnexa-AI/e2a/internal/limits"
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// isUniqueViolation reports whether err is a Postgres unique-constraint
+// violation (SQLSTATE 23505) — the duplicate-key signal on the
+// agent_identities PK. Mirrors identity.isUniqueViolation / the agent
+// package's helper; typed instead of a strings.Contains match so a non-pg
+// error (e.g. a wrapped network error) can't masquerade as a conflict.
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.SQLState() == "23505"
+}
 
 // CreateAgentRequest is the /v1 agent-create body. The legacy agent_mode and
 // webhook_url fields were dropped (migration 029): push is delivered solely
@@ -101,10 +113,21 @@ func (s *Server) registerAgentWrites() {
 		Method:      http.MethodDelete,
 		Path:        "/v1/agents/{email}",
 		Summary:     "Delete an agent",
-		Description: "Delete an agent the caller owns. Requires ?confirm=DELETE (irreversible). Returns 200 with a deletion receipt ({deleted:true, email, messages_deleted}) — the cascade also removes the agent's webhook-delivery records and revokes its credentials.",
+		Description: "Move an agent the caller owns to the trash. Requires ?confirm=DELETE. A trashed agent stops receiving mail, disappears from lists, and its held messages leave the review queue; restore it via POST /v1/agents/{email}/restore within 30 days, after which it is purged permanently (messages included). Pass permanent=true to skip the trash and delete irreversibly right away (accepts live and trashed agents). Returns 200 with a deletion receipt; messages_deleted is zero when the agent is moved to trash.",
 		Tags:        []string{"agents"},
 		Security:    []map[string][]string{{"bearer": {}}},
 	}, s.handleDeleteAgent)
+
+	huma.Register(s.API, huma.Operation{
+		OperationID: "restoreAgent",
+		Method:      http.MethodPost,
+		Path:        "/v1/agents/{email}/restore",
+		Summary:     "Restore an agent from the trash",
+		Description: "Bring a trashed (soft-deleted) agent back into service, messages and configuration intact. Returns the restored agent. 409 not_in_trash when the agent is not in the trash.",
+		Tags:        []string{"agents"},
+		Security:    []map[string][]string{{"bearer": {}}},
+		Extensions:  experimental(),
+	}, s.handleRestoreAgent)
 }
 
 // UpdateAgentRequest is the /v1 agent PATCH body. The per-agent screening/HITL
@@ -153,11 +176,15 @@ func (s *Server) handleUpdateAgent(ctx context.Context, in *updateAgentInput) (*
 type deleteAgentOutput struct{ Body DeleteAgentResult }
 
 // deleteAgentInput adds the confirmation guard (AG-6). Deleting an agent
-// discards held drafts and revokes its credentials, so it requires
-// ?confirm=DELETE — uniform with every other delete op (see DeleteConfirm).
+// takes it out of service immediately (held drafts leave the review queue,
+// its credentials stop resolving), so it requires ?confirm=DELETE — uniform
+// with every other delete op (see DeleteConfirm). The default delete is SOFT
+// (trash, restorable for 30 days); permanent=true is the irreversible hard
+// delete and also accepts an agent already in the trash ("delete forever").
 type deleteAgentInput struct {
-	Address string `path:"email"`
-	DeleteConfirm
+	Address   string `path:"email"`
+	Confirm   string `query:"confirm" enum:"DELETE" required:"true" doc:"Must be the literal DELETE. The default action moves the agent to trash; permanent=true is irreversible."`
+	Permanent bool   `query:"permanent" doc:"Delete irreversibly right away instead of moving to the trash. Accepts live and trashed agents."`
 }
 
 func (s *Server) handleDeleteAgent(ctx context.Context, in *deleteAgentInput) (*deleteAgentOutput, error) {
@@ -166,17 +193,41 @@ func (s *Server) handleDeleteAgent(ctx context.Context, in *deleteAgentInput) (*
 	if _, err := s.requireAccountScope(ctx); err != nil {
 		return nil, err
 	}
-	ag, err := s.resolveOwnedAgent(ctx, in.Address)
+	// Confirm is enforced declaratively by Huma (required + enum:[DELETE]): a
+	// missing/wrong ?confirm is a 422 before this handler.
+	//
+	// One resolution path across both variants: any-state, so permanent=true
+	// can purge an agent already in the trash. A trashed agent is 404 for the
+	// SOFT delete — matching every live lookup's view of it.
+	ag, err := s.resolveOwnedAgentAnyState(ctx, in.Address)
 	if err != nil {
 		return nil, err
 	}
-	// Confirm is enforced declaratively by Huma (required + enum:[DELETE] on
-	// DeleteConfirm): a missing/wrong ?confirm is a 422 before this handler.
-	if s.deps.DeleteAgent == nil {
-		return nil, NewError(http.StatusInternalServerError, "internal_error", "delete unavailable")
+	var messagesDeleted int64
+	if in.Permanent {
+		if s.deps.PermanentDeleteAgent == nil {
+			return nil, NewError(http.StatusInternalServerError, "internal_error", "delete unavailable")
+		}
+		messagesDeleted, err = s.deps.PermanentDeleteAgent(ctx, ag.ID, ag.UserID)
+	} else if ag.DeletedAt != nil {
+		return nil, NewError(http.StatusNotFound, "not_found", "agent not found")
+	} else {
+		if s.deps.DeleteAgent == nil {
+			return nil, NewError(http.StatusInternalServerError, "internal_error", "delete unavailable")
+		}
+		err = s.deps.DeleteAgent(ctx, ag.ID, ag.UserID)
 	}
-	messagesDeleted, err := s.deps.DeleteAgent(ctx, ag.ID, ag.UserID)
 	if err != nil {
+		// A not-found here means the agent vanished (hard-deleted or moved to
+		// the trash by a concurrent request) between the any-state resolve and
+		// the mutation — 404, not a generic 500.
+		if errors.Is(err, identity.ErrAgentNotFound) {
+			return nil, NewError(http.StatusNotFound, "not_found", "agent not found")
+		}
+		if errors.Is(err, identity.ErrSendInProgress) {
+			return nil, NewError(http.StatusConflict, "send_in_progress",
+				"agent has an outbound send in progress; retry permanent deletion after it finishes")
+		}
 		return nil, NewError(http.StatusInternalServerError, "internal_error", "failed to delete agent")
 	}
 	// ag.ID is the agent's email (canonical form) — echo it as the identity key.
@@ -185,6 +236,39 @@ func (s *Server) handleDeleteAgent(ctx context.Context, in *deleteAgentInput) (*
 		Email:           ag.ID,
 		MessagesDeleted: messagesDeleted,
 	}}, nil
+}
+
+// handleRestoreAgent brings a trashed agent back (POST
+// /v1/agents/{email}/restore). Account administration, like delete.
+func (s *Server) handleRestoreAgent(ctx context.Context, in *AddressParam) (*agentOutput, error) {
+	if _, err := s.requireAccountScope(ctx); err != nil {
+		return nil, err
+	}
+	if s.deps.RestoreAgent == nil {
+		return nil, NewError(http.StatusInternalServerError, "internal_error", "restore unavailable")
+	}
+	ag, err := s.resolveOwnedAgentAnyState(ctx, in.Address)
+	if err != nil {
+		return nil, err
+	}
+	// The trash-state decision belongs to the store (its UPDATE is the one
+	// atomic check); the handler only maps the sentinel.
+	if err := s.deps.RestoreAgent(ctx, ag.ID, ag.UserID); err != nil {
+		if errors.Is(err, identity.ErrNotInTrash) {
+			return nil, NewError(http.StatusConflict, "not_in_trash", "agent is not in the trash")
+		}
+		if errors.Is(err, identity.ErrAgentNotFound) {
+			return nil, NewError(http.StatusNotFound, "not_found", "agent not found")
+		}
+		return nil, NewError(http.StatusInternalServerError, "internal_error", "failed to restore agent")
+	}
+	// Re-read via the LIVE getter for the authoritative post-restore state
+	// (ag.ID is the email); it also proves the agent is visible again.
+	restored, err := s.deps.GetAgent(ctx, ag.ID)
+	if err != nil || restored == nil {
+		return nil, NewError(http.StatusInternalServerError, "internal_error", "failed to reload agent")
+	}
+	return &agentOutput{Body: agentViewFromIdentity(restored)}, nil
 }
 
 func (s *Server) handleCreateAgent(ctx context.Context, in *createAgentInput) (*createAgentOutput, error) {
@@ -251,7 +335,22 @@ func (s *Server) handleCreateAgent(ctx context.Context, in *createAgentInput) (*
 	// pass "" to satisfy the retained signature.
 	ag, err := s.deps.CreateAgent(ctx, email, domain, req.Name, "", "", user.ID)
 	if err != nil {
-		if strings.Contains(err.Error(), "duplicate") {
+		if isUniqueViolation(err) {
+			// Soft-delete (migration 063) keeps the trashed row's PK, so the
+			// address stays reserved: a user who trashed an inbox and tries to
+			// recreate the same address hits this conflict. If the duplicate is
+			// the caller's own trashed inbox, point them at the trash (restore
+			// or permanently delete to reuse the address); otherwise fall back
+			// to the generic conflict so we never reveal another account's
+			// trashed inbox. Probe is post-conflict, so there's no TOCTOU
+			// window between a pre-check and the INSERT.
+			if s.deps.GetAgentAnyState != nil {
+				if existing, lerr := s.deps.GetAgentAnyState(ctx, email); lerr == nil && existing != nil &&
+					existing.DeletedAt != nil && existing.UserID == user.ID {
+					return nil, NewError(http.StatusConflict, "address_in_trash",
+						"this address belongs to an inbox in your trash — restore it, or delete it permanently from the trash, to reuse the address")
+				}
+			}
 			// agent_taken joins the *_taken conflict family (domain_taken,
 			// alias_taken): the requested address is already registered.
 			return nil, NewError(http.StatusConflict, "agent_taken", "agent already registered for this domain")

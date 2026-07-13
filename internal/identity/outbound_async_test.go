@@ -3,6 +3,7 @@ package identity_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -90,7 +91,52 @@ func TestCreateOutboundMessageTx_AcceptedRow(t *testing.T) {
 	}
 }
 
-// TestMarkOutboundSentTx flips an accepted row to sent with the provider id +
+func TestClaimOutboundForSend_JobOwnership(t *testing.T) {
+	pool := testutil.TestDB(t)
+	store := identity.NewStore(pool)
+	ctx := context.Background()
+	agentID := convoTestSetup(t, store, "async-claim-owner")
+
+	var msgID string
+	if err := store.WithTx(ctx, func(tx pgx.Tx) error {
+		m, err := store.CreateOutboundMessageTx(ctx, tx, agentID,
+			[]string{"a@gmail.com"}, nil, nil, "S", "send", "smtp", "", "conv-claim",
+			[]byte("raw"), "accepted", "agent@test.e2a.dev", "relay")
+		if err != nil {
+			return err
+		}
+		msgID = m.ID
+		return store.StampSendJobIDTx(ctx, tx, msgID, 4242)
+	}); err != nil {
+		t.Fatalf("accept tx: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		payload, err := store.ClaimOutboundForSend(ctx, msgID, 4242)
+		if err != nil || payload == nil {
+			t.Fatalf("same-job claim %d = (%v, %v), want payload", i+1, payload, err)
+		}
+	}
+	payload, err := store.ClaimOutboundForSend(ctx, msgID, 4343)
+	if err != nil || payload != nil {
+		t.Fatalf("foreign-job claim = (%v, %v), want (nil, nil)", payload, err)
+	}
+	if err := store.ReleaseOutboundSendClaim(ctx, msgID, 4242); err != nil {
+		t.Fatalf("ReleaseOutboundSendClaim: %v", err)
+	}
+	var status string
+	var claimedAt *time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT delivery_status, send_claimed_at FROM messages WHERE id=$1`, msgID,
+	).Scan(&status, &claimedAt); err != nil {
+		t.Fatalf("read released claim: %v", err)
+	}
+	if status != "accepted" || claimedAt != nil {
+		t.Fatalf("released claim = status %q claimed_at %v, want accepted/nil", status, claimedAt)
+	}
+}
+
+// TestMarkOutboundSentTx flips a claimed sending row to sent with the provider id +
 // per-recipient rows, and returns the owning user/domain for the caller.
 func TestMarkOutboundSentTx(t *testing.T) {
 	pool := testutil.TestDB(t)
@@ -104,6 +150,10 @@ func TestMarkOutboundSentTx(t *testing.T) {
 			[]string{"a@gmail.com"}, nil, nil, "S", "send", "smtp", "", "conv-s",
 			[]byte("raw"), "accepted", "agent@test.e2a.dev", "relay")
 		msgID = m.ID
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `UPDATE messages SET delivery_status='sending' WHERE id=$1`, msgID)
 		return err
 	}); err != nil {
 		t.Fatalf("accept tx: %v", err)
@@ -155,7 +205,7 @@ func TestMarkOutboundSentTx(t *testing.T) {
 	}
 }
 
-// TestMarkOutboundFailedTx flips an accepted row to failed with the detail.
+// TestMarkOutboundFailedTx flips a claimed sending row to failed with the detail.
 func TestMarkOutboundFailedTx(t *testing.T) {
 	pool := testutil.TestDB(t)
 	store := identity.NewStore(pool)
@@ -168,6 +218,10 @@ func TestMarkOutboundFailedTx(t *testing.T) {
 			[]string{"a@gmail.com"}, nil, nil, "F", "send", "smtp", "", "conv-f",
 			[]byte("raw"), "accepted", "agent@test.e2a.dev", "relay")
 		msgID = m.ID
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `UPDATE messages SET delivery_status='sending' WHERE id=$1`, msgID)
 		return err
 	}); err != nil {
 		t.Fatalf("accept tx: %v", err)
@@ -202,6 +256,9 @@ func TestMarkOutboundFailedTx(t *testing.T) {
 			return err
 		}
 		sentMsgID = m.ID
+		if _, err := tx.Exec(ctx, `UPDATE messages SET delivery_status='sending' WHERE id=$1`, sentMsgID); err != nil {
+			return err
+		}
 		_, err = store.MarkOutboundSentTx(ctx, tx, sentMsgID, "<provider-sent>")
 		return err
 	}); err != nil {
@@ -233,4 +290,158 @@ func TestMarkOutboundFailedTx(t *testing.T) {
 	if detail != "" {
 		t.Errorf("sent row delivery_detail = %q, want unchanged empty detail", detail)
 	}
+}
+
+func TestMarkOutboundSentTxSkipsTrashRace(t *testing.T) {
+	pool := testutil.TestDB(t)
+	store := identity.NewStore(pool)
+	ctx := context.Background()
+	userID, agentID := trashTestSetup(t, store, "async-sent-race")
+
+	msg, err := store.CreateOutboundMessage(ctx, agentID,
+		[]string{"x@example.com"}, nil, nil, "queued", "send", "smtp", "", "", []byte("raw"))
+	if err != nil {
+		t.Fatalf("CreateOutboundMessage: %v", err)
+	}
+	if p, err := store.LoadOutboundForSend(ctx, msg.ID); err != nil || p == nil {
+		t.Fatalf("LoadOutboundForSend(live) = (%v, %v), want payload", p, err)
+	}
+	var wantDeliveryStatus, wantProviderID string
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(delivery_status,''), COALESCE(provider_message_id,'') FROM messages WHERE id=$1`, msg.ID,
+	).Scan(&wantDeliveryStatus, &wantProviderID); err != nil {
+		t.Fatalf("read baseline row: %v", err)
+	}
+
+	t.Run("trashed message", func(t *testing.T) {
+		if err := store.SoftDeleteMessage(ctx, msg.ID, agentID); err != nil {
+			t.Fatalf("SoftDeleteMessage: %v", err)
+		}
+		var info *identity.OutboundSentInfo
+		if err := store.WithTx(ctx, func(tx pgx.Tx) error {
+			i, err := store.MarkOutboundSentTx(ctx, tx, msg.ID, "<ses-race@amazonses.com>")
+			info = i
+			return err
+		}); err != nil {
+			t.Fatalf("MarkOutboundSentTx: %v", err)
+		}
+		if info != nil {
+			t.Fatalf("MarkOutboundSentTx info = %+v, want nil for trashed message", info)
+		}
+		var deliveryStatus, providerID string
+		if err := pool.QueryRow(ctx,
+			`SELECT COALESCE(delivery_status,''), COALESCE(provider_message_id,'') FROM messages WHERE id=$1`, msg.ID,
+		).Scan(&deliveryStatus, &providerID); err != nil {
+			t.Fatalf("read row: %v", err)
+		}
+		if deliveryStatus != wantDeliveryStatus || providerID != wantProviderID {
+			t.Fatalf("after trashed-message race: delivery_status=%q provider_message_id=%q, want %q/%q", deliveryStatus, providerID, wantDeliveryStatus, wantProviderID)
+		}
+	})
+
+	if err := store.RestoreMessage(ctx, msg.ID, agentID); err != nil {
+		t.Fatalf("RestoreMessage: %v", err)
+	}
+	t.Run("trashed agent", func(t *testing.T) {
+		if err := store.SoftDeleteAgent(ctx, agentID, userID); err != nil {
+			t.Fatalf("SoftDeleteAgent: %v", err)
+		}
+		var info *identity.OutboundSentInfo
+		if err := store.WithTx(ctx, func(tx pgx.Tx) error {
+			i, err := store.MarkOutboundSentTx(ctx, tx, msg.ID, "<ses-agent-race@amazonses.com>")
+			info = i
+			return err
+		}); err != nil {
+			t.Fatalf("MarkOutboundSentTx: %v", err)
+		}
+		if info != nil {
+			t.Fatalf("MarkOutboundSentTx info = %+v, want nil for trashed agent", info)
+		}
+		var deliveryStatus, providerID string
+		if err := pool.QueryRow(ctx,
+			`SELECT COALESCE(delivery_status,''), COALESCE(provider_message_id,'') FROM messages WHERE id=$1`, msg.ID,
+		).Scan(&deliveryStatus, &providerID); err != nil {
+			t.Fatalf("read row: %v", err)
+		}
+		if deliveryStatus != wantDeliveryStatus || providerID != wantProviderID {
+			t.Fatalf("after trashed-agent race: delivery_status=%q provider_message_id=%q, want %q/%q", deliveryStatus, providerID, wantDeliveryStatus, wantProviderID)
+		}
+	})
+}
+
+func TestMarkOutboundFailedTxSkipsTrashRace(t *testing.T) {
+	pool := testutil.TestDB(t)
+	store := identity.NewStore(pool)
+	ctx := context.Background()
+	userID, agentID := trashTestSetup(t, store, "async-failed-race")
+
+	msg, err := store.CreateOutboundMessage(ctx, agentID,
+		[]string{"x@example.com"}, nil, nil, "queued", "send", "smtp", "", "", []byte("raw"))
+	if err != nil {
+		t.Fatalf("CreateOutboundMessage: %v", err)
+	}
+	if p, err := store.LoadOutboundForSend(ctx, msg.ID); err != nil || p == nil {
+		t.Fatalf("LoadOutboundForSend(live) = (%v, %v), want payload", p, err)
+	}
+	var wantDeliveryStatus, wantDetail string
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(delivery_status,''), COALESCE(delivery_detail,'') FROM messages WHERE id=$1`, msg.ID,
+	).Scan(&wantDeliveryStatus, &wantDetail); err != nil {
+		t.Fatalf("read baseline row: %v", err)
+	}
+
+	t.Run("trashed message", func(t *testing.T) {
+		if err := store.SoftDeleteMessage(ctx, msg.ID, agentID); err != nil {
+			t.Fatalf("SoftDeleteMessage: %v", err)
+		}
+		var info *identity.OutboundSentInfo
+		if err := store.WithTx(ctx, func(tx pgx.Tx) error {
+			i, err := store.MarkOutboundFailedTx(ctx, tx, msg.ID, "550 after trash")
+			info = i
+			return err
+		}); err != nil {
+			t.Fatalf("MarkOutboundFailedTx: %v", err)
+		}
+		if info != nil {
+			t.Fatalf("MarkOutboundFailedTx info = %+v, want nil for trashed message", info)
+		}
+		var deliveryStatus, detail string
+		if err := pool.QueryRow(ctx,
+			`SELECT COALESCE(delivery_status,''), COALESCE(delivery_detail,'') FROM messages WHERE id=$1`, msg.ID,
+		).Scan(&deliveryStatus, &detail); err != nil {
+			t.Fatalf("read row: %v", err)
+		}
+		if deliveryStatus != wantDeliveryStatus || detail != wantDetail {
+			t.Fatalf("after trashed-message race: delivery_status=%q detail=%q, want %q/%q", deliveryStatus, detail, wantDeliveryStatus, wantDetail)
+		}
+	})
+
+	if err := store.RestoreMessage(ctx, msg.ID, agentID); err != nil {
+		t.Fatalf("RestoreMessage: %v", err)
+	}
+	t.Run("trashed agent", func(t *testing.T) {
+		if err := store.SoftDeleteAgent(ctx, agentID, userID); err != nil {
+			t.Fatalf("SoftDeleteAgent: %v", err)
+		}
+		var info *identity.OutboundSentInfo
+		if err := store.WithTx(ctx, func(tx pgx.Tx) error {
+			i, err := store.MarkOutboundFailedTx(ctx, tx, msg.ID, "550 after agent trash")
+			info = i
+			return err
+		}); err != nil {
+			t.Fatalf("MarkOutboundFailedTx: %v", err)
+		}
+		if info != nil {
+			t.Fatalf("MarkOutboundFailedTx info = %+v, want nil for trashed agent", info)
+		}
+		var deliveryStatus, detail string
+		if err := pool.QueryRow(ctx,
+			`SELECT COALESCE(delivery_status,''), COALESCE(delivery_detail,'') FROM messages WHERE id=$1`, msg.ID,
+		).Scan(&deliveryStatus, &detail); err != nil {
+			t.Fatalf("read row: %v", err)
+		}
+		if deliveryStatus != wantDeliveryStatus || detail != wantDetail {
+			t.Fatalf("after trashed-agent race: delivery_status=%q detail=%q, want %q/%q", deliveryStatus, detail, wantDeliveryStatus, wantDetail)
+		}
+	})
 }

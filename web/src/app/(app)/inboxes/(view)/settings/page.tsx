@@ -12,6 +12,7 @@ import { deleteAgent, getProtection } from "../../../../components/onboarding/ap
 import { useAgents } from "../../../../components/hooks/useAgents";
 import {
   invalidateAgents,
+  invalidateDeletedAgents,
   invalidateProtection,
   protectionKey,
 } from "../../../../../lib/swrKeys";
@@ -71,12 +72,19 @@ function AgentSettingsContent({ email }: { email: string }) {
 
   const onDelete = async () => {
     if (!agent) return;
-    if (!confirm(`Delete inbox ${agent.email}? This cannot be undone.`)) return;
+    if (
+      !confirm(
+        `Move inbox ${agent.email} to the trash? It stops receiving mail immediately. You can restore it from the Trash page for 30 days.`,
+      )
+    )
+      return;
     setDeleting(true);
     setDeleteError("");
     try {
       await deleteAgent(agent.email);
       await invalidateAgents();
+      // The inbox now lives in the trash — a mounted /trash page is stale.
+      void invalidateDeletedAgents();
       // replace, not push: the inbox is gone, so Back must not return to
       // this now-dead settings page.
       router.replace("/inboxes");
@@ -165,10 +173,12 @@ function AgentSettingsContent({ email }: { email: string }) {
           className="mb-4"
           style={{ fontSize: 13, color: "var(--fg-muted)", lineHeight: 1.6 }}
         >
-          Removes the inbox and all of its messages older than the
-          30-day retention window. Pending review drafts are auto-rejected.
-          The email address becomes available for re-registration. This
-          cannot be undone.
+          Moves the inbox to the trash: it stops receiving mail immediately,
+          its held drafts leave the review queue, and its API credentials
+          stop working. You can restore it — messages and settings intact —
+          from the Trash page for 30 days; after that it is purged
+          permanently together with its messages. The email address stays
+          reserved while the inbox is in the trash.
         </p>
         <button
           type="button"

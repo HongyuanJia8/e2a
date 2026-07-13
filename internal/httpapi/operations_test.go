@@ -19,6 +19,7 @@ import (
 	"github.com/Mnexa-AI/e2a/internal/outbound"
 	"github.com/Mnexa-AI/e2a/internal/startertemplates"
 	"github.com/Mnexa-AI/e2a/internal/webhook"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // sampleAgent is the canonical fixture agent owned by user u_1.
@@ -93,6 +94,15 @@ func testServer(t *testing.T, opts ...func(*Deps)) *httptest.Server {
 			return []identity.AgentIdentity{sampleAgent()}, nil
 		},
 		GetAgent: func(ctx context.Context, address string) (*identity.AgentIdentity, error) {
+			if address == "support@acme.com" {
+				a := sampleAgent()
+				return &a, nil
+			}
+			return nil, errors.New("not found")
+		},
+		// Any-state resolution mirrors the live getter by default (no trashed
+		// agents in the base fixture); trash tests override it.
+		GetAgentAnyState: func(ctx context.Context, address string) (*identity.AgentIdentity, error) {
 			if address == "support@acme.com" {
 				a := sampleAgent()
 				return &a, nil
@@ -595,7 +605,10 @@ func testServer(t *testing.T, opts ...func(*Deps)) *httptest.Server {
 		},
 		CreateAgent: func(ctx context.Context, email, domain, name, webhookURL, agentMode, userID string) (*identity.AgentIdentity, error) {
 			if email == "dupe@acme.com" {
-				return nil, errors.New("duplicate key value")
+				// Real unique-violation shape (SQLSTATE 23505) so the handler's
+				// typed isUniqueViolation check classifies it as a conflict —
+				// a plain errors.New("duplicate key value") no longer matches.
+				return nil, &pgconn.PgError{Code: "23505", Message: "duplicate key value"}
 			}
 			return &identity.AgentIdentity{ID: email, Domain: domain, Email: email, Name: name, UserID: userID}, nil
 		},
@@ -611,11 +624,11 @@ func testServer(t *testing.T, opts ...func(*Deps)) *httptest.Server {
 		UpdateAgentProtection: func(ctx context.Context, agentID, userID string, cfg identity.ProtectionConfig) error {
 			return nil
 		},
-		DeleteAgent: func(ctx context.Context, agentID, userID string) (int64, error) {
+		DeleteAgent: func(ctx context.Context, agentID, userID string) error {
 			if userID != "u_1" {
-				return 0, errors.New("unexpected user")
+				return errors.New("unexpected user")
 			}
-			return 3, nil
+			return nil
 		},
 		SharedDomain: "agents.e2a.dev",
 		PublicURL:    "https://api.e2a.dev",

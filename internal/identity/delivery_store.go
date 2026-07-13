@@ -10,6 +10,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// OutboundSendClaimStaleWindow exceeds River's one-minute worker timeout and
+// bounds how long a crashed worker can prevent permanent trash deletion.
+const OutboundSendClaimStaleWindow = 10 * time.Minute
+
 // --- Delivery feedback (decision 9 / Slice 4b) ---
 //
 // These back internal/delivery's Consumer.Store and the send path + the
@@ -245,9 +249,12 @@ func (s *Store) GetSendOutcome(ctx context.Context, messageID string) (SendOutco
 }
 
 // LoadOutboundForSend returns the payload the async send worker submits, or nil if
-// the row is gone (agent-delete cascade / TTL) — the worker treats that as a
-// no-op. Reads the envelope (to+cc+bcc) and the persisted wire bytes; does not
-// touch message_recipients (those are written at MarkSent).
+// the row is gone (agent delete / TTL) — the worker treats that as a no-op.
+// A message in the trash, or one whose AGENT is in the trash, counts as gone:
+// deleting is the user's one lever to stop a queued-but-unsent message (e.g.
+// snoozed behind a provider-outage retry horizon), and a trashed inbox must
+// never emit mail. Reads the envelope (to+cc+bcc) and the persisted wire
+// bytes; does not touch message_recipients (those are written at MarkSent).
 func (s *Store) LoadOutboundForSend(ctx context.Context, messageID string) (*OutboundSendPayload, error) {
 	var (
 		deliveryStatus string
@@ -258,10 +265,12 @@ func (s *Store) LoadOutboundForSend(ctx context.Context, messageID string) (*Out
 		createdAt      time.Time
 	)
 	err := s.pool.QueryRow(ctx,
-		`SELECT COALESCE(delivery_status,''), COALESCE(envelope_from,''), COALESCE(sent_as,''),
-		        to_recipients, cc, bcc, raw_message, created_at
-		   FROM messages
-		  WHERE id = $1 AND direction = 'outbound'`,
+		`SELECT COALESCE(m.delivery_status,''), COALESCE(m.envelope_from,''), COALESCE(m.sent_as,''),
+		        m.to_recipients, m.cc, m.bcc, m.raw_message, m.created_at
+		   FROM messages m
+		   JOIN agent_identities a ON a.id = m.agent_id
+		  WHERE m.id = $1 AND m.direction = 'outbound'
+		    AND m.deleted_at IS NULL AND a.deleted_at IS NULL`,
 		messageID,
 	).Scan(&deliveryStatus, &envelopeFrom, &sentAs, &to, &cc, &bcc, &raw, &createdAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -285,19 +294,162 @@ func (s *Store) LoadOutboundForSend(ctx context.Context, messageID string) (*Out
 	}, nil
 }
 
-// MarkOutboundSentTx records, within the caller's transaction, that an accepted
+// ClaimOutboundForSend atomically moves the stamped River job's live outbound
+// message into delivery_status='sending' and returns its provider payload. A
+// retry of the same job may reclaim a row already in sending (River does not run
+// two attempts of one job concurrently); a duplicate job id cannot claim it.
+//
+// The short transaction is the send/trash linearization point. If trash commits
+// first, the claim misses and the queued send is canceled. If this claim commits
+// first, trash may proceed while provider I/O runs, and MarkOutboundSentTx or
+// MarkOutboundFailedTx still records the terminal result on the trashed row.
+func (s *Store) ClaimOutboundForSend(ctx context.Context, messageID string, jobID int64) (*OutboundSendPayload, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin outbound send claim: %w", err)
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx))
+
+	var agentID string
+	err = tx.QueryRow(ctx,
+		`SELECT agent_id FROM messages WHERE id = $1 AND direction = 'outbound'`,
+		messageID,
+	).Scan(&agentID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		deliveryStatus string
+		envelopeFrom   string
+		sentAs         string
+		to, cc, bcc    []string
+		raw            []byte
+		createdAt      time.Time
+		deletedAt      *time.Time
+		agentDeletedAt *time.Time
+		stampedJobID   *int64
+	)
+	// Lock agent first to match permanent agent deletion's lock order, then
+	// lock the message. Message-only trash operations never need the agent lock.
+	err = tx.QueryRow(ctx,
+		`SELECT deleted_at FROM agent_identities WHERE id = $1 FOR UPDATE`,
+		agentID,
+	).Scan(&agentDeletedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	err = tx.QueryRow(ctx,
+		`SELECT COALESCE(m.delivery_status,''), COALESCE(m.envelope_from,''), COALESCE(m.sent_as,''),
+		        m.to_recipients, m.cc, m.bcc, m.raw_message, m.created_at,
+		        m.deleted_at, m.send_job_id
+		   FROM messages m
+		  WHERE m.id = $1 AND m.agent_id = $2 AND m.direction = 'outbound'
+		  FOR UPDATE OF m`,
+		messageID, agentID,
+	).Scan(&deliveryStatus, &envelopeFrom, &sentAs, &to, &cc, &bcc, &raw, &createdAt,
+		&deletedAt, &stampedJobID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if stampedJobID == nil || *stampedJobID != jobID ||
+		(deliveryStatus != "accepted" && deliveryStatus != "sending") {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	if deletedAt != nil || agentDeletedAt != nil {
+		// The locked snapshot says trash won before the claim. Cancel the queued
+		// send without a webhook event; no provider attempt occurred in this run.
+		if _, err := tx.Exec(ctx,
+			`UPDATE messages
+			    SET delivery_status = 'failed',
+			        delivery_detail = 'send canceled because the message or agent is in trash',
+			        send_claimed_at = NULL
+			  WHERE id = $1`,
+			messageID,
+		); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE messages SET delivery_status = 'sending', send_claimed_at = now() WHERE id = $1`,
+		messageID,
+	); err != nil {
+		return nil, err
+	}
+	deliveryStatus = "sending"
+	recipients := make([]string, 0, len(to)+len(cc)+len(bcc))
+	recipients = append(recipients, to...)
+	recipients = append(recipients, cc...)
+	recipients = append(recipients, bcc...)
+	p := &OutboundSendPayload{
+		ID:             messageID,
+		DeliveryStatus: deliveryStatus,
+		EnvelopeFrom:   envelopeFrom,
+		SentAs:         sentAs,
+		Recipients:     recipients,
+		Raw:            raw,
+		CreatedAt:      createdAt,
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// ReleaseOutboundSendClaim moves a side-effect-free provider failure back to
+// accepted so River backoff is not mistaken for an active provider call.
+func (s *Store) ReleaseOutboundSendClaim(ctx context.Context, messageID string, jobID int64) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE messages
+		    SET delivery_status = 'accepted', send_claimed_at = NULL
+		  WHERE id = $1 AND send_job_id = $2 AND delivery_status = 'sending'`,
+		messageID, jobID,
+	)
+	return err
+}
+
+// MarkOutboundSentTx records, within the caller's transaction, that a claimed
 // outbound message was submitted to the provider: delivery_status='sent',
 // provider_message_id, and one message_recipients row per recipient at 'sent'
 // (mirrors MarkMessageSent's recipient shape). sent_as is left as the accept-time
 // value. Returns the row + owning user/domain for the caller to emit email.sent +
-// meter usage, or nil if the row is gone (deleted between load and mark).
+// meter usage, or nil if the row is gone or no longer in `sending`. Trashed rows
+// remain eligible because trash may commit after the durable send claim.
 func (s *Store) MarkOutboundSentTx(ctx context.Context, tx pgx.Tx, messageID, providerMessageID string) (*OutboundSentInfo, error) {
 	m := &Message{ID: messageID, Direction: "outbound", DeliveryStatus: "sent", ProviderMessageID: providerMessageID}
 	err := tx.QueryRow(ctx,
-		`UPDATE messages
-		    SET delivery_status = 'sent', provider_message_id = $2
-		  WHERE id = $1 AND direction = 'outbound'
-		 RETURNING agent_id, subject, message_type, method, conversation_id, sender, to_recipients, cc, bcc`,
+		`UPDATE messages m
+		    SET delivery_status = 'sent', provider_message_id = $2, send_claimed_at = NULL
+		   FROM agent_identities a
+		  WHERE m.id = $1 AND m.direction = 'outbound'
+		    AND m.agent_id = a.id
+		    AND m.delivery_status = 'sending'
+		 RETURNING m.agent_id, m.subject, m.message_type, m.method, m.conversation_id, m.sender, m.to_recipients, m.cc, m.bcc`,
 		messageID, providerMessageID,
 	).Scan(&m.AgentID, &m.Subject, &m.Type, &m.Method, &m.ConversationID, &m.Sender, &m.ToRecipients, &m.CC, &m.BCC)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -346,14 +498,17 @@ func (s *Store) MarkOutboundSentTx(ctx context.Context, tx pgx.Tx, messageID, pr
 // row + owning user for the caller to emit email.failed, or nil if the row is gone
 // or already left accepted/sending. The compare-and-set prevents a late worker or
 // reconciler from overwriting a successful or otherwise terminal delivery state.
+// A post-accept trash does not suppress terminal bookkeeping on the hidden row.
 func (s *Store) MarkOutboundFailedTx(ctx context.Context, tx pgx.Tx, messageID, detail string) (*OutboundSentInfo, error) {
 	m := &Message{ID: messageID, Direction: "outbound", DeliveryStatus: "failed", DeliveryDetail: detail}
 	err := tx.QueryRow(ctx,
-		`UPDATE messages
-		    SET delivery_status = 'failed', delivery_detail = $2
-		  WHERE id = $1 AND direction = 'outbound'
-		    AND delivery_status IN ('accepted', 'sending')
-		 RETURNING agent_id, subject, message_type, method, conversation_id, sender, to_recipients, cc, bcc`,
+		`UPDATE messages m
+		    SET delivery_status = 'failed', delivery_detail = $2, send_claimed_at = NULL
+		   FROM agent_identities a
+		  WHERE m.id = $1 AND m.direction = 'outbound'
+		    AND m.agent_id = a.id
+		    AND m.delivery_status IN ('accepted', 'sending')
+		 RETURNING m.agent_id, m.subject, m.message_type, m.method, m.conversation_id, m.sender, m.to_recipients, m.cc, m.bcc`,
 		messageID, nullIfEmpty(detail),
 	).Scan(&m.AgentID, &m.Subject, &m.Type, &m.Method, &m.ConversationID, &m.Sender, &m.ToRecipients, &m.CC, &m.BCC)
 	if errors.Is(err, pgx.ErrNoRows) {

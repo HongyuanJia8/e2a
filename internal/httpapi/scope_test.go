@@ -50,13 +50,25 @@ func scopeTestServer(t *testing.T) *httptest.Server {
 			}
 			return nil, errors.New("not found")
 		},
+		GetAgentAnyState: func(ctx context.Context, address string) (*identity.AgentIdentity, error) {
+			switch address {
+			case "support@acme.com":
+				a := sampleAgent()
+				return &a, nil
+			case "other@acme.com":
+				a := sampleAgent()
+				a.ID = "other@acme.com"
+				return &a, nil
+			}
+			return nil, errors.New("not found")
+		},
 		UpdateAgentName: func(ctx context.Context, agentID, userID, name string) error {
 			return nil
 		},
 		UpdateAgentProtection: func(ctx context.Context, agentID, userID string, cfg identity.ProtectionConfig) error {
 			return nil
 		},
-		DeleteAgent: func(ctx context.Context, agentID, userID string) (int64, error) { return 0, nil },
+		DeleteAgent: func(ctx context.Context, agentID, userID string) error { return nil },
 		Legacy:      http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusTeapot) }),
 	}
 	srv := httptest.NewServer(New(deps))

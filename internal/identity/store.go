@@ -128,6 +128,11 @@ type AgentIdentity struct {
 	// the wire. Replaces the pre-GA webhook_healthy bool, which could not
 	// distinguish "no webhook configured" from "healthy".
 	WebhookStatus string `json:"webhook_status,omitempty" doc:"Webhook posture for this agent, derived from the account's webhook subscribers that match it (a webhook with no agent filter matches every agent). Open set; tolerate unknown values. Known values: none (no webhook matches this agent), healthy (an enabled webhook matches and none serving this agent has a terminally-failed delivery in the last 24h), failing (an enabled webhook matches but at least one delivery on a matching enabled webhook terminally failed in the last 24h), disabled (webhooks match but every one is disabled, turned off manually), auto_disabled (webhooks match, every one is disabled, and at least one was auto-disabled by the chronic-failure sweep). Present on enriched surfaces (account export, dashboard agent list); absent where not computed."`
+	// DeletedAt is non-nil while the agent is in the trash (soft-deleted,
+	// migration 063): hidden from every live lookup, restorable until the
+	// janitor purges it after TrashRetention. Populated only by the
+	// any-state / trash load paths; live lookups filter it out entirely.
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 	// InboundPolicy is the per-agent inbound ingestion gate (migration 033 /
 	// Slice 7): one of inboundpolicy.{Open,Allowlist,Domain}.
 	// Defaults to 'open' (the column default). InboundAllowlist holds the
@@ -319,12 +324,19 @@ type Message struct {
 	// SentAs is the From identity actually used when the outbound message was
 	// accepted by the relay. Outbound-only; empty on inbound rows. Source:
 	// messages.sent_as.
-	SentAs          string    `json:"sent_as,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	ExpiresAt       time.Time `json:"expires_at"`
-	WebhookStatus   string    `json:"webhook_status,omitempty"`
-	WebhookError    string    `json:"webhook_error,omitempty"`
-	WebhookAttempts int       `json:"webhook_attempts,omitempty"`
+	SentAs    string    `json:"sent_as,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+	// DeletedAt is non-nil while the message is in the trash (soft-deleted,
+	// migration 063): hidden from every agent-facing read path except the
+	// single-message get (so the trash view can open it), restorable until
+	// the janitor purges it after TrashRetention. While trashed the natural
+	// expiry clock (ExpiresAt) is suspended; RestoreMessage shifts ExpiresAt
+	// by the time spent in trash.
+	DeletedAt       *time.Time `json:"deleted_at,omitempty"`
+	WebhookStatus   string     `json:"webhook_status,omitempty"`
+	WebhookError    string     `json:"webhook_error,omitempty"`
+	WebhookAttempts int        `json:"webhook_attempts,omitempty"`
 	// SizeBytes is the RAW MIME byte length of the whole stored message —
 	// the octet length of raw_message (headers + bodies + encoded attachments
 	// as transported). NOT a decoded-attachment size: the per-attachment
@@ -1020,9 +1032,19 @@ func (s *Store) DeleteDomainTx(ctx context.Context, domain, userID string, inTx 
 
 // GetAgentByID looks up an agent by its ID (full email) with domain verification status.
 func (s *Store) GetAgentByID(ctx context.Context, id string) (*AgentIdentity, error) {
-	a := &AgentIdentity{}
-	err := s.pool.QueryRow(ctx,
-		`SELECT a.id, a.domain, a.user_id, a.name, a.public, a.created_at,
+	return s.getAgentByID(ctx, id, false)
+}
+
+// GetAgentByIDAnyState loads an agent regardless of trash state (deleted_at
+// populated when trashed). For the trash surfaces only — restore, permanent
+// delete, trash listing detail. Every live path uses GetAgentByID, which
+// treats a trashed agent as nonexistent.
+func (s *Store) GetAgentByIDAnyState(ctx context.Context, id string) (*AgentIdentity, error) {
+	return s.getAgentByID(ctx, id, true)
+}
+
+func (s *Store) getAgentByID(ctx context.Context, id string, includeDeleted bool) (*AgentIdentity, error) {
+	q := `SELECT a.id, a.domain, a.user_id, a.name, a.public, a.created_at,
 		        a.hitl_ttl_seconds, a.hitl_expiration_action,
 		        COALESCE(a.inbound_policy, 'open'), a.inbound_allowlist,
 		        a.inbound_policy_action,
@@ -1031,11 +1053,16 @@ func (s *Store) GetAgentByID(ctx context.Context, id string) (*AgentIdentity, er
 		        a.outbound_scan, a.outbound_scan_review_threshold, a.outbound_scan_block_threshold,
 		        a.inbound_scan_sensitivity, a.outbound_scan_sensitivity,
 		        COALESCE(a.assertion_version, 1),
+		        a.deleted_at,
 		        d.verified as domain_verified
 		 FROM agent_identities a
 		 JOIN domains d ON a.domain = d.domain
-		 WHERE a.id = $1`, id,
-	).Scan(&a.ID, &a.Domain, &a.UserID, &a.Name, &a.Public, &a.CreatedAt,
+		 WHERE a.id = $1`
+	if !includeDeleted {
+		q += ` AND a.deleted_at IS NULL`
+	}
+	a := &AgentIdentity{}
+	err := s.pool.QueryRow(ctx, q, id).Scan(&a.ID, &a.Domain, &a.UserID, &a.Name, &a.Public, &a.CreatedAt,
 		&a.HITLTTLSeconds, &a.HITLExpirationAction,
 		&a.InboundPolicy, &a.InboundAllowlist,
 		&a.InboundPolicyAction,
@@ -1044,6 +1071,7 @@ func (s *Store) GetAgentByID(ctx context.Context, id string) (*AgentIdentity, er
 		&a.OutboundScan, &a.OutboundScanReviewThreshold, &a.OutboundScanBlockThreshold,
 		&a.InboundScanSensitivity, &a.OutboundScanSensitivity,
 		&a.AssertionVersion,
+		&a.DeletedAt,
 		&a.DomainVerified)
 	if err != nil {
 		return nil, err
@@ -1218,7 +1246,24 @@ func (s *Store) UpdateAgentName(ctx context.Context, agentID, userID, name strin
 // detect a further page) starting after the (afterCreatedAt, afterID) key from
 // the previous page's last row (zero afterCreatedAt = first page).
 func (s *Store) ListAgentsByUser(ctx context.Context, userID string, limit int, afterCreatedAt time.Time, afterID string) ([]AgentIdentity, error) {
-	q := `SELECT a.id, a.domain, a.user_id, a.name, a.public, a.created_at,
+	return s.listAgentsByUser(ctx, userID, limit, afterCreatedAt, afterID, false)
+}
+
+// ListDeletedAgentsByUser is the trash listing: agents the user soft-deleted,
+// newest-first, same keyset pagination as the live list. DeletedAt is
+// populated on every row.
+func (s *Store) ListDeletedAgentsByUser(ctx context.Context, userID string, limit int, afterCreatedAt time.Time, afterID string) ([]AgentIdentity, error) {
+	return s.listAgentsByUser(ctx, userID, limit, afterCreatedAt, afterID, true)
+}
+
+func (s *Store) listAgentsByUser(ctx context.Context, userID string, limit int, afterCreatedAt time.Time, afterID string, deleted bool) ([]AgentIdentity, error) {
+	// The per-agent activity stats exclude trashed messages (deleted_at IS
+	// NOT NULL) — the dashboard's 7-day counters and last-delivery must agree
+	// with what the inbox actually shows. For the TRASH listing (deleted=
+	// true) the stats are skipped entirely below: the trash view renders
+	// identity fields only, and five correlated probes per trashed agent
+	// against the prod-sized messages table would be pure waste.
+	q := `SELECT a.id, a.domain, a.user_id, a.name, a.public, a.created_at, a.deleted_at,
 		        a.hitl_ttl_seconds, a.hitl_expiration_action,
 		        COALESCE(a.inbound_policy, 'open'), a.inbound_allowlist,
 		        a.inbound_policy_action,
@@ -1226,22 +1271,44 @@ func (s *Store) ListAgentsByUser(ctx context.Context, userID string, limit int, 
 		        a.inbound_scan, a.inbound_scan_review_threshold, a.inbound_scan_block_threshold,
 		        a.outbound_scan, a.outbound_scan_review_threshold, a.outbound_scan_block_threshold,
 		        a.inbound_scan_sensitivity, a.outbound_scan_sensitivity,
-		        d.verified as domain_verified,
+		        d.verified as domain_verified,`
+	if deleted {
+		// Trash view: identity fields only — zero-value the stats columns so
+		// the scan shape stays uniform without paying five correlated probes
+		// against the prod-sized messages table per trashed agent (the trash
+		// UI renders none of them).
+		q += `
+		        0 AS inbound_7d, 0 AS outbound_7d, 0 AS pending_count,
+		        NULL::timestamptz AS last_delivery_at, ''::text AS webhook_status`
+	} else {
+		// Live stats exclude trashed messages so the dashboard counters agree
+		// with what the inbox shows.
+		q += `
 		        (SELECT count(*) FROM messages m
 		           WHERE m.agent_id = a.id AND m.direction = 'inbound'
+		             AND m.deleted_at IS NULL
 		             AND m.created_at > now() - interval '7 days') AS inbound_7d,
 		        (SELECT count(*) FROM messages m
 		           WHERE m.agent_id = a.id AND m.direction = 'outbound'
+		             AND m.deleted_at IS NULL
 		             AND m.created_at > now() - interval '7 days') AS outbound_7d,
 		        (SELECT count(*) FROM messages m
 		           WHERE m.agent_id = a.id AND m.status = 'pending_review' AND m.direction = 'outbound') AS pending_count,
 		        (SELECT max(m.created_at) FROM messages m
 		           WHERE m.agent_id = a.id AND m.direction = 'outbound'
+		             AND m.deleted_at IS NULL
 		             AND m.status = 'sent') AS last_delivery_at,
-		        ` + webhookStatusSQL + ` AS webhook_status
+		        ` + webhookStatusSQL + ` AS webhook_status`
+	}
+	q += `
 		 FROM agent_identities a
 		 JOIN domains d ON a.domain = d.domain
 		 WHERE a.user_id = $1`
+	if deleted {
+		q += ` AND a.deleted_at IS NOT NULL`
+	} else {
+		q += ` AND a.deleted_at IS NULL`
+	}
 	args := []interface{}{userID}
 	if !afterCreatedAt.IsZero() {
 		i := len(args) + 1
@@ -1263,7 +1330,7 @@ func (s *Store) ListAgentsByUser(ctx context.Context, userID string, limit int, 
 	for rows.Next() {
 		var a AgentIdentity
 		var lastDeliveryAt *time.Time
-		if err := rows.Scan(&a.ID, &a.Domain, &a.UserID, &a.Name, &a.Public, &a.CreatedAt,
+		if err := rows.Scan(&a.ID, &a.Domain, &a.UserID, &a.Name, &a.Public, &a.CreatedAt, &a.DeletedAt,
 			&a.HITLTTLSeconds, &a.HITLExpirationAction,
 			&a.InboundPolicy, &a.InboundAllowlist,
 			&a.InboundPolicyAction,
@@ -1285,40 +1352,154 @@ func (s *Store) ListAgentsByUser(ctx context.Context, userID string, limit int, 
 
 // DeleteAgent removes an agent and everything bound to it. It returns the
 // number of message rows removed with the agent — the messages are deleted
-// explicitly (rather than left to the agent_identities → messages FK cascade)
-// purely so their rows-affected count is available for the API's deletion
-// receipt at zero extra query cost; webhook_deliveries still cascade from the
-// deleted messages. The ownership join on the messages delete plus the
-// single-transaction scope keep it exactly as safe as the old cascade path.
+// explicitly rather than left to the agent_identities → messages FK cascade.
+// Besides providing the API's deletion receipt, this ensures the storage
+// metering trigger can resolve the owning user while the agent row exists.
 func (s *Store) DeleteAgent(ctx context.Context, agentID, userID string) (messagesDeleted int64, err error) {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback(ctx)
+	err = s.WithTx(ctx, func(tx pgx.Tx) error {
+		var lockedID string
+		queryErr := tx.QueryRow(ctx,
+			`SELECT id FROM agent_identities WHERE id = $1 AND user_id = $2 FOR UPDATE`,
+			agentID, userID).Scan(&lockedID)
+		if errors.Is(queryErr, pgx.ErrNoRows) {
+			return ErrAgentNotFound
+		}
+		if queryErr != nil {
+			return queryErr
+		}
+		var sending bool
+		if err := tx.QueryRow(ctx,
+			`SELECT EXISTS (
+				SELECT 1 FROM messages
+				 WHERE agent_id = $1 AND delivery_status = 'sending'
+				   AND send_claimed_at > now() - make_interval(secs => $2)
+			)`,
+			agentID, int64(OutboundSendClaimStaleWindow/time.Second),
+		).Scan(&sending); err != nil {
+			return err
+		}
+		if sending {
+			return ErrSendInProgress
+		}
+		msgTag, err := tx.Exec(ctx, `DELETE FROM messages WHERE agent_id = $1`, agentID)
+		if err != nil {
+			return err
+		}
+		messagesDeleted = msgTag.RowsAffected()
+		_, err = tx.Exec(ctx, `DELETE FROM agent_identities WHERE id = $1`, agentID)
+		return err
+	})
+	return messagesDeleted, err
+}
 
-	msgTag, err := tx.Exec(ctx,
-		`DELETE FROM messages USING agent_identities a
-		 WHERE messages.agent_id = a.id AND a.id = $1 AND a.user_id = $2`, agentID, userID,
+// SoftDeleteAgent moves a live agent to the trash (docs/design/
+// trash-soft-delete.md): it disappears from every live lookup — inbound mail
+// bounces, per-agent API calls 404, its held messages leave the review
+// queue — until restored or purged by the janitor after TrashRetention.
+// The email address stays reserved while in the trash.
+func (s *Store) SoftDeleteAgent(ctx context.Context, agentID, userID string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE agent_identities SET deleted_at = now()
+		  WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`, agentID, userID,
 	)
 	if err != nil {
-		return 0, err
-	}
-	tag, err := tx.Exec(ctx,
-		`DELETE FROM agent_identities WHERE id = $1 AND user_id = $2`, agentID, userID,
-	)
-	if err != nil {
-		return 0, err
+		return err
 	}
 	if tag.RowsAffected() == 0 {
-		// The deferred rollback undoes the messages delete — though the
-		// ownership join means none can have matched if the agent row didn't.
-		return 0, fmt.Errorf("agent not found or not owned by user")
+		return ErrAgentNotFound
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return 0, err
+	return nil
+}
+
+// RestoreAgent brings a trashed agent back to life, messages and config
+// intact. The agent's live messages resume their clocks exactly where they
+// stopped: expires_at (and, for still-held drafts, approval_expires_at) are
+// shifted forward by the time spent in the trash, so a restore never
+// resurrects an inbox whose mail immediately expires — nor auto-resolves a
+// hold whose review TTL silently lapsed while the inbox was trashed.
+// Returns ErrNotInTrash when the agent exists but is live, and ErrAgentNotFound
+// when it doesn't exist (or isn't the caller's).
+func (s *Store) RestoreAgent(ctx context.Context, agentID, userID string) error {
+	return s.WithTx(ctx, func(tx pgx.Tx) error {
+		var deletedAt *time.Time
+		err := tx.QueryRow(ctx,
+			`SELECT deleted_at FROM agent_identities
+			  WHERE id = $1 AND user_id = $2 FOR UPDATE`, agentID, userID,
+		).Scan(&deletedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrAgentNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if deletedAt == nil {
+			return ErrNotInTrash
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE agent_identities SET deleted_at = NULL WHERE id = $1`, agentID); err != nil {
+			return err
+		}
+		// Give back the trash time to the agent's LIVE messages only —
+		// message-level trash rows keep their own suspended clock.
+		_, err = tx.Exec(ctx,
+			`UPDATE messages
+			    SET expires_at = expires_at + (now() - $2::timestamptz),
+			        approval_expires_at = CASE
+			          WHEN status = 'pending_review' AND approval_expires_at IS NOT NULL
+			          THEN approval_expires_at + (now() - $2::timestamptz)
+			          ELSE approval_expires_at END
+			  WHERE agent_id = $1 AND deleted_at IS NULL`, agentID, *deletedAt)
+		return err
+	})
+}
+
+// agentPurgeBatch bounds one janitor pass of PurgeDeletedAgents: one agent
+// per transaction, so the messages drained with it are bounded by that one
+// inbox rather than a whole batch's worth of cascades.
+var agentPurgeBatch = 100
+
+// PurgeDeletedAgents hard-deletes agents whose trash retention has lapsed
+// (deleted_at older than TrashRetention). One agent per transaction, its
+// messages deleted explicitly BEFORE the agent row (not via ON DELETE
+// CASCADE) so the storage-metering trigger — which resolves the owning user
+// through the agent row — still reconciles account_usage; see DeleteAgent.
+// Idempotent and interruption-safe: each agent commits independently, so a
+// janitor timeout mid-backlog resumes next tick.
+func (s *Store) PurgeDeletedAgents(ctx context.Context) (int64, error) {
+	var total int64
+	for i := 0; i < agentPurgeBatch; i++ {
+		var purged bool
+		err := s.WithTx(ctx, func(tx pgx.Tx) error {
+			var id string
+			err := tx.QueryRow(ctx,
+				`SELECT id FROM agent_identities
+				  WHERE deleted_at IS NOT NULL AND deleted_at <= now() - make_interval(secs => $1)
+				  LIMIT 1 FOR UPDATE SKIP LOCKED`,
+				TrashRetention.Seconds()).Scan(&id)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil // drained
+			}
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `DELETE FROM messages WHERE agent_id = $1`, id); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `DELETE FROM agent_identities WHERE id = $1`, id); err != nil {
+				return err
+			}
+			purged = true
+			return nil
+		})
+		if err != nil {
+			return total, err
+		}
+		if !purged {
+			return total, nil
+		}
+		total++
 	}
-	return msgTag.RowsAffected(), nil
+	return total, nil
 }
 
 // --- Messages ---
@@ -1338,6 +1519,30 @@ func (s *Store) DeleteAgent(ctx context.Context, agentID, userID string) (messag
 // If HITLMaxTTLSeconds is ever raised, raise this too — keep
 // MessageTTL > HITLMaxTTLSeconds by at least 1 day.
 const MessageTTL = 10 * 24 * time.Hour // 10 days
+
+// TrashRetention is how long a soft-deleted resource (agent inbox or
+// message) stays in the trash before the janitor purges it permanently —
+// the Gmail-style 30-day window (docs/design/trash-soft-delete.md). While a
+// message sits in the trash its natural expiry clock (MessageTTL /
+// expires_at) is suspended; the trash clock alone governs. A var (not a
+// const) so a deployment or test can tune it; default 30 days.
+var TrashRetention = 30 * 24 * time.Hour
+
+// ErrNotInTrash is returned by restore/purge operations that target a
+// resource that exists but is not soft-deleted.
+var ErrNotInTrash = fmt.Errorf("resource is not in the trash")
+
+// ErrMessageHeld is returned when a trash operation targets a message that
+// is held for review (status pending_review) — the review queue is its
+// resolution surface; approve or reject it first.
+var ErrMessageHeld = fmt.Errorf("message is held for review")
+
+// ErrAgentNotFound is returned by agent trash operations (soft delete /
+// restore / permanent delete) when the agent row isn't there for the caller
+// — either it never existed, belongs to another user, or was hard-deleted
+// between resolution and the mutation (a race the handler maps to 404
+// instead of a generic 500). Mirrors ErrMessageNotFound / ErrDomainNotFound.
+var ErrAgentNotFound = fmt.Errorf("agent not found or not owned by user")
 
 // NewMessageID returns a fresh internal message ID. Callers can use this
 // to generate the ID up-front when they need it before storing — for
@@ -1490,6 +1695,7 @@ func (s *Store) GetInboundMessage(ctx context.Context, id string) (*Message, err
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, agent_id, direction, sender, recipient, to_recipients, cc, reply_to, subject, email_message_id, raw_message, auth_verdict, COALESCE(flagged, false), COALESCE(flag_reason, ''), COALESCE(conversation_id, ''), created_at, expires_at
 		 FROM messages WHERE id = $1 AND direction = 'inbound' AND expires_at > now()
+		   AND deleted_at IS NULL
 		   AND status NOT IN (`+heldInboundStatuses+`)`, id,
 	).Scan(&m.ID, &m.AgentID, &m.Direction, &m.Sender, &m.Recipient, &m.ToRecipients, &m.CC, &m.ReplyTo, &m.Subject, &m.EmailMessageID, &m.RawMessage, &authVerdict, &m.Flagged, &m.FlagReason, &m.ConversationID, &m.CreatedAt, &m.ExpiresAt)
 	if err != nil {
@@ -1536,6 +1742,7 @@ func (s *Store) GetRepliableMessage(ctx context.Context, id string) (*Message, e
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, agent_id, direction, sender, recipient, to_recipients, cc, reply_to, subject, email_message_id, COALESCE(provider_message_id, ''), raw_message, auth_verdict, COALESCE(flagged, false), COALESCE(flag_reason, ''), COALESCE(conversation_id, ''), created_at, expires_at
 		 FROM messages WHERE id = $1 AND expires_at > now()
+		   AND deleted_at IS NULL
 		   AND status NOT IN (`+heldInboundStatuses+`)`, id,
 	).Scan(&m.ID, &m.AgentID, &m.Direction, &m.Sender, &m.Recipient, &m.ToRecipients, &m.CC, &m.ReplyTo, &m.Subject, &m.EmailMessageID, &m.ProviderMessageID, &m.RawMessage, &authVerdict, &m.Flagged, &m.FlagReason, &m.ConversationID, &m.CreatedAt, &m.ExpiresAt)
 	if err != nil {
@@ -1586,6 +1793,7 @@ func (s *Store) GetInboundByEmailMessageID(ctx context.Context, agentID, emailMe
 		   AND direction = 'inbound'
 		   AND email_message_id = $2
 		   AND expires_at > now()
+		   AND deleted_at IS NULL
 		   AND status NOT IN (`+heldInboundStatuses+`)
 		 ORDER BY created_at DESC LIMIT 1`,
 		agentID, emailMessageID,
@@ -1623,6 +1831,7 @@ func (s *Store) GetMessageByEmailMessageID(ctx context.Context, agentID, message
 		 WHERE agent_id = $1
 		   AND (email_message_id = $2 OR provider_message_id = $2)
 		   AND expires_at > now()
+		   AND deleted_at IS NULL
 		   AND status NOT IN (`+heldInboundStatuses+`)
 		 ORDER BY created_at DESC LIMIT 1`,
 		agentID, messageID,
@@ -2029,7 +2238,8 @@ func (s *Store) GetOutboundMessageForUser(ctx context.Context, messageID, userID
 		 FROM messages m
 		 JOIN agent_identities a ON a.id = m.agent_id
 		 LEFT JOIN users r ON r.id = m.reviewed_by_user_id
-		 WHERE m.id = $1 AND a.user_id = $2 AND m.direction = 'outbound'`,
+		 WHERE m.id = $1 AND a.user_id = $2 AND m.direction = 'outbound'
+		   AND a.deleted_at IS NULL`,
 		messageID, userID,
 	).Scan(
 		&m.ID, &m.AgentID, &m.Direction, &m.Sender, &m.Recipient, &m.Subject,
@@ -2092,7 +2302,8 @@ func (s *Store) ListPendingOutboundForUser(ctx context.Context, userID string, l
 		        COALESCE(m.delivery_status, ''), COALESCE(m.delivery_detail, ''), COALESCE(m.sent_as, '')
 		 FROM messages m
 		 JOIN agent_identities a ON a.id = m.agent_id
-		 WHERE a.user_id = $1 AND m.status = 'pending_review' AND m.direction = 'outbound'
+		 WHERE a.user_id = $1 AND a.deleted_at IS NULL
+		   AND m.status = 'pending_review' AND m.direction = 'outbound'
 		 ORDER BY m.approval_expires_at ASC
 		 LIMIT $2`, userID, limit,
 	)
@@ -2228,6 +2439,7 @@ func (s *Store) ApproveAndSend(
 		 FROM messages m
 		 JOIN agent_identities a ON a.id = m.agent_id
 		 WHERE m.id = $1 AND m.direction = 'outbound'
+		   AND a.deleted_at IS NULL
 		 FOR NO KEY UPDATE OF m`,
 		messageID,
 	).Scan(
@@ -2395,7 +2607,8 @@ func (s *Store) ResolveOutboundOwner(ctx context.Context, messageID string) (use
 		`SELECT a.user_id, m.agent_id
 		 FROM messages m
 		 JOIN agent_identities a ON a.id = m.agent_id
-		 WHERE m.id = $1 AND m.direction = 'outbound'`,
+		 WHERE m.id = $1 AND m.direction = 'outbound'
+		   AND a.deleted_at IS NULL`,
 		messageID,
 	).Scan(&userID, &agentID)
 	if err != nil {
@@ -2426,6 +2639,7 @@ func (s *Store) ListExpiredPending(ctx context.Context, limit int) ([]Expiration
 		 JOIN agent_identities a ON a.id = m.agent_id
 		 WHERE m.status = 'pending_review' AND m.direction = 'outbound'
 		   AND m.approval_expires_at < now()
+		   AND a.deleted_at IS NULL
 		 ORDER BY m.approval_expires_at ASC
 		 LIMIT $1`, limit,
 	)
@@ -2862,7 +3076,7 @@ func (s *Store) RejectPending(ctx context.Context, messageID, userID, reason str
 		  WHERE id = $1
 		    AND status = 'pending_review'
 		    AND direction = 'outbound'
-		    AND agent_id IN (SELECT id FROM agent_identities WHERE user_id = $2)`,
+		    AND agent_id IN (SELECT id FROM agent_identities WHERE user_id = $2 AND deleted_at IS NULL)`,
 		messageID, userID, MessageStatusReviewRejected, reason,
 	)
 	if err != nil {
@@ -2898,6 +3112,7 @@ func (s *Store) ListActivityByAgent(ctx context.Context, agentID string, limit i
 		 FROM messages m
 		 LEFT JOIN webhook_deliveries wd ON wd.message_id = m.id
 		 WHERE m.agent_id = $1 AND m.expires_at > now()
+		   AND m.deleted_at IS NULL
 		   AND NOT (m.direction = 'inbound' AND m.status IN (`+heldInboundStatuses+`))
 		 ORDER BY m.created_at DESC
 		 LIMIT $2`, agentID, limit,
@@ -2971,6 +3186,11 @@ type MessageListFilter struct {
 	// rows. Handler-layer validates each entry against the same charset
 	// rule used on writes so callers can't smuggle SQL through here.
 	Labels []string
+	// Deleted flips the query to the TRASH view: only soft-deleted rows,
+	// with the natural-expiry filter dropped (a trashed row's expiry clock
+	// is suspended — see TrashRetention). False (default) lists live rows
+	// only.
+	Deleted bool
 }
 
 // GetMessagesByAgent returns messages for an agent, filtered by status,
@@ -2999,10 +3219,18 @@ func (s *Store) GetMessagesByAgent(ctx context.Context, f MessageListFilter) ([]
 	var query string
 	var args []interface{}
 
-	baseSelect := `SELECT m.id, m.agent_id, m.direction, m.sender, m.recipient, m.to_recipients, m.cc, m.reply_to, m.subject, m.email_message_id, m.conversation_id, COALESCE(m.inbox_status, ''), COALESCE(m.status, ''), COALESCE(wd.status, ''), COALESCE(wd.last_error, ''), COALESCE(octet_length(m.raw_message), 0), m.created_at, m.labels, COALESCE(m.delivery_status, ''), COALESCE(m.delivery_detail, ''), COALESCE(m.sent_as, ''), m.auth_verdict, COALESCE(m.flagged, false), COALESCE(m.flag_reason, ''), m.auth_headers
+	baseSelect := `SELECT m.id, m.agent_id, m.direction, m.sender, m.recipient, m.to_recipients, m.cc, m.reply_to, m.subject, m.email_message_id, m.conversation_id, COALESCE(m.inbox_status, ''), COALESCE(m.status, ''), COALESCE(wd.status, ''), COALESCE(wd.last_error, ''), COALESCE(octet_length(m.raw_message), 0), m.created_at, m.deleted_at, m.labels, COALESCE(m.delivery_status, ''), COALESCE(m.delivery_detail, ''), COALESCE(m.sent_as, ''), m.auth_verdict, COALESCE(m.flagged, false), COALESCE(m.flag_reason, ''), m.auth_headers
 		 FROM messages m
 		 LEFT JOIN webhook_deliveries wd ON wd.message_id = m.id
-		 WHERE m.agent_id = $1 AND m.expires_at > now()`
+		 WHERE m.agent_id = $1`
+
+	// Live view: exclude trash + expired. Trash view: only soft-deleted
+	// rows; no expiry filter (the clock is suspended in the trash).
+	if f.Deleted {
+		baseSelect += ` AND m.deleted_at IS NOT NULL`
+	} else {
+		baseSelect += ` AND m.deleted_at IS NULL AND m.expires_at > now()`
+	}
 
 	switch f.Direction {
 	case "outbound":
@@ -3121,7 +3349,7 @@ func (s *Store) GetMessagesByAgent(ctx context.Context, f MessageListFilter) ([]
 			&m.ID, &m.AgentID, &m.Direction, &m.Sender, &m.Recipient, &m.ToRecipients, &m.CC, &m.ReplyTo,
 			&m.Subject, &m.EmailMessageID, &m.ConversationID,
 			&m.InboxStatus, &m.Status, &m.WebhookStatus, &m.WebhookError, &m.SizeBytes,
-			&m.CreatedAt, &m.Labels,
+			&m.CreatedAt, &m.DeletedAt, &m.Labels,
 			&outboundDeliveryStatus, &m.DeliveryDetail, &m.SentAs, &authVerdict, &m.Flagged, &m.FlagReason,
 			&authHeadersJSON,
 		); err != nil {
@@ -3151,6 +3379,11 @@ func (s *Store) GetMessagesByAgent(ctx context.Context, f MessageListFilter) ([]
 
 // GetMessageWithContent returns a full message including raw_message and auth_headers.
 // Marks the message as 'read' if it was 'unread'.
+//
+// Unlike the list/reply/threading paths, this deliberately returns TRASHED
+// rows too (DeletedAt set, natural-expiry filter waived while trashed) so
+// the dashboard trash can open a deleted message — Gmail's "view message in
+// trash". Callers branch on DeletedAt when trash rows must not qualify.
 func (s *Store) GetMessageWithContent(ctx context.Context, messageID, agentID string) (*Message, error) {
 	m := &Message{}
 	var authHeadersJSON []byte
@@ -3163,14 +3396,14 @@ func (s *Store) GetMessageWithContent(ctx context.Context, messageID, agentID st
 	err := s.pool.QueryRow(ctx,
 		`WITH upd AS (
 		   UPDATE messages SET inbox_status = CASE WHEN inbox_status = 'unread' THEN 'read' ELSE inbox_status END
-		   WHERE id = $1 AND agent_id = $2 AND expires_at > now()
+		   WHERE id = $1 AND agent_id = $2 AND (expires_at > now() OR deleted_at IS NOT NULL)
 		     AND NOT (direction = 'inbound' AND status IN (`+heldInboundStatuses+`))
-		   RETURNING id, agent_id, direction, sender, recipient, to_recipients, cc, reply_to, subject, email_message_id, conversation_id, COALESCE(inbox_status, '') AS inbox_status, raw_message, auth_headers, auth_verdict, COALESCE(flagged, false) AS flagged, COALESCE(flag_reason, '') AS flag_reason, created_at, expires_at, labels, COALESCE(delivery_status, '') AS delivery_status, COALESCE(delivery_detail, '') AS delivery_detail, COALESCE(sent_as, '') AS sent_as, COALESCE(body_text, '') AS body_text, COALESCE(body_html, '') AS body_html, COALESCE(status, '') AS status
+		   RETURNING id, agent_id, direction, sender, recipient, to_recipients, cc, reply_to, subject, email_message_id, conversation_id, COALESCE(inbox_status, '') AS inbox_status, raw_message, auth_headers, auth_verdict, COALESCE(flagged, false) AS flagged, COALESCE(flag_reason, '') AS flag_reason, created_at, expires_at, deleted_at, labels, COALESCE(delivery_status, '') AS delivery_status, COALESCE(delivery_detail, '') AS delivery_detail, COALESCE(sent_as, '') AS sent_as, COALESCE(body_text, '') AS body_text, COALESCE(body_html, '') AS body_html, COALESCE(status, '') AS status
 		 )
-		 SELECT upd.id, upd.agent_id, upd.direction, upd.sender, upd.recipient, upd.to_recipients, upd.cc, upd.reply_to, upd.subject, upd.email_message_id, upd.conversation_id, upd.inbox_status, upd.raw_message, upd.auth_headers, upd.auth_verdict, upd.flagged, upd.flag_reason, upd.created_at, upd.expires_at, upd.labels, upd.delivery_status, upd.delivery_detail, upd.sent_as, upd.body_text, upd.body_html, upd.status, COALESCE(wd.status, ''), COALESCE(wd.last_error, '')
+		 SELECT upd.id, upd.agent_id, upd.direction, upd.sender, upd.recipient, upd.to_recipients, upd.cc, upd.reply_to, upd.subject, upd.email_message_id, upd.conversation_id, upd.inbox_status, upd.raw_message, upd.auth_headers, upd.auth_verdict, upd.flagged, upd.flag_reason, upd.created_at, upd.expires_at, upd.deleted_at, upd.labels, upd.delivery_status, upd.delivery_detail, upd.sent_as, upd.body_text, upd.body_html, upd.status, COALESCE(wd.status, ''), COALESCE(wd.last_error, '')
 		 FROM upd LEFT JOIN webhook_deliveries wd ON wd.message_id = upd.id`,
 		messageID, agentID,
-	).Scan(&m.ID, &m.AgentID, &m.Direction, &m.Sender, &m.Recipient, &m.ToRecipients, &m.CC, &m.ReplyTo, &m.Subject, &m.EmailMessageID, &m.ConversationID, &m.InboxStatus, &m.RawMessage, &authHeadersJSON, &authVerdict, &m.Flagged, &m.FlagReason, &m.CreatedAt, &m.ExpiresAt, &m.Labels, &outboundDeliveryStatus, &m.DeliveryDetail, &m.SentAs, &m.BodyText, &m.BodyHTML, &m.Status, &m.WebhookStatus, &m.WebhookError)
+	).Scan(&m.ID, &m.AgentID, &m.Direction, &m.Sender, &m.Recipient, &m.ToRecipients, &m.CC, &m.ReplyTo, &m.Subject, &m.EmailMessageID, &m.ConversationID, &m.InboxStatus, &m.RawMessage, &authHeadersJSON, &authVerdict, &m.Flagged, &m.FlagReason, &m.CreatedAt, &m.ExpiresAt, &m.DeletedAt, &m.Labels, &outboundDeliveryStatus, &m.DeliveryDetail, &m.SentAs, &m.BodyText, &m.BodyHTML, &m.Status, &m.WebhookStatus, &m.WebhookError)
 	if err != nil {
 		return nil, err
 	}
@@ -3231,7 +3464,7 @@ func (s *Store) ModifyMessageLabels(ctx context.Context, messageID, agentID stri
 
 	var current []string
 	err = tx.QueryRow(ctx,
-		`SELECT labels FROM messages WHERE id = $1 AND agent_id = $2 AND expires_at > now() AND NOT (direction = 'inbound' AND status IN (`+heldInboundStatuses+`)) FOR UPDATE`,
+		`SELECT labels FROM messages WHERE id = $1 AND agent_id = $2 AND expires_at > now() AND deleted_at IS NULL AND NOT (direction = 'inbound' AND status IN (`+heldInboundStatuses+`)) FOR UPDATE`,
 		messageID, agentID,
 	).Scan(&current)
 	if err != nil {
@@ -3296,13 +3529,29 @@ func (s *Store) UpdateMessageDeliveryStatus(ctx context.Context, messageID, agen
 // const) so tests can shrink it to exercise the multi-batch loop cheaply.
 var expiredDeleteBatch int64 = 5000
 
+// DeleteExpiredMessages drops (a) live rows past their natural expiry —
+// the pre-trash rule, now scoped to deleted_at IS NULL — and (b) trashed
+// rows whose TrashRetention window has lapsed. A row in the trash is NOT
+// subject to natural expiry (the clock is suspended; RestoreMessage gives
+// the time back), so the two arms are disjoint.
+//
+// Arm (a) also skips messages whose AGENT is in the trash: a trashed inbox
+// must come back "messages included" for the full TrashRetention window
+// (docs/design/trash-soft-delete.md), so its messages' natural-expiry clocks
+// are suspended exactly like message-level trash — RestoreAgent gives the
+// time back, and PurgeDeletedAgents removes them with the agent at day 30.
 func (s *Store) DeleteExpiredMessages(ctx context.Context) (int64, error) {
 	var total int64
 	for {
 		tag, err := s.pool.Exec(ctx,
 			`DELETE FROM messages WHERE ctid IN (
-			   SELECT ctid FROM messages WHERE expires_at <= now() LIMIT $1)`,
-			expiredDeleteBatch)
+			   SELECT m.ctid FROM messages m
+			    WHERE (m.deleted_at IS NULL AND m.expires_at <= now()
+			           AND NOT EXISTS (SELECT 1 FROM agent_identities a
+			                            WHERE a.id = m.agent_id AND a.deleted_at IS NOT NULL))
+			       OR (m.deleted_at IS NOT NULL AND m.deleted_at <= now() - make_interval(secs => $2))
+			    LIMIT $1)`,
+			expiredDeleteBatch, TrashRetention.Seconds())
 		if err != nil {
 			return total, err
 		}
@@ -3312,6 +3561,113 @@ func (s *Store) DeleteExpiredMessages(ctx context.Context) (int64, error) {
 			return total, nil
 		}
 	}
+}
+
+// SoftDeleteMessage moves a live message to the trash. Idempotent on an
+// already-trashed message (nil). A held message (status pending_review,
+// either direction) cannot be trashed — the review queue is its resolution
+// surface — and returns ErrMessageHeld. A missing/expired message returns
+// ErrMessageNotFound.
+func (s *Store) SoftDeleteMessage(ctx context.Context, messageID, agentID string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE messages SET deleted_at = now()
+		  WHERE id = $1 AND agent_id = $2 AND deleted_at IS NULL
+		    AND expires_at > now()
+		    AND COALESCE(status, '') <> 'pending_review'`,
+		messageID, agentID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return s.classifyTrashMiss(ctx, messageID, agentID, true)
+	}
+	return nil
+}
+
+// RestoreMessage brings a trashed message back to the inbox, shifting its
+// natural expiry forward by the time it spent in the trash so it resumes
+// with exactly the active lifetime it had left when deleted. Returns
+// ErrNotInTrash when the message exists but is live, ErrMessageNotFound
+// otherwise.
+func (s *Store) RestoreMessage(ctx context.Context, messageID, agentID string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE messages
+		    SET expires_at = expires_at + (now() - deleted_at),
+		        deleted_at = NULL
+		  WHERE id = $1 AND agent_id = $2 AND deleted_at IS NOT NULL`,
+		messageID, agentID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return s.classifyTrashMiss(ctx, messageID, agentID, false)
+	}
+	return nil
+}
+
+// PurgeMessage permanently deletes a message that is already in the trash
+// ("delete forever" — the Gmail journey is delete → trash → delete forever,
+// so a live message must be trashed first). Returns ErrNotInTrash for a
+// live message, ErrMessageNotFound otherwise.
+func (s *Store) PurgeMessage(ctx context.Context, messageID, agentID string) error {
+	return s.WithTx(ctx, func(tx pgx.Tx) error {
+		var deletedAt *time.Time
+		var deliveryStatus string
+		var activeSend bool
+		err := tx.QueryRow(ctx,
+			`SELECT deleted_at, COALESCE(delivery_status, ''),
+			        COALESCE(send_claimed_at > now() - make_interval(secs => $3), false)
+			   FROM messages
+			  WHERE id = $1 AND agent_id = $2 FOR UPDATE`,
+			messageID, agentID, int64(OutboundSendClaimStaleWindow/time.Second),
+		).Scan(&deletedAt, &deliveryStatus, &activeSend)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrMessageNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if deliveryStatus == "sending" && activeSend {
+			return ErrSendInProgress
+		}
+		if deletedAt == nil {
+			return ErrNotInTrash
+		}
+		_, err = tx.Exec(ctx, `DELETE FROM messages WHERE id = $1`, messageID)
+		return err
+	})
+}
+
+// classifyTrashMiss turns a zero-row trash mutation into the precise error:
+// held → ErrMessageHeld (soft delete only), already-trashed soft delete →
+// nil (idempotent), live restore/purge target → ErrNotInTrash, otherwise
+// ErrMessageNotFound.
+func (s *Store) classifyTrashMiss(ctx context.Context, messageID, agentID string, softDelete bool) error {
+	var deletedAt *time.Time
+	var status string
+	err := s.pool.QueryRow(ctx,
+		`SELECT deleted_at, COALESCE(status, '') FROM messages
+		  WHERE id = $1 AND agent_id = $2 AND (deleted_at IS NOT NULL OR expires_at > now())`,
+		messageID, agentID,
+	).Scan(&deletedAt, &status)
+	if err != nil {
+		return ErrMessageNotFound
+	}
+	if softDelete {
+		if deletedAt != nil {
+			return nil // already in the trash — idempotent
+		}
+		if status == "pending_review" {
+			return ErrMessageHeld
+		}
+		return ErrMessageNotFound
+	}
+	if deletedAt == nil {
+		return ErrNotInTrash
+	}
+	return ErrMessageNotFound
 }
 
 // LookupConversationID finds a conversation_id by matching In-Reply-To / References
@@ -3455,6 +3811,7 @@ func (s *Store) ListConversationsByAgent(ctx context.Context, f ConversationList
 		WHERE agent_id = $1
 		  AND conversation_id <> ''
 		  AND expires_at > now()
+		  AND deleted_at IS NULL
 		  AND NOT (direction = 'inbound' AND status IN (` + heldInboundStatuses + `))
 		GROUP BY conversation_id`
 
@@ -3533,6 +3890,7 @@ func (s *Store) GetConversationByID(ctx context.Context, agentID, conversationID
 		 WHERE m.agent_id = $1
 		   AND m.conversation_id = $2
 		   AND m.expires_at > now()
+		   AND m.deleted_at IS NULL
 		   AND NOT (m.direction = 'inbound' AND m.status IN (`+heldInboundStatuses+`))
 		 ORDER BY m.created_at ASC, m.id ASC`,
 		agentID, conversationID,
@@ -3872,7 +4230,8 @@ func (s *Store) GetDashboardStats(ctx context.Context, userID string, windowDays
 		        END
 		 FROM messages m
 		 JOIN agent_identities a ON a.id = m.agent_id
-		 WHERE a.user_id = $1 AND m.status = 'pending_review' AND m.direction = 'outbound'`,
+		 WHERE a.user_id = $1 AND a.deleted_at IS NULL
+		   AND m.status = 'pending_review' AND m.direction = 'outbound'`,
 		userID).Scan(&pendingCount, &oldestSec)
 	if err != nil {
 		return nil, fmt.Errorf("pending count: %w", err)
