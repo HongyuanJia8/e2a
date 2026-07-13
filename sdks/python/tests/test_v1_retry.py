@@ -173,6 +173,30 @@ async def test_retry_after_clamped_to_ceiling():
 
 
 @pytest.mark.anyio
+async def test_retry_after_http_date_drives_backoff():
+    # Regression: RFC 9110 §10.2.3 allows Retry-After as an HTTP-date (common
+    # behind CDNs). The retry path used to parse only integer seconds and
+    # silently fell back to exponential backoff on a dated value — a drift from
+    # the TS SDK, which honors the date. A far-future date parses to a delay
+    # larger than the ceiling, so it clamps to max_retry_after_ms — a
+    # deterministic assertion independent of the wall clock. Without the fix the
+    # header is ignored and exp-backoff yields 0.1s (200ms * 0.5 jitter).
+    delays = []
+
+    async def rec_sleep(secs):
+        delays.append(secs)
+
+    s = Script([_api_exc(429, headers={"Retry-After": "Wed, 21 Oct 2099 07:28:00 GMT"}), "ok"])
+    await request_with_retry(
+        s.make,
+        cfg=cfg(sleep=rec_sleep, max_retries=1, max_retry_after_ms=5000, rand=lambda: 0.0),
+        retryable=True,
+        idempotency=False,
+    )
+    assert delays == [5.0]  # clamped Retry-After date, NOT the 0.1s exp-backoff
+
+
+@pytest.mark.anyio
 async def test_non_transport_httpx_error_wrapped():
     # Regression: a non-TransportError httpx error must surface as a typed
     # E2AError, not a raw httpx exception. Not retried.
