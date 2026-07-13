@@ -39,7 +39,13 @@ from .generated.models import (
     CreateAPIKeyResponse,
     CreateWebhookRequest,
     CreateWebhookResponse,
+    DeleteAgentResult,
+    DeleteApiKeyResult,
+    DeleteDomainResult,
+    DeleteSuppressionResult,
+    DeleteTemplateResult,
     DeleteUserDataResult,
+    DeleteWebhookResult,
     DeploymentInfoView,
     DomainView,
     EventJSON,
@@ -313,10 +319,11 @@ class AgentsResource:
             lambda h: self._api.put_agent_protection(email, req, _headers=h)
         )
 
-    async def delete(self, email: str) -> None:
+    async def delete(self, email: str) -> DeleteAgentResult:
         # The typed .delete() call is the confirmation; the SDK supplies the
-        # ?confirm=DELETE guard the raw API requires (AG-6).
-        await self._c._write_idempotent(lambda h: self._api.delete_agent(email, confirm="DELETE", _headers=h))
+        # ?confirm=DELETE guard the raw API requires (AG-6). Returns the deletion
+        # receipt ({deleted, email, messages_deleted}).
+        return await self._c._write_idempotent(lambda h: self._api.delete_agent(email, confirm="DELETE", _headers=h))
 
     async def test(self, email: str) -> SendResultView:
         return await self._c._write_unsafe(lambda h: self._api.test_agent(email, _headers=h))
@@ -510,10 +517,10 @@ class TemplatesResource:
             lambda h: self._api.update_template(template_id, req, _headers=h)
         )
 
-    async def delete(self, template_id: str) -> None:
+    async def delete(self, template_id: str) -> DeleteTemplateResult:
         # In-flight sends are unaffected (rendering happens at send time). DELETE
-        # is idempotent → safe to retry.
-        await self._c._write_idempotent(lambda h: self._api.delete_template(template_id, confirm="DELETE", _headers=h))
+        # is idempotent → safe to retry. Returns the deletion object ({deleted, id}).
+        return await self._c._write_idempotent(lambda h: self._api.delete_template(template_id, confirm="DELETE", _headers=h))
 
     async def validate(self, body: Body) -> ValidateTemplateResponse:
         """Dry-run template source without persisting: per-part parse errors, a
@@ -593,8 +600,9 @@ class DomainsResource:
         req = _coerce(RegisterDomainRequest, body)
         return await self._c._write_unsafe(lambda h: self._api.register_domain(req, _headers=h))
 
-    async def delete(self, domain: str) -> None:
-        await self._c._write_idempotent(lambda h: self._api.delete_domain(domain, confirm="DELETE", _headers=h))
+    async def delete(self, domain: str) -> DeleteDomainResult:
+        # Returns the deletion object ({deleted, domain}).
+        return await self._c._write_idempotent(lambda h: self._api.delete_domain(domain, confirm="DELETE", _headers=h))
 
     async def verify(self, domain: str) -> VerifyDomainView:
         return await self._c._write_unsafe(lambda h: self._api.verify_domain(domain, _headers=h))
@@ -691,8 +699,9 @@ class WebhooksResource:
             lambda h: self._api.update_webhook(webhook_id, req, _headers=h)
         )
 
-    async def delete(self, webhook_id: str) -> None:
-        await self._c._write_idempotent(lambda h: self._api.delete_webhook(webhook_id, confirm="DELETE", _headers=h))
+    async def delete(self, webhook_id: str) -> DeleteWebhookResult:
+        # Returns the deletion object ({deleted, id}).
+        return await self._c._write_idempotent(lambda h: self._api.delete_webhook(webhook_id, confirm="DELETE", _headers=h))
 
     async def rotate_secret(self, webhook_id: str) -> RotateSecretResponse:
         # Server-deduped via Idempotency-Key: a retried rotate replays the first
@@ -738,8 +747,9 @@ class SuppressionsResource:
 
         return AutoPager(fetch)
 
-    async def delete(self, email: str) -> None:
-        await self._c._write_idempotent(lambda h: self._api.delete_suppression(email, confirm="DELETE", _headers=h))
+    async def delete(self, email: str) -> DeleteSuppressionResult:
+        # Returns the deletion object ({deleted, address}).
+        return await self._c._write_idempotent(lambda h: self._api.delete_suppression(email, confirm="DELETE", _headers=h))
 
 
 class APIKeysResource:
@@ -762,8 +772,9 @@ class APIKeysResource:
         req = _coerce(CreateAPIKeyRequest, body)
         return await self._c._write_unsafe(lambda h: self._api.create_api_key(req, _headers=h))
 
-    async def delete(self, key_id: str) -> None:
-        await self._c._write_idempotent(lambda h: self._api.delete_api_key(key_id, confirm="DELETE", _headers=h))
+    async def delete(self, key_id: str) -> DeleteApiKeyResult:
+        # Returns the deletion object ({deleted, id}).
+        return await self._c._write_idempotent(lambda h: self._api.delete_api_key(key_id, confirm="DELETE", _headers=h))
 
 
 class AccountResource:
