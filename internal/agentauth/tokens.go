@@ -113,6 +113,15 @@ func (s *Signer) VerifyToken(token, expectedType, issuer string) (*VerifiedClaim
 	if err != nil {
 		return nil, fmt.Errorf("%w: parse: %v", ErrTokenInvalid, err)
 	}
+	// Pin the signature algorithm to RS256. go-jose does not allow-list algs at
+	// parse time — it relies on key-type binding to reject alg-confusion (an RSA
+	// public key cannot drive an HS256/`none` verifier, so those fail below).
+	// Enforce the alg explicitly so `alg:none` and the HS256-keyed-on-the-public-
+	// key confusion attack are rejected by OUR check, not merely as a side effect
+	// of the key type — closing the gap if the verifying key is ever changed.
+	if len(parsed.Headers) != 1 || parsed.Headers[0].Algorithm != string(SigningAlg) {
+		return nil, fmt.Errorf("%w: unexpected JWS alg", ErrTokenInvalid)
+	}
 	var std jwt.Claims
 	var priv tokenPrivateClaims
 	if err := parsed.Claims(s.priv.Public(), &std, &priv); err != nil {

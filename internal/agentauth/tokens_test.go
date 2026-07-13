@@ -1,6 +1,12 @@
 package agentauth
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
+	"encoding/pem"
 	"strings"
 	"testing"
 	"time"
@@ -96,6 +102,52 @@ func TestVerify_DisabledSigner(t *testing.T) {
 	}
 	if _, err := disabled.VerifyToken("whatever", TypAccessToken, testIssuer); err != ErrSigningDisabled {
 		t.Errorf("verify on disabled = %v, want ErrSigningDisabled", err)
+	}
+}
+
+// TestVerify_RejectsAlgConfusion: the two classic JWT forgery attacks must be
+// rejected. VerifyToken pins alg=RS256, so neither an unsigned `alg:none` token
+// nor an HS256 token whose MAC is keyed on the server's PUBLIC key (the RSA/HMAC
+// confusion) can verify — regardless of go-jose's own key-type binding.
+func TestVerify_RejectsAlgConfusion(t *testing.T) {
+	s := testSigner(t)
+	now := time.Now()
+	// Otherwise-valid claims, so only the forged `alg` differs from a good token.
+	payload, err := json.Marshal(map[string]any{
+		"iss":               testIssuer,
+		"aud":               testIssuer,
+		"sub":               "x@acme.com",
+		"iat":               now.Unix(),
+		"nbf":               now.Unix(),
+		"exp":               now.Add(time.Hour).Unix(),
+		"typ":               TypAccessToken,
+		"scope":             "agent",
+		"assertion_version": 1,
+	})
+	if err != nil {
+		t.Fatalf("marshal claims: %v", err)
+	}
+	b64 := func(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
+
+	// 1) alg:none — unsecured JWS, empty signature.
+	noneTok := b64([]byte(`{"alg":"none","typ":"JWT"}`)) + "." + b64(payload) + "."
+	if _, err := s.VerifyToken(noneTok, TypAccessToken, testIssuer); err == nil {
+		t.Error("alg:none token verified; want rejected")
+	}
+
+	// 2) alg:HS256 with the HMAC keyed on the server's PUBLIC key (PKIX PEM) —
+	// a *validly* MAC'd token that must still be rejected because we pin RS256.
+	pub, err := x509.MarshalPKIXPublicKey(s.priv.Public())
+	if err != nil {
+		t.Fatalf("marshal public key: %v", err)
+	}
+	pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pub})
+	signingInput := b64([]byte(`{"alg":"HS256","typ":"JWT"}`)) + "." + b64(payload)
+	mac := hmac.New(sha256.New, pubPEM)
+	mac.Write([]byte(signingInput))
+	hs256Tok := signingInput + "." + b64(mac.Sum(nil))
+	if _, err := s.VerifyToken(hs256Tok, TypAccessToken, testIssuer); err == nil {
+		t.Error("HS256-confusion token verified; want rejected")
 	}
 }
 

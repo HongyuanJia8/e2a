@@ -23,7 +23,15 @@ func TestIsDisallowedWebhookIP(t *testing.T) {
 		{"0.0.0.0", true},          // unspecified
 		{"224.0.0.1", true},        // multicast
 		{"fc00::1", true},          // IPv6 ULA
+		{"fd00:ec2::254", true},    // IPv6 ULA (fd00, IMDSv6-style)
 		{"fe80::1", true},          // IPv6 link-local
+		{"::", true},               // unspecified v6
+		// IPv4-mapped IPv6 (::ffff:a.b.c.d) — the classic guard-bypass class:
+		// an internal v4 target smuggled through a v6 literal. Go's IP.To4()
+		// unwraps it so the same private/loopback/link-local checks apply.
+		{"::ffff:127.0.0.1", true},       // v4-mapped loopback
+		{"::ffff:10.0.0.1", true},        // v4-mapped RFC-1918
+		{"::ffff:169.254.169.254", true}, // v4-mapped cloud metadata
 		{"8.8.8.8", false},         // public
 		{"1.1.1.1", false},         // public
 		{"100.63.255.255", false},  // just below CGNAT
@@ -51,6 +59,14 @@ func TestGuardedDialControl(t *testing.T) {
 	}
 	if err := guardedDialControl("tcp", "169.254.169.254:80", nil); err == nil {
 		t.Error("dial control allowed metadata IP; want blocked")
+	}
+	// Bracketed IPv6 literals, including the v4-mapped metadata bypass, must be
+	// split and blocked exactly like their v4 forms.
+	if err := guardedDialControl("tcp", "[::1]:443", nil); err == nil {
+		t.Error("dial control allowed IPv6 loopback; want blocked")
+	}
+	if err := guardedDialControl("tcp", "[::ffff:169.254.169.254]:80", nil); err == nil {
+		t.Error("dial control allowed v4-mapped metadata IP; want blocked")
 	}
 	if err := guardedDialControl("tcp", "8.8.8.8:443", nil); err != nil {
 		t.Errorf("dial control blocked a public IP: %v", err)
