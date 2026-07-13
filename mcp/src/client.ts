@@ -433,7 +433,7 @@ export class McpClient {
     url: string;
     events: Array<string>;
     description?: string;
-    filters?: { agentIds?: Array<string>; conversationIds?: Array<string>; labels?: Array<string> };
+    filters?: { agentEmails?: Array<string>; conversationIds?: Array<string>; labels?: Array<string> };
   }): Promise<CreateWebhookResponse> {
     return this.sdk.webhooks.create(body as CreateWebhookRequest);
   }
@@ -445,7 +445,7 @@ export class McpClient {
       events?: Array<string>;
       description?: string;
       enabled?: boolean;
-      filters?: { agentIds?: Array<string>; conversationIds?: Array<string>; labels?: Array<string> };
+      filters?: { agentEmails?: Array<string>; conversationIds?: Array<string>; labels?: Array<string> };
     },
   ): Promise<WebhookView> {
     return this.sdk.webhooks.update(id, patch as UpdateWebhookRequest);

@@ -1,4 +1,4 @@
-import express, { type Express, type Request, type Response } from "express";
+import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import cors from "cors";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { E2AClient } from "@e2a/sdk/v1";
@@ -77,7 +77,13 @@ export function buildApp(opts: HttpServerOptions): BuiltApp {
     });
 
   const app = express();
-  app.use(express.json({ limit: "1mb" }));
+  // The body limit must clear the attachment contract: the tools advertise up
+  // to 10 MB/attachment and 25 MB combined (see tools/attachments.ts), which
+  // base64-encode to ~34 MB on the wire, plus the JSON-RPC envelope. A 1 MB cap
+  // silently 413'd any real attachment before it reached the tool. 40 MB gives
+  // headroom over the combined cap; the fronting proxy (Caddy) is the outer
+  // guard against pathological unauthenticated bodies.
+  app.use(express.json({ limit: "40mb" }));
   // CORS open for v0.2; revisit when we have a real allowlist of MCP hosts.
   app.use(cors({ origin: "*", exposedHeaders: ["Mcp-Session-Id"] }));
 
@@ -161,6 +167,25 @@ export function buildApp(opts: HttpServerOptions): BuiltApp {
   // reference server.
   app.get("/mcp", methodNotAllowed);
   app.delete("/mcp", methodNotAllowed);
+
+  // Terminal error handler (MUST be last; the 4-arg signature is how Express
+  // identifies it). Without it, Express's default finalhandler dumps the error
+  // stack — including absolute internal file paths — into the response body when
+  // NODE_ENV !== "production" (bin/http never sets it), and never emits a
+  // JSON-RPC error. Convert any post-route throw into a generic JSON-RPC
+  // internal error; the detail is logged server-side only, never sent to the
+  // client/model.
+  app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[e2a-mcp] unhandled request error: ${message}`);
+    if (res.headersSent) {
+      // The streaming transport already began writing; we can't reshape the
+      // response, so let Express abort the connection.
+      next(err);
+      return;
+    }
+    res.status(500).json(jsonRpcError(req.body, -32603, "internal server error"));
+  });
 
   return { app, cache };
 }

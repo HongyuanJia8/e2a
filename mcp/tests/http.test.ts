@@ -97,6 +97,30 @@ describe("HTTP MCP server", () => {
     expect(body.error.message).toMatch(/missing bearer/);
   });
 
+  it("accepts a request body larger than 1 MB (the attachment contract), not a 413", async () => {
+    // The attachment tools advertise up to 10 MB/attachment and 25 MB total,
+    // and Streamable-HTTP is the only transport — so the body limit must clear
+    // the attachment contract. A ~2 MB body must reach the handler (→ 401 for
+    // the missing bearer here), NOT be rejected with 413 by the body parser
+    // before auth even runs.
+    const bigArg = "x".repeat(2 * 1024 * 1024); // ~2 MB, well over the old 1 MB cap
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "send_message", arguments: { big: bigArg } },
+      }),
+    });
+    expect(res.status).not.toBe(413); // pre-fix: express.json 413s before auth
+    expect(res.status).toBe(401); // body parsed → missing-bearer path reached
+  });
+
   it("invalid bearer (whoami 401) is rejected with an invalid_token challenge", async () => {
     await close();
     const invalidStub = makeStubClient();
@@ -780,6 +804,49 @@ describe("HTTP MCP server", () => {
     // Express's default error handler produces 500 when our async handler
     // throws; what matters here is that we don't leak — see follow-up assertion.
     expect(res.status).toBeGreaterThanOrEqual(500);
+  });
+
+  it("a post-auth failure returns a JSON-RPC error without leaking a stack trace", async () => {
+    // Without a terminal error middleware, Express's default finalhandler dumps
+    // the error stack into the response body when NODE_ENV !== "production"
+    // (bin/http never sets it) and never produces a JSON-RPC error. The factory
+    // throws during the whoami probe, so the failure surfaces post-routing.
+    await close();
+    const { close: c, port } = await startHttpServer(0, {
+      baseUrl: "http://e2a.local",
+      allowedHosts: ["127.0.0.1", "localhost"],
+      clientFactory: () => {
+        throw new Error("synthetic-secret-in-stack");
+      },
+    });
+    close = c;
+    const local = `http://127.0.0.1:${port}/mcp`;
+    const res = await fetch(local, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        Authorization: "Bearer e2a_test",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 7,
+        method: "initialize",
+        params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "x", version: "0" } },
+      }),
+    });
+    expect(res.status).toBe(500);
+    const text = await res.text();
+    // Nothing internal leaks to the client: not the error message, not a stack
+    // frame, not an internal file path.
+    expect(text).not.toContain("synthetic-secret-in-stack");
+    expect(text).not.toContain("\n    at ");
+    expect(text).not.toMatch(/http-server\.(ts|js)/);
+    // Proper JSON-RPC error envelope, request id preserved.
+    const body = JSON.parse(text);
+    expect(body.jsonrpc).toBe("2.0");
+    expect(body.error).toBeTruthy();
+    expect(body.id).toBe(7);
   });
 
   it("publicUrl override drives both protected-resource metadata and WWW-Authenticate", async () => {
