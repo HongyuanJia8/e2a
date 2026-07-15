@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import time
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +13,9 @@ from e2a.v1.errors import E2AWebhookSignatureError
 
 
 SECRET = "whsec_test1234567890abcdef"
+SIGNING_VECTOR = json.loads(
+    (Path(__file__).resolve().parents[3] / "internal" / "webhook" / "testdata" / "signing-vector.json").read_text()
+)
 
 
 def _sign(secret: str, t: str, body: str) -> str:
@@ -20,6 +24,22 @@ def _sign(secret: str, t: str, body: str) -> str:
         f"{t}.{body}".encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
+
+
+def test_shared_go_typescript_signing_vector() -> None:
+    vector = SIGNING_VECTOR
+    assert verify_webhook_signature(
+        vector["body"],
+        vector["single_header"],
+        vector["current_secret"],
+        now=vector["timestamp"],
+    )
+    assert verify_webhook_signature(
+        vector["body"],
+        vector["dual_header"],
+        vector["previous_secret"],
+        now=vector["timestamp"],
+    )
 
 
 def test_accepts_valid_signature() -> None:

@@ -1,4 +1,6 @@
 import { createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { verifyWebhookSignature, constructEvent } from "../../src/v1/webhook-signature.js";
 import { E2AWebhookSignatureError } from "../../src/v1/errors.js";
@@ -9,7 +11,34 @@ function sign(secret: string, t: string, body: string): string {
   return createHmac("sha256", secret).update(`${t}.${body}`).digest("hex");
 }
 
+const signingVector = JSON.parse(
+  readFileSync(join(__dirname, "../../../../internal/webhook/testdata/signing-vector.json"), "utf8"),
+) as {
+  timestamp: number;
+  body: string;
+  current_secret: string;
+  previous_secret: string;
+  single_header: string;
+  dual_header: string;
+};
+
 describe("verifyWebhookSignature", () => {
+  it("verifies the shared Go/Python signing vector", () => {
+    const now = () => signingVector.timestamp * 1000;
+    expect(verifyWebhookSignature({
+      rawBody: signingVector.body,
+      header: signingVector.single_header,
+      secret: signingVector.current_secret,
+      now,
+    })).toBe(true);
+    expect(verifyWebhookSignature({
+      rawBody: signingVector.body,
+      header: signingVector.dual_header,
+      secret: signingVector.previous_secret,
+      now,
+    })).toBe(true);
+  });
+
   it("accepts a correctly signed envelope", () => {
     const body = '{"type":"email.received"}';
     const t = Math.floor(Date.now() / 1000).toString();
