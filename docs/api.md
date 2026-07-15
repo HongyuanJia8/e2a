@@ -113,6 +113,7 @@ or the state first); `rate_limited`, `idempotency_in_flight`, and 5xx
 | `invalid_cursor` | 400 | Bad pagination cursor — drop it and re-fetch from the start. |
 | `invalid_filter` | 400 | Bad list-filter parameter (messages/conversations/events). |
 | `invalid_domain`, `invalid_slug`, `invalid_recipient`, `invalid_attachment`, `invalid_template`, `invalid_event_type`, `invalid_webhook_url`, `invalid_expires_at`, `invalid_scope` | 400 | Field/resource-specific refinements of `invalid_request`. |
+| `confirmation_required` | 400 | A destructive operation requires its documented confirmation value. |
 | `reserved_domain` | 400 | The domain is reserved by the deployment (e.g. the shared domain). |
 | `too_many_recipients` | 400 | Send/reply/forward recipient count over the cap. |
 | `template_render_failed`, `template_rendered_empty` | 400 | Template send: rendering failed / produced an empty body. |
@@ -124,7 +125,11 @@ or the state first); `rate_limited`, `idempotency_in_flight`, and 5xx
 | **Conflict / state** | | |
 | `conflict` | 409 | Generic state conflict (e.g. redelivery to a webhook that never matched the event). |
 | `agent_taken`, `domain_taken`, `alias_taken` | 409 | The `*_taken` family — the requested identifier (agent address, domain, template alias) is already claimed. |
+| `address_in_trash` | 409 | The requested agent address is reserved by a soft-deleted agent; restore or permanently delete it first. |
+| `message_held` | 409 | The message is held for review and cannot perform the requested operation until the hold is resolved. |
 | `message_not_pending` | 409 | The review hold was already resolved (approved/rejected/expired). |
+| `not_in_trash` | 409 | Restore or permanent-delete was requested for a resource that is not currently in trash. |
+| `send_in_progress` | 409 | The message send is already executing; wait for its terminal outcome. |
 | `webhook_disabled` | 409 | Operation requires an enabled webhook. |
 | `webhook_cooldown` | 409 | The webhook was auto-disabled and cannot be re-enabled until the cooldown elapses — retryable after the cooldown. |
 | `domain_not_registered` | 400 | Create-agent on a domain the account has not registered. |
