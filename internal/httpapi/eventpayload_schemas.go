@@ -29,29 +29,16 @@ import (
 // payloads are explicitly open/unstable.
 func (s *Server) registerEventPayloadSchemas() {
 	registry := s.API.OpenAPI().Components.Schemas
-	names := make([]string, 0, 9)
-	for _, p := range []struct {
-		typ  any
-		name string
-	}{
-		{eventpayload.EmailReceivedData{}, "EmailReceivedData"},
-		{eventpayload.EmailSentData{}, "EmailSentData"},
-		{eventpayload.EmailFailedData{}, "EmailFailedData"},
-		{eventpayload.EmailDeliveredData{}, "EmailDeliveredData"},
-		{eventpayload.EmailBouncedData{}, "EmailBouncedData"},
-		{eventpayload.EmailComplainedData{}, "EmailComplainedData"},
-		{eventpayload.DomainSendingVerifiedData{}, "DomainSendingVerifiedData"},
-		{eventpayload.DomainSendingFailedData{}, "DomainSendingFailedData"},
-		{eventpayload.DomainSuppressionAddedData{}, "DomainSuppressionAddedData"},
-	} {
-		schema := registry.Schema(reflect.TypeOf(p.typ), true, p.name)
+	names := make([]string, 0, len(eventpayload.StableEvents))
+	for _, event := range eventpayload.StableEvents {
+		schema := registry.Schema(reflect.TypeOf(event.Payload), true, event.SchemaName)
 		// The registry MUST intern the type under the exact hinted name — the
 		// docs reference these names, and a silent rename (e.g. a name
 		// collision appending a suffix) would break every published pointer.
-		if schema == nil || schema.Ref != "#/components/schemas/"+p.name {
-			panic(fmt.Sprintf("event payload schema %s registered under an unexpected ref: %+v", p.name, schema))
+		if schema == nil || schema.Ref != "#/components/schemas/"+event.SchemaName {
+			panic(fmt.Sprintf("event payload schema %s registered under an unexpected ref: %+v", event.SchemaName, schema))
 		}
-		names = append(names, p.name)
+		names = append(names, event.SchemaName)
 	}
 
 	// Forward-compatibility stance: these are CONSUMER-direction (server →

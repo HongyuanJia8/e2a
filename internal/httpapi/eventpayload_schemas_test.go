@@ -3,23 +3,20 @@ package httpapi
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/Mnexa-AI/e2a/internal/eventpayload"
 )
 
 // eventPayloadComponentNames are every component schema published by
 // registerEventPayloadSchemas, plus the nested components reachable from them
 // (AttachmentMeta via EmailReceivedData.attachments).
-var eventPayloadComponentNames = []string{
-	"EmailReceivedData",
-	"EmailSentData",
-	"EmailFailedData",
-	"EmailDeliveredData",
-	"EmailBouncedData",
-	"EmailComplainedData",
-	"DomainSendingVerifiedData",
-	"DomainSendingFailedData",
-	"DomainSuppressionAddedData",
-	"AttachmentMeta",
-}
+var eventPayloadComponentNames = func() []string {
+	names := make([]string, 0, len(eventpayload.StableEvents)+1)
+	for _, event := range eventpayload.StableEvents {
+		names = append(names, event.SchemaName)
+	}
+	return append(names, "AttachmentMeta")
+}()
 
 // TestEventPayloadSchemasAreOpen enforces the forward-compatibility invariant
 // on the RENDERED spec: every event-payload component schema (and every
@@ -29,11 +26,6 @@ var eventPayloadComponentNames = []string{
 // opens only response-REACHABLE schemas would leave them strict, and a
 // spec-generated client would reject the first additive payload field. The
 // invariant must therefore be enforced here, not inherited by accident.
-//
-// TODO(rebase onto main): main's applyEvolutionStance/stability_test.go only
-// covers operation-reachable schemas. When this branch rebases onto main,
-// stability_test.go should also gain an assertion for operation-UNREACHABLE
-// components (like these) so the two enforcement points can't drift apart.
 func TestEventPayloadSchemasAreOpen(t *testing.T) {
 	raw, err := json.Marshal(New(Deps{}).API.OpenAPI())
 	if err != nil {
