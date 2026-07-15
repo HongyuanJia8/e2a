@@ -195,6 +195,14 @@ func TestAttachment_DownloadRoute(t *testing.T) {
 	if cd := resp.Header.Get("Content-Disposition"); !strings.Contains(cd, "report.pdf") {
 		t.Errorf("content-disposition: got %q", cd)
 	}
+	if got := resp.Header.Get("X-Request-Id"); got == "" {
+		t.Error("raw attachment download must carry X-Request-Id")
+	}
+	for name := range resp.Header {
+		if strings.HasPrefix(strings.ToLower(name), "x-ratelimit-") {
+			t.Errorf("raw attachment download emitted legacy header %s", name)
+		}
+	}
 
 	// Bad token → 403.
 	bad := strings.Replace(dlPath, "token=", "token=bogus", 1)

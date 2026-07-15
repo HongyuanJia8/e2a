@@ -142,6 +142,13 @@ type RateLimitedDetails struct {
 	RetryAfterSeconds int `json:"retry_after_seconds" doc:"Seconds to wait before retrying; mirrors the Retry-After response header. Always ≥ 1."`
 }
 
+// RetryAfterDetails is the open transient-availability retry hint used by
+// limits_unavailable. It intentionally matches the rate-limit field name so
+// generic clients can share one backoff parser across 429 and 503 responses.
+type RetryAfterDetails struct {
+	RetryAfterSeconds int `json:"retry_after_seconds" minimum:"1" doc:"Seconds to wait before retrying; mirrors the Retry-After response header."`
+}
+
 // RateLimitedErrorBody mirrors ErrorBody but with typed rate_limited details, so
 // codegen surfaces a concrete detail shape for the 429 case instead of `any`.
 type RateLimitedErrorBody struct {
