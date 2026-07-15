@@ -306,7 +306,10 @@ single message.
   async outcomes reported later via SNS and the corresponding webhook events.
 - `GET …/messages/{id}` — fetch one message (inbound or outbound), including the
   raw message and inbound auth headers. Reading an unread inbound message flips it
-  to `read`.
+  to `read`. A soft-deleted message remains readable by this direct GET and carries
+  `deleted_at` until it is permanently purged (normally ~30 days after deletion).
+  Ordinary message lists, conversations, reply targets, and forward targets hide
+  trashed messages; use `GET …/messages?deleted=true` to enumerate the trash.
 - `PATCH …/messages/{id}` — apply a labels delta (`add_labels` / `remove_labels`).
 - `POST …/messages/{id}/reply`, `POST …/messages/{id}/forward` — reply to /
   forward a message; `202` when held for review.

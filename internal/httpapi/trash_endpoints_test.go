@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -193,6 +194,39 @@ func TestRestoreMessageNotInTrash(t *testing.T) {
 	code, body := sendJSON(t, "POST", srv.URL+"/v1/agents/support%40acme.com/messages/msg_live/restore", "good", nil)
 	if code != 409 || errCode(body) != "not_in_trash" {
 		t.Fatalf("want 409 not_in_trash, got %d %v", code, body)
+	}
+}
+
+func TestGetTrashedMessageRemainsDirectlyReadable(t *testing.T) {
+	deletedAt := time.Unix(1700001000, 0).UTC()
+	srv := testServer(t, func(d *Deps) {
+		d.GetMessage = func(ctx context.Context, messageID, agentID string) (*identity.Message, error) {
+			return &identity.Message{
+				ID: messageID, AgentID: agentID, Direction: "inbound",
+				Sender: "alice@gmail.com", Subject: "trashed",
+				CreatedAt: time.Unix(1700000000, 0).UTC(), DeletedAt: &deletedAt,
+			}, nil
+		}
+	})
+	code, body := sendJSON(t, "GET", srv.URL+"/v1/agents/support%40acme.com/messages/msg_trashed", "good", nil)
+	if code != http.StatusOK {
+		t.Fatalf("want 200 for direct GET of trashed message, got %d %v", code, body)
+	}
+	if body["id"] != "msg_trashed" || body["deleted_at"] == nil {
+		t.Fatalf("trashed direct-read must include id and deleted_at, got %v", body)
+	}
+}
+
+func TestGetMessageDocumentsTrashVisibility(t *testing.T) {
+	op := New(Deps{}).API.OpenAPI().Paths["/v1/agents/{email}/messages/{id}"].Get
+	if op == nil {
+		t.Fatal("getMessage operation missing")
+	}
+	description := strings.ToLower(op.Description)
+	for _, required := range []string{"direct get", "deleted_at", "ordinary lists", "reply", "purged"} {
+		if !strings.Contains(description, required) {
+			t.Errorf("getMessage description must document %q in trash visibility contract: %q", required, op.Description)
+		}
 	}
 }
 
