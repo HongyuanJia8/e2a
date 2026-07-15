@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import time
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +13,9 @@ from e2a.v1.errors import E2AWebhookSignatureError
 
 
 SECRET = "whsec_test1234567890abcdef"
+SIGNING_VECTOR = json.loads(
+    (Path(__file__).resolve().parents[3] / "internal" / "webhook" / "testdata" / "signing-vector.json").read_text()
+)
 
 
 def _sign(secret: str, t: str, body: str) -> str:
@@ -20,6 +24,30 @@ def _sign(secret: str, t: str, body: str) -> str:
         f"{t}.{body}".encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
+
+
+def test_shared_go_typescript_signing_vector() -> None:
+    vector = SIGNING_VECTOR
+    assert verify_webhook_signature(
+        vector["body"],
+        vector["single_header"],
+        vector["current_secret"],
+        now=vector["timestamp"],
+    )
+    assert verify_webhook_signature(
+        vector["body"],
+        vector["dual_header"],
+        vector["previous_secret"],
+        now=vector["timestamp"],
+    )
+
+
+def test_construct_event_rejects_missing_required_envelope_fields() -> None:
+    body = json.dumps({"type": "email.received", "data": {}})
+    t = str(int(time.time()))
+    header = f"t={t},v1={_sign(SECRET, t, body)}"
+    with pytest.raises(E2AWebhookSignatureError, match="missing required"):
+        construct_event(body, header, SECRET)
 
 
 def test_accepts_valid_signature() -> None:
@@ -110,7 +138,13 @@ def test_empty_secret_list_rejects() -> None:
 
 
 def test_construct_event_verifies_and_parses() -> None:
-    body = json.dumps({"id": "evt_1", "type": "email.received", "data": {"message_id": "msg_1"}})
+    body = json.dumps({
+        "id": "evt_1",
+        "type": "email.received",
+        "schema_version": "1",
+        "created_at": "2026-07-01T10:30:00Z",
+        "data": {"message_id": "msg_1"},
+    })
     t = str(int(time.time()))
     header = f"t={t},v1={_sign(SECRET, t, body)}"
     event = construct_event(body, header, SECRET)
@@ -146,15 +180,26 @@ def test_construct_event_rejects_non_json() -> None:
 
 
 def test_construct_event_rejects_missing_type() -> None:
-    body = json.dumps({"data": {}})
+    body = json.dumps({
+        "id": "evt_1",
+        "schema_version": "1",
+        "created_at": "2026-07-01T10:30:00Z",
+        "data": {},
+    })
     t = str(int(time.time()))
     header = f"t={t},v1={_sign(SECRET, t, body)}"
-    with pytest.raises(E2AWebhookSignatureError, match="missing a string"):
+    with pytest.raises(E2AWebhookSignatureError, match="missing required"):
         construct_event(body, header, SECRET)
 
 
 def test_construct_event_accepts_bytes_body() -> None:
-    body = json.dumps({"type": "email.sent"})
+    body = json.dumps({
+        "id": "evt_1",
+        "type": "email.sent",
+        "schema_version": "1",
+        "created_at": "2026-07-01T10:30:00Z",
+        "data": {},
+    })
     t = str(int(time.time()))
     header = f"t={t},v1={_sign(SECRET, t, body)}"
     event = construct_event(body.encode("utf-8"), header, SECRET)

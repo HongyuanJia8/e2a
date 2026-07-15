@@ -1,0 +1,10 @@
+[
+  {"code": 1000, "reason": "", "classification": "normal"},
+  {"code": 1001, "reason": "shutting_down", "classification": "transient"},
+  {"code": 1001, "reason": "ping_timeout", "classification": "transient"},
+  {"code": 1006, "reason": "", "classification": "transient"},
+  {"code": 1008, "reason": "policy_violation", "classification": "terminal"},
+  {"code": 1011, "reason": "internal_error", "classification": "transient"},
+  {"code": 4000, "reason": "replaced", "classification": "replaced"},
+  {"code": 4321, "reason": "future_condition", "classification": "terminal"}
+]

@@ -28,15 +28,12 @@ import (
 	"github.com/Mnexa-AI/e2a/internal/webhookpub"
 )
 
-// retryBackoffs replicates internal/webhook/retry.go's schedule exactly (~72h
-// over 8 attempts) so customer-facing retry timing is unchanged. Indexed by the
-// completed attempt number: after River's attempt N fails, the next retry is
-// now+retryBackoffs[N] (matching the legacy nextRetryAt(newAttempts)). The legacy
-// path likewise never used index 0 — preserved deliberately, not a new bug. That
-// file is deleted with the legacy worker at cutover, so the schedule lives here.
+// retryBackoffs is the GA-frozen eight-attempt delivery envelope. Entry zero is
+// the delay after failed attempt one; the eighth attempt is terminal, so seven
+// delays span 29h21m from the initial attempt to the final attempt.
 var retryBackoffs = []time.Duration{
 	1 * time.Minute, 5 * time.Minute, 15 * time.Minute, 1 * time.Hour,
-	4 * time.Hour, 8 * time.Hour, 16 * time.Hour, 24 * time.Hour,
+	4 * time.Hour, 8 * time.Hour, 16 * time.Hour,
 }
 
 // MaxDeliveryAttempts is River's MaxAttempts for a delivery job — after this many
@@ -83,10 +80,10 @@ func NewDeliverWorker(subStore *webhook.SubscriberStore, deliverer Deliverer, we
 }
 
 // NextRetry overrides River's client-wide policy for webhook jobs only, returning
-// the exact 72h envelope. job.Attempt is the just-failed attempt (1-based); River
+// the exact 29h21m envelope. job.Attempt is the just-failed attempt (1-based); River
 // discards at MaxAttempts so this is called for attempts 1..MaxDeliveryAttempts-1.
 func (w *DeliverWorker) NextRetry(job *river.Job[WebhookDeliverArgs]) time.Time {
-	i := job.Attempt
+	i := job.Attempt - 1
 	if i < 0 || i >= len(retryBackoffs) {
 		return time.Time{} // fall back to client policy; River discards at MaxAttempts anyway
 	}

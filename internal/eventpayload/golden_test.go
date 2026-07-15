@@ -373,9 +373,11 @@ func minimalEvents() []struct {
 // regeneration fails on every surface at once.
 func TestGoldenFixtures(t *testing.T) {
 	seen := map[string]bool{}
+	seenFixtures := map[string]bool{}
 	for _, c := range append(canonicalEvents(), minimalEvents()...) {
 		c := c
 		seen[c.event.Type] = true
+		seenFixtures[c.fixture] = true
 		t.Run(c.fixture, func(t *testing.T) {
 			got, err := json.MarshalIndent(c.event.AsEnvelope(), "", "  ")
 			if err != nil {
@@ -405,35 +407,23 @@ func TestGoldenFixtures(t *testing.T) {
 
 	// Coverage gate: every STABLE event type must have a fixture; the beta
 	// events must NOT (their payloads are open/unstable maps by design).
-	stable := []string{
-		webhookpub.EventEmailReceived,
-		webhookpub.EventEmailSent,
-		webhookpub.EventEmailFailed,
-		webhookpub.EventEmailDelivered,
-		webhookpub.EventEmailBounced,
-		webhookpub.EventEmailComplained,
-		webhookpub.EventDomainSendingVerified,
-		webhookpub.EventDomainSendingFailed,
-		webhookpub.EventDomainSuppressionAdded,
-	}
-	for _, typ := range stable {
-		if !seen[typ] {
-			t.Errorf("stable event %s has no golden fixture", typ)
+	for _, event := range eventpayload.StableEvents {
+		if !seen[event.Type] {
+			t.Errorf("stable event %s has no golden fixture", event.Type)
+		}
+		if !seenFixtures[event.Fixture] {
+			t.Errorf("stable event %s is missing catalog fixture %s", event.Type, event.Fixture)
+		}
+		if event.MinimalFixture != "" && !seenFixtures[event.MinimalFixture] {
+			t.Errorf("stable event %s is missing catalog minimal fixture %s", event.Type, event.MinimalFixture)
 		}
 	}
-	beta := []string{
-		webhookpub.EventEmailFlagged,
-		webhookpub.EventEmailBlocked,
-		webhookpub.EventEmailReviewRequested,
-		webhookpub.EventEmailReviewApproved,
-		webhookpub.EventEmailReviewRejected,
-	}
-	for _, typ := range beta {
+	for _, typ := range webhookpub.ExperimentalEventTypes {
 		if seen[typ] {
 			t.Errorf("beta event %s must not have a golden fixture (its payload is explicitly unstable)", typ)
 		}
 	}
-	if len(stable)+len(beta) != len(webhookpub.AllEventTypes) {
+	if len(eventpayload.StableEvents)+len(webhookpub.ExperimentalEventTypes) != len(webhookpub.AllEventTypes) {
 		t.Errorf("event catalog changed (%d types) — classify the new type as stable (add a struct + fixture) or beta (map payload) here", len(webhookpub.AllEventTypes))
 	}
 }

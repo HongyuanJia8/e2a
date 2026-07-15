@@ -1,6 +1,8 @@
 import { createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { verifyWebhookSignature, constructEvent } from "../../src/v1/webhook-signature.js";
+import { verifyWebhookSignature, constructEvent, isEmailReceived } from "../../src/v1/webhook-signature.js";
 import { E2AWebhookSignatureError } from "../../src/v1/errors.js";
 
 const SECRET = "whsec_test1234567890abcdef";
@@ -9,7 +11,34 @@ function sign(secret: string, t: string, body: string): string {
   return createHmac("sha256", secret).update(`${t}.${body}`).digest("hex");
 }
 
+const signingVector = JSON.parse(
+  readFileSync(join(__dirname, "../../../../internal/webhook/testdata/signing-vector.json"), "utf8"),
+) as {
+  timestamp: number;
+  body: string;
+  current_secret: string;
+  previous_secret: string;
+  single_header: string;
+  dual_header: string;
+};
+
 describe("verifyWebhookSignature", () => {
+  it("verifies the shared Go/Python signing vector", () => {
+    const now = () => signingVector.timestamp * 1000;
+    expect(verifyWebhookSignature({
+      rawBody: signingVector.body,
+      header: signingVector.single_header,
+      secret: signingVector.current_secret,
+      now,
+    })).toBe(true);
+    expect(verifyWebhookSignature({
+      rawBody: signingVector.body,
+      header: signingVector.dual_header,
+      secret: signingVector.previous_secret,
+      now,
+    })).toBe(true);
+  });
+
   it("accepts a correctly signed envelope", () => {
     const body = '{"type":"email.received"}';
     const t = Math.floor(Date.now() / 1000).toString();
@@ -110,8 +139,38 @@ describe("verifyWebhookSignature", () => {
 });
 
 describe("constructEvent", () => {
+  it("rejects a verified envelope missing required core fields", () => {
+    const body = JSON.stringify({ type: "email.received", data: {} });
+    const t = Math.floor(Date.now() / 1000).toString();
+    const header = `t=${t},v1=${sign(SECRET, t, body)}`;
+    expect(() => constructEvent(body, header, SECRET)).toThrow(/missing required/);
+  });
+
+  it("parses a future envelope version without applying v1 narrowing", () => {
+    const body = JSON.stringify({
+      id: "evt_v2",
+      type: "email.received",
+      schema_version: "2",
+      created_at: "2030-01-02T03:04:05Z",
+      data: { future: true },
+      future_envelope_field: true,
+    });
+    const t = Math.floor(Date.now() / 1000).toString();
+    const header = `t=${t},v1=${sign(SECRET, t, body)}`;
+    const event = constructEvent(body, header, SECRET);
+    expect(event.schema_version).toBe("2");
+    expect(event.future_envelope_field).toBe(true);
+    expect(isEmailReceived(event)).toBe(false);
+  });
+
   it("verifies and parses a valid delivery into a typed event", () => {
-    const body = JSON.stringify({ id: "evt_1", type: "email.received", data: { message_id: "msg_1" } });
+    const body = JSON.stringify({
+      id: "evt_1",
+      type: "email.received",
+      schema_version: "1",
+      created_at: "2026-07-01T10:30:00Z",
+      data: { message_id: "msg_1" },
+    });
     const t = Math.floor(Date.now() / 1000).toString();
     const header = `t=${t},v1=${sign(SECRET, t, body)}`;
     const event = constructEvent(body, header, SECRET);
@@ -145,14 +204,25 @@ describe("constructEvent", () => {
   });
 
   it("throws when the event is missing a string type", () => {
-    const body = JSON.stringify({ data: {} });
+    const body = JSON.stringify({
+      id: "evt_1",
+      schema_version: "1",
+      created_at: "2026-07-01T10:30:00Z",
+      data: {},
+    });
     const t = Math.floor(Date.now() / 1000).toString();
     const header = `t=${t},v1=${sign(SECRET, t, body)}`;
-    expect(() => constructEvent(body, header, SECRET)).toThrow(/missing a string/);
+    expect(() => constructEvent(body, header, SECRET)).toThrow(/missing required/);
   });
 
   it("accepts a Buffer raw body", () => {
-    const body = JSON.stringify({ type: "email.sent" });
+    const body = JSON.stringify({
+      id: "evt_1",
+      type: "email.sent",
+      schema_version: "1",
+      created_at: "2026-07-01T10:30:00Z",
+      data: {},
+    });
     const t = Math.floor(Date.now() / 1000).toString();
     const header = `t=${t},v1=${sign(SECRET, t, body)}`;
     const event = constructEvent(Buffer.from(body), header, SECRET);

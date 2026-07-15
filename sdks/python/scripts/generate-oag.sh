@@ -43,4 +43,8 @@ rm -rf "$TMP"
 # deployed client). Matches the TypeScript SDK's passthrough behavior.
 python3 "$ROOT/sdks/python/scripts/strip-enum-validators.py" "$DEST"
 
+# OpenAPI Generator leaves multiple terminal newlines on standalone component
+# models. Keep the dedicated push envelope deterministic for diff hygiene.
+perl -0pi -e 's/\n+\z/\n/' "$DEST/models/event_envelope.py"
+
 echo "Python /v1 client base regenerated at sdks/python/src/e2a/v1/generated"

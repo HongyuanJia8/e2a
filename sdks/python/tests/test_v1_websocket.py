@@ -8,11 +8,17 @@ explicitly when they want the body.
 
 import json
 import sys
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from e2a.v1.websocket import WSEvent, _build_ws_url
+
+
+CLOSE_CONTRACT = json.loads(
+    (Path(__file__).resolve().parents[3] / "internal" / "ws" / "testdata" / "close-contract.json").read_text()
+)
 
 
 # ── _build_ws_url ────────────────────────────────────────────────
@@ -83,6 +89,23 @@ def test_ws_event_tolerates_unknown_type():
     e = WSEvent.from_payload(_envelope({"anything": True}, type_="email.future_kind"))
     assert e.type == "email.future_kind"
     assert e.data == {"anything": True}
+
+
+@pytest.mark.parametrize("missing", ["type", "id", "schema_version", "created_at", "data"])
+def test_ws_event_rejects_missing_required_envelope_field(missing):
+    payload = _envelope({})
+    del payload[missing]
+    with pytest.raises(ValueError, match="missing required envelope fields"):
+        WSEvent.from_payload(payload)
+
+
+def test_ws_event_preserves_future_envelope_versions_and_fields():
+    payload = _envelope({"future": True})
+    payload["schema_version"] = "2"
+    payload["future_envelope_field"] = True
+    event = WSEvent.from_payload(payload)
+    assert event.schema_version == "2"
+    assert event.raw["future_envelope_field"] is True
 
 
 # ── _connect_and_stream ──────────────────────────────────────────
@@ -250,6 +273,9 @@ async def test_wsstream_no_reconnect_exits():
 
     fake_notif = WSEvent(
         type="email.received",
+        id="evt_1",
+        schema_version="1",
+        created_at="2026-04-27T10:00:00Z",
         data={
             "message_id": "msg_1",
             "from": "alice@example.com",
@@ -426,6 +452,13 @@ def test_fatal_error_for_close_matrix():
     assert _fatal_error_for_close(1011, "") is None
 
 
+@pytest.mark.parametrize("case", CLOSE_CONTRACT)
+def test_close_contract_shared_matrix(case):
+    from e2a.v1.websocket import _close_disposition
+
+    assert _close_disposition(case["code"], case["reason"]) == case["classification"]
+
+
 @pytest.mark.anyio
 async def test_wsstream_replaced_4000_raises_typed_and_does_not_reconnect():
     """A 4000 "replaced" close must raise E2AConnectionReplacedError and STOP —
@@ -507,6 +540,30 @@ async def test_wsstream_transient_close_code_reconnects():
         results = [notif async for notif in s]
 
     assert results == []  # ended cleanly — no typed raise for a transient close
+    assert attempts == 1
+
+
+@pytest.mark.anyio
+async def test_wsstream_normal_close_stops_without_reconnecting():
+    from e2a.v1.websocket import WSStream
+
+    attempts = 0
+
+    async def fake_connect_and_stream(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        raise _FakeConnectionClosed(1000, "")
+        yield  # pragma: no cover
+
+    stream = WSStream(
+        api_key="k", agent_email="bot@agents.e2a.dev", base_url="https://e2a.dev",
+        reconnect=True,
+    )
+    with patch("e2a.v1.websocket._connect_and_stream", side_effect=fake_connect_and_stream), \
+         patch.dict(sys.modules, {"websockets": MagicMock()}):
+        results = [event async for event in stream]
+
+    assert results == []
     assert attempts == 1
 
 

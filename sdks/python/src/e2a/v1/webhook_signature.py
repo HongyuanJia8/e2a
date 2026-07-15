@@ -292,12 +292,10 @@ class WebhookEvent:
     ``is_email_*`` / ``is_domain_*`` guards for the typed stable payloads."""
 
     type: str
-    data: Any = None
-    id: Optional[str] = None
-    created_at: Optional[str] = None
-    #: Envelope schema version (currently "1"). Branch on it before parsing
-    #: ``data`` if you need forward-compatibility across envelope revisions.
-    schema_version: Optional[str] = None
+    id: str
+    schema_version: str
+    created_at: str
+    data: Any
     #: The full parsed envelope (all fields, for forward-compatibility).
     raw: Mapping[str, Any] = field(default_factory=dict)
 
@@ -326,15 +324,23 @@ def construct_event(
         parsed = json.loads(text)
     except (ValueError, TypeError):
         raise _sig_error("webhook_body_invalid", "webhook body is not valid JSON")
-    if not isinstance(parsed, dict) or not isinstance(parsed.get("type"), str):
-        raise _sig_error("webhook_body_invalid", "webhook event is missing a string `type`")
+    if not isinstance(parsed, dict):
+        raise _sig_error("webhook_body_invalid", "webhook event must be an object")
+    if not (
+        isinstance(parsed.get("type"), str)
+        and isinstance(parsed.get("id"), str)
+        and isinstance(parsed.get("schema_version"), str)
+        and isinstance(parsed.get("created_at"), str)
+        and isinstance(parsed.get("data"), dict)
+    ):
+        raise _sig_error("webhook_body_invalid", "webhook event is missing required envelope fields")
 
     return WebhookEvent(
         type=parsed["type"],
-        data=parsed.get("data"),
-        id=parsed.get("id"),
-        created_at=parsed.get("created_at"),
-        schema_version=parsed.get("schema_version"),
+        id=parsed["id"],
+        schema_version=parsed["schema_version"],
+        created_at=parsed["created_at"],
+        data=parsed["data"],
         raw=parsed,
     )
 
@@ -357,44 +363,44 @@ def _sig_error(code: str, message: str) -> E2AWebhookSignatureError:
 
 def is_email_received(e: WebhookEvent) -> TypeGuard[WebhookEvent]:
     """True iff the event is ``email.received`` (``e.data``: :class:`EmailReceivedData`)."""
-    return e.type == "email.received"
+    return e.schema_version == "1" and e.type == "email.received"
 
 
 def is_email_sent(e: WebhookEvent) -> TypeGuard[WebhookEvent]:
     """True iff the event is ``email.sent`` (``e.data``: :class:`EmailSentData`)."""
-    return e.type == "email.sent"
+    return e.schema_version == "1" and e.type == "email.sent"
 
 
 def is_email_failed(e: WebhookEvent) -> TypeGuard[WebhookEvent]:
     """True iff the event is ``email.failed`` (``e.data``: :class:`EmailFailedData`)."""
-    return e.type == "email.failed"
+    return e.schema_version == "1" and e.type == "email.failed"
 
 
 def is_email_delivered(e: WebhookEvent) -> TypeGuard[WebhookEvent]:
     """True iff the event is ``email.delivered`` (``e.data``: :class:`EmailDeliveredData`)."""
-    return e.type == "email.delivered"
+    return e.schema_version == "1" and e.type == "email.delivered"
 
 
 def is_email_bounced(e: WebhookEvent) -> TypeGuard[WebhookEvent]:
     """True iff the event is ``email.bounced`` (``e.data``: :class:`EmailBouncedData`)."""
-    return e.type == "email.bounced"
+    return e.schema_version == "1" and e.type == "email.bounced"
 
 
 def is_email_complained(e: WebhookEvent) -> TypeGuard[WebhookEvent]:
     """True iff the event is ``email.complained`` (``e.data``: :class:`EmailComplainedData`)."""
-    return e.type == "email.complained"
+    return e.schema_version == "1" and e.type == "email.complained"
 
 
 def is_domain_sending_verified(e: WebhookEvent) -> TypeGuard[WebhookEvent]:
     """True iff the event is ``domain.sending_verified`` (``e.data``: :class:`DomainSendingVerifiedData`)."""
-    return e.type == "domain.sending_verified"
+    return e.schema_version == "1" and e.type == "domain.sending_verified"
 
 
 def is_domain_sending_failed(e: WebhookEvent) -> TypeGuard[WebhookEvent]:
     """True iff the event is ``domain.sending_failed`` (``e.data``: :class:`DomainSendingFailedData`)."""
-    return e.type == "domain.sending_failed"
+    return e.schema_version == "1" and e.type == "domain.sending_failed"
 
 
 def is_domain_suppression_added(e: WebhookEvent) -> TypeGuard[WebhookEvent]:
     """True iff the event is ``domain.suppression_added`` (``e.data``: :class:`DomainSuppressionAddedData`)."""
-    return e.type == "domain.suppression_added"
+    return e.schema_version == "1" and e.type == "domain.suppression_added"

@@ -74,12 +74,12 @@ export function verifyWebhookSignature(opts: VerifySignatureOptions): boolean {
  *  types still parse; narrow on `type` with the `isEmail*` / `isDomain*`
  *  guards below to get the typed payload of a stable event. */
 export interface WebhookEvent {
-  id?: string;
+  id: string;
   type: string;
   /** Envelope schema version (currently "1"). Branch on it before parsing
    *  `data` if you need forward-compatibility across envelope revisions. */
-  schema_version?: string;
-  created_at?: string;
+  schema_version: string;
+  created_at: string;
   data: unknown;
   [k: string]: unknown;
 }
@@ -273,39 +273,39 @@ export interface DomainSuppressionAddedData {
 
 /** Narrow a verified event to `email.received` with typed `data`. */
 export function isEmailReceived(e: WebhookEvent): e is WebhookEvent & { type: "email.received"; data: EmailReceivedData } {
-  return e.type === "email.received";
+  return e.schema_version === "1" && e.type === "email.received";
 }
 /** Narrow a verified event to `email.sent` with typed `data`. */
 export function isEmailSent(e: WebhookEvent): e is WebhookEvent & { type: "email.sent"; data: EmailSentData } {
-  return e.type === "email.sent";
+  return e.schema_version === "1" && e.type === "email.sent";
 }
 /** Narrow a verified event to `email.failed` with typed `data`. */
 export function isEmailFailed(e: WebhookEvent): e is WebhookEvent & { type: "email.failed"; data: EmailFailedData } {
-  return e.type === "email.failed";
+  return e.schema_version === "1" && e.type === "email.failed";
 }
 /** Narrow a verified event to `email.delivered` with typed `data`. */
 export function isEmailDelivered(e: WebhookEvent): e is WebhookEvent & { type: "email.delivered"; data: EmailDeliveredData } {
-  return e.type === "email.delivered";
+  return e.schema_version === "1" && e.type === "email.delivered";
 }
 /** Narrow a verified event to `email.bounced` with typed `data`. */
 export function isEmailBounced(e: WebhookEvent): e is WebhookEvent & { type: "email.bounced"; data: EmailBouncedData } {
-  return e.type === "email.bounced";
+  return e.schema_version === "1" && e.type === "email.bounced";
 }
 /** Narrow a verified event to `email.complained` with typed `data`. */
 export function isEmailComplained(e: WebhookEvent): e is WebhookEvent & { type: "email.complained"; data: EmailComplainedData } {
-  return e.type === "email.complained";
+  return e.schema_version === "1" && e.type === "email.complained";
 }
 /** Narrow a verified event to `domain.sending_verified` with typed `data`. */
 export function isDomainSendingVerified(e: WebhookEvent): e is WebhookEvent & { type: "domain.sending_verified"; data: DomainSendingVerifiedData } {
-  return e.type === "domain.sending_verified";
+  return e.schema_version === "1" && e.type === "domain.sending_verified";
 }
 /** Narrow a verified event to `domain.sending_failed` with typed `data`. */
 export function isDomainSendingFailed(e: WebhookEvent): e is WebhookEvent & { type: "domain.sending_failed"; data: DomainSendingFailedData } {
-  return e.type === "domain.sending_failed";
+  return e.schema_version === "1" && e.type === "domain.sending_failed";
 }
 /** Narrow a verified event to `domain.suppression_added` with typed `data`. */
 export function isDomainSuppressionAdded(e: WebhookEvent): e is WebhookEvent & { type: "domain.suppression_added"; data: DomainSuppressionAddedData } {
-  return e.type === "domain.suppression_added";
+  return e.schema_version === "1" && e.type === "domain.suppression_added";
 }
 
 export interface ConstructEventOptions {
@@ -340,8 +340,20 @@ export function constructEvent(
   } catch {
     throw sigError("webhook_body_invalid", "webhook body is not valid JSON");
   }
-  if (!parsed || typeof parsed !== "object" || typeof (parsed as { type?: unknown }).type !== "string") {
-    throw sigError("webhook_body_invalid", "webhook event is missing a string `type`");
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw sigError("webhook_body_invalid", "webhook event must be an object");
+  }
+  const envelope = parsed as Record<string, unknown>;
+  if (
+    typeof envelope.type !== "string" ||
+    typeof envelope.id !== "string" ||
+    typeof envelope.schema_version !== "string" ||
+    typeof envelope.created_at !== "string" ||
+    !envelope.data ||
+    typeof envelope.data !== "object" ||
+    Array.isArray(envelope.data)
+  ) {
+    throw sigError("webhook_body_invalid", "webhook event is missing required envelope fields");
   }
   return parsed as WebhookEvent;
 }

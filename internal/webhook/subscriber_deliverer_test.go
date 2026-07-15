@@ -5,10 +5,12 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -17,12 +19,14 @@ import (
 
 func TestSubscriberDeliverer_SignsRequest(t *testing.T) {
 	var gotSignatureHeader string
-	var gotEventType, gotSchemaVersion string
+	var gotEventType, gotSchemaVersion, gotContentType, gotUserAgent string
 	var gotBody []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotSignatureHeader = r.Header.Get("X-E2A-Signature")
 		gotEventType = r.Header.Get("X-E2A-Event-Type")
 		gotSchemaVersion = r.Header.Get("X-E2A-Schema-Version")
+		gotContentType = r.Header.Get("Content-Type")
+		gotUserAgent = r.Header.Get("User-Agent")
 		gotBody, _ = io.ReadAll(r.Body)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -42,6 +46,12 @@ func TestSubscriberDeliverer_SignsRequest(t *testing.T) {
 	}
 	if gotSchemaVersion != "1" {
 		t.Errorf("X-E2A-Schema-Version = %q, want 1", gotSchemaVersion)
+	}
+	if gotContentType != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", gotContentType)
+	}
+	if gotUserAgent != "e2a-webhooks/1" {
+		t.Errorf("User-Agent = %q, want e2a-webhooks/1", gotUserAgent)
 	}
 
 	if !strings.HasPrefix(gotSignatureHeader, "t=") {
@@ -68,6 +78,46 @@ func TestSubscriberDeliverer_SignsRequest(t *testing.T) {
 	wantHex := hex.EncodeToString(mac.Sum(nil))
 	if v1Hex != wantHex {
 		t.Errorf("signature mismatch:\n  got:  %s\n  want: %s", v1Hex, wantHex)
+	}
+}
+
+func TestSigningGoldenVector(t *testing.T) {
+	raw, err := os.ReadFile("testdata/signing-vector.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vector struct {
+		Timestamp      int64  `json:"timestamp"`
+		Body           string `json:"body"`
+		CurrentSecret  string `json:"current_secret"`
+		PreviousSecret string `json:"previous_secret"`
+		SingleHeader   string `json:"single_header"`
+		DualHeader     string `json:"dual_header"`
+	}
+	if err := json.Unmarshal(raw, &vector); err != nil {
+		t.Fatal(err)
+	}
+	if got := buildSignatureHeader(vector.Timestamp, []byte(vector.Body), vector.CurrentSecret, ""); got != vector.SingleHeader {
+		t.Errorf("single signature = %q, want %q", got, vector.SingleHeader)
+	}
+	if got := buildSignatureHeader(vector.Timestamp, []byte(vector.Body), vector.CurrentSecret, vector.PreviousSecret); got != vector.DualHeader {
+		t.Errorf("dual signature = %q, want %q", got, vector.DualHeader)
+	}
+}
+
+func TestSubscriberDeliverer_All2xxStatusesSucceed(t *testing.T) {
+	for _, status := range []int{200, 201, 202, 204, 299} {
+		status := status
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(status)
+			}))
+			defer srv.Close()
+			out := NewSubscriberDeliverer(false, "").Deliver(context.Background(), srv.URL, []byte(`{}`), "whsec_x", "", "email.sent", "1")
+			if !out.Success || out.StatusCode != status {
+				t.Errorf("status %d outcome = %+v, want success", status, out)
+			}
+		})
 	}
 }
 

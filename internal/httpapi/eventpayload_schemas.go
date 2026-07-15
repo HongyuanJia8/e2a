@@ -4,10 +4,23 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/Mnexa-AI/e2a/internal/eventpayload"
 	"github.com/danielgtaylor/huma/v2"
 )
+
+// EventEnvelope is the documentation schema for the push wire object
+// shared by webhook deliveries and WebSocket frames. The runtime publisher
+// uses webhookpub.Envelope; this map-typed data field is intentional so the
+// published base schema stays open to unknown event types.
+type EventEnvelope struct {
+	Type          string         `json:"type" doc:"Open event type; clients must tolerate unknown values."`
+	ID            string         `json:"id" doc:"Stable across retries and push channels; use it to deduplicate at-least-once delivery."`
+	SchemaVersion string         `json:"schema_version" doc:"Open envelope-version string; the current server emits 1."`
+	CreatedAt     time.Time      `json:"created_at" format:"date-time"`
+	Data          map[string]any `json:"data" nullable:"false" doc:"Event-specific payload. Open at the envelope level; use x-e2a-event-data-schemas for stable event payloads."`
+}
 
 // registerEventPayloadSchemas publishes the canonical typed per-event `data`
 // payloads (internal/eventpayload) as NAMED component schemas in the OpenAPI
@@ -29,29 +42,16 @@ import (
 // payloads are explicitly open/unstable.
 func (s *Server) registerEventPayloadSchemas() {
 	registry := s.API.OpenAPI().Components.Schemas
-	names := make([]string, 0, 9)
-	for _, p := range []struct {
-		typ  any
-		name string
-	}{
-		{eventpayload.EmailReceivedData{}, "EmailReceivedData"},
-		{eventpayload.EmailSentData{}, "EmailSentData"},
-		{eventpayload.EmailFailedData{}, "EmailFailedData"},
-		{eventpayload.EmailDeliveredData{}, "EmailDeliveredData"},
-		{eventpayload.EmailBouncedData{}, "EmailBouncedData"},
-		{eventpayload.EmailComplainedData{}, "EmailComplainedData"},
-		{eventpayload.DomainSendingVerifiedData{}, "DomainSendingVerifiedData"},
-		{eventpayload.DomainSendingFailedData{}, "DomainSendingFailedData"},
-		{eventpayload.DomainSuppressionAddedData{}, "DomainSuppressionAddedData"},
-	} {
-		schema := registry.Schema(reflect.TypeOf(p.typ), true, p.name)
+	names := make([]string, 0, len(eventpayload.StableEvents))
+	for _, event := range eventpayload.StableEvents {
+		schema := registry.Schema(reflect.TypeOf(event.Payload), true, event.SchemaName)
 		// The registry MUST intern the type under the exact hinted name — the
 		// docs reference these names, and a silent rename (e.g. a name
 		// collision appending a suffix) would break every published pointer.
-		if schema == nil || schema.Ref != "#/components/schemas/"+p.name {
-			panic(fmt.Sprintf("event payload schema %s registered under an unexpected ref: %+v", p.name, schema))
+		if schema == nil || schema.Ref != "#/components/schemas/"+event.SchemaName {
+			panic(fmt.Sprintf("event payload schema %s registered under an unexpected ref: %+v", event.SchemaName, schema))
 		}
-		names = append(names, p.name)
+		names = append(names, event.SchemaName)
 	}
 
 	// Forward-compatibility stance: these are CONSUMER-direction (server →
@@ -69,6 +69,29 @@ func (s *Server) registerEventPayloadSchemas() {
 	for _, name := range names {
 		openEventPayloadComponent(registry, name, seen)
 	}
+
+	envelope := registry.Schema(reflect.TypeOf(EventEnvelope{}), true, "EventEnvelope")
+	if envelope == nil || envelope.Ref != "#/components/schemas/EventEnvelope" {
+		panic(fmt.Sprintf("event envelope registered under an unexpected ref: %+v", envelope))
+	}
+	openEventPayloadComponent(registry, "EventEnvelope", seen)
+	envelopeSchema := registry.Map()["EventEnvelope"]
+	data := envelopeSchema.Properties["data"]
+	if data == nil {
+		panic("event envelope data property missing from registered schema")
+	}
+	// map[string]any is rendered as an unconstrained schema-valued map by
+	// Huma. Publish the simpler explicit open-object posture consumers rely on.
+	data.Type = huma.TypeObject
+	data.AdditionalProperties = true
+	if data.Extensions == nil {
+		data.Extensions = map[string]any{}
+	}
+	mapping := make(map[string]any, len(eventpayload.StableEvents))
+	for _, event := range eventpayload.StableEvents {
+		mapping[event.Type] = "#/components/schemas/" + event.SchemaName
+	}
+	data.Extensions["x-e2a-event-data-schemas"] = mapping
 }
 
 // openEventPayloadComponent flips additionalProperties from the strict

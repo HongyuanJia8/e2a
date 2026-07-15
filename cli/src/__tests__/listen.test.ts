@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { EmailReceivedData } from "@e2a/sdk/v1";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   isOpenClawUrl,
@@ -315,6 +317,12 @@ describe("listen replaced-takeover exit (WS close 4000)", () => {
     }));
 
     const sdk = await import("@e2a/sdk/v1");
+    const closeContract = JSON.parse(readFileSync(
+      join(__dirname, "../../../internal/ws/testdata/close-contract.json"),
+      "utf8",
+    )) as Array<{ code: number; reason: string; classification: string }>;
+    const replacement = closeContract.find((entry) => entry.classification === "replaced");
+    expect(replacement).toEqual({ code: 4000, reason: "replaced", classification: "replaced" });
     const replaced = new sdk.E2AConnectionReplacedError({
       code: "ws_replaced",
       message: "a newer connection for this agent superseded this one",

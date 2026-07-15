@@ -11,9 +11,9 @@ import (
 	"github.com/riverqueue/river/rivertype"
 
 	"github.com/Mnexa-AI/e2a/internal/identity"
+	"github.com/Mnexa-AI/e2a/internal/testutil"
 	"github.com/Mnexa-AI/e2a/internal/webhook"
 	"github.com/Mnexa-AI/e2a/internal/webhookdelivery"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
 )
 
 type fakeDeliverer struct{ out webhook.DeliveryOutcome }
@@ -202,12 +202,20 @@ func TestReconcilePending(t *testing.T) {
 
 func TestDeliverWorker_NextRetryMatchesEnvelope(t *testing.T) {
 	w := webhookdelivery.NewDeliverWorker(nil, nil, nil)
-	want := []time.Duration{5 * time.Minute, 15 * time.Minute, time.Hour, 4 * time.Hour, 8 * time.Hour, 16 * time.Hour, 24 * time.Hour}
+	want := []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute, time.Hour, 4 * time.Hour, 8 * time.Hour, 16 * time.Hour}
+	if webhookdelivery.MaxDeliveryAttempts != 8 {
+		t.Fatalf("MaxDeliveryAttempts = %d, want 8", webhookdelivery.MaxDeliveryAttempts)
+	}
+	var total time.Duration
 	for i, wantDur := range want {
 		attempt := i + 1 // attempts 1..7
+		total += wantDur
 		got := time.Until(w.NextRetry(job("x", attempt))).Round(time.Second)
 		if diff := got - wantDur; diff < -2*time.Second || diff > 2*time.Second {
 			t.Errorf("attempt %d: next retry in %v, want ~%v", attempt, got, wantDur)
 		}
+	}
+	if total != 29*time.Hour+21*time.Minute {
+		t.Errorf("retry envelope spans %v, want 29h21m", total)
 	}
 }
