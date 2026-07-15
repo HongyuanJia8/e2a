@@ -21,6 +21,46 @@ import (
 	"nhooyr.io/websocket"
 )
 
+type closeContractCase struct {
+	Code           int    `json:"code"`
+	Reason         string `json:"reason"`
+	Classification string `json:"classification"`
+}
+
+func loadCloseContract(t *testing.T) []closeContractCase {
+	t.Helper()
+	b, err := os.ReadFile("testdata/close-contract.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []closeContractCase
+	if err := json.Unmarshal(b, &cases); err != nil {
+		t.Fatal(err)
+	}
+	return cases
+}
+
+func TestCloseContractFixturePinsServerTokens(t *testing.T) {
+	cases := loadCloseContract(t)
+	want := map[int]map[string]string{
+		1000:                {"": "normal"},
+		1001:                {ReasonShuttingDown: "transient", ReasonPingTimeout: "transient"},
+		1006:                {"": "transient"},
+		1008:                {"policy_violation": "terminal"},
+		1011:                {"internal_error": "transient"},
+		int(StatusReplaced): {ReasonReplaced: "replaced"},
+		4321:                {"future_condition": "terminal"},
+	}
+	if len(cases) != 8 {
+		t.Fatalf("close contract has %d cases, want 8", len(cases))
+	}
+	for _, tc := range cases {
+		if got := want[tc.Code][tc.Reason]; got != tc.Classification {
+			t.Errorf("close %d/%q = %q, want %q", tc.Code, tc.Reason, tc.Classification, got)
+		}
+	}
+}
+
 // ── Mock store ──────────────────────────────────────────────────
 
 type mockStore struct {

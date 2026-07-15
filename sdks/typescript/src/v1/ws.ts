@@ -71,6 +71,16 @@ function fatalErrorForClose(code: number, reason: string): E2AError | null {
   return null;
 }
 
+function isEventEnvelope(value: unknown): value is WSEvent {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const event = value as Record<string, unknown>;
+  return typeof event.type === "string" &&
+    typeof event.id === "string" &&
+    typeof event.schema_version === "string" &&
+    typeof event.created_at === "string" &&
+    !!event.data && typeof event.data === "object" && !Array.isArray(event.data);
+}
+
 /**
  * A WebSocket frame from the e2a relay: the SAME versioned event envelope a
  * webhook delivery carries — `{type, id, schema_version, created_at, data}`.
@@ -201,8 +211,8 @@ export class WSListener extends EventEmitter<WSListenerEvents> {
         // Every frame is the versioned event envelope; a frame without a
         // string `type` is not one. Unknown `type` VALUES are fine (future
         // WS event kinds) — consumers narrow on type.
-        if (!parsed || typeof parsed !== "object" || typeof (parsed as { type?: unknown }).type !== "string") {
-          this.emit("error", new Error("WS frame is not an event envelope (missing string `type`)"));
+        if (!isEventEnvelope(parsed)) {
+          this.emit("error", new Error("WS frame is missing required event envelope fields"));
           return;
         }
         this.emit("event", parsed as WSEvent);
@@ -226,6 +236,13 @@ export class WSListener extends EventEmitter<WSListenerEvents> {
       // 4xxx) — surface the typed error and STOP. Only consulted when we did
       // not initiate the close ourselves.
       if (!this.closed) {
+        // A peer's normal close is a clean terminal condition, not a network
+        // failure. Reconnecting here would turn an intentional shutdown into
+        // a surprising infinite listener loop.
+        if (code === 1000) {
+          this.closed = true;
+          return;
+        }
         const fatalClose = fatalErrorForClose(code, reasonStr);
         if (fatalClose) {
           this.closed = true;

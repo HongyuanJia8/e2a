@@ -171,6 +171,18 @@ def _fatal_error_for_close(code: int, reason: str) -> Optional[E2AError]:
     return None
 
 
+def _close_disposition(code: int, reason: str) -> str:
+    """Classify the GA-frozen peer-close contract for reconnect decisions."""
+    del reason  # Stable reason tokens are diagnostic; clients branch on code.
+    if code == 1000:
+        return "normal"
+    if code == WS_CLOSE_REPLACED:
+        return "replaced"
+    if code == 1008 or 4000 <= code <= 4999:
+        return "terminal"
+    return "transient"
+
+
 @dataclass(frozen=True)
 class WSEvent:
     """One WebSocket frame: the versioned event envelope (same shape as a
@@ -283,6 +295,8 @@ class WSStream:
                 # replacement. Surface the typed error and stop.
                 close_code, close_reason = _close_code_and_reason(exc)
                 if close_code is not None:
+                    if _close_disposition(close_code, close_reason) == "normal":
+                        return
                     fatal = _fatal_error_for_close(close_code, close_reason)
                     if fatal is not None:
                         fatal.__cause__ = exc

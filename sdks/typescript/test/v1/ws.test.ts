@@ -4,6 +4,17 @@ import { join } from "node:path";
 import type { WSEvent } from "../../src/v1/ws.js";
 import { isEmailReceived } from "../../src/v1/webhook-signature.js";
 
+interface CloseContractCase {
+  code: number;
+  reason: string;
+  classification: "normal" | "transient" | "terminal" | "replaced";
+}
+
+const closeContract = JSON.parse(readFileSync(
+  join(__dirname, "../../../../internal/ws/testdata/close-contract.json"),
+  "utf8",
+)) as CloseContractCase[];
+
 // These are pure unit tests for the WS surface. Network-level tests
 // would require spinning up a fake WS server, which isn't worth it for
 // this PR — the type fix and exponential backoff are easy to verify by
@@ -94,6 +105,31 @@ describe("WSListener auth", () => {
   });
 });
 
+describe("WSListener envelope validation", () => {
+  it("rejects frames missing required core envelope fields", async () => {
+    class FakeWS {
+      handlers = new Map<string, (...args: unknown[]) => void>();
+      constructor(_url: string, _opts: unknown) {}
+      on(event: string, fn: (...args: unknown[]) => void) { this.handlers.set(event, fn); return this; }
+      close() {}
+    }
+    const socket = new FakeWS("", {});
+    vi.resetModules();
+    vi.doMock("ws", () => ({ default: class extends FakeWS {
+      constructor(url: string, opts: unknown) { super(url, opts); Object.assign(socket, this); }
+    } }));
+    const { WSListener } = await import("../../src/v1/ws.js");
+    const listener = new WSListener({ apiKey: "k", agentEmail: "bot@x.dev", reconnect: false });
+    const errors: Error[] = [];
+    listener.on("error", (error) => errors.push(error));
+    listener.connect();
+    socket.handlers.get("message")?.(Buffer.from(JSON.stringify({ type: "email.received", data: {} })));
+    expect(errors[0]?.message).toMatch(/required event envelope fields/);
+    vi.doUnmock("ws");
+    vi.resetModules();
+  });
+});
+
 describe("WSListener close-code contract (docs/api.md)", () => {
   // Drives the reconnect matrix by mocking the `ws` module: each fake socket
   // records its event handlers so the test can fire a server-initiated close
@@ -146,6 +182,25 @@ describe("WSListener close-code contract (docs/api.md)", () => {
     vi.resetModules();
     return { dials: FakeWS.instances.length, errors: seen, closes, errorsMod: errors, listener: l };
   }
+
+  it.each(closeContract)("classifies $code/$reason as $classification", async (tc) => {
+    const { dials, errors } = await listenWith(tc.code, tc.reason);
+    if (tc.classification === "transient") {
+      expect(dials).toBeGreaterThan(1);
+      expect(errors).toHaveLength(0);
+      return;
+    }
+    expect(dials).toBe(1);
+    if (tc.classification === "normal") {
+      expect(errors).toHaveLength(0);
+      return;
+    }
+    expect(errors).toHaveLength(1);
+    expect((errors[0] as { code?: string }).code).toBe(
+      tc.classification === "replaced" ? "ws_replaced" :
+        tc.code === 1008 ? "ws_policy_violation" : "ws_closed",
+    );
+  });
 
   it("4000 'replaced' → E2AConnectionReplacedError, no reconnect", async () => {
     const { dials, errors, closes, errorsMod } = await listenWith(4000, "replaced");
