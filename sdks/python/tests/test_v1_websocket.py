@@ -85,6 +85,23 @@ def test_ws_event_tolerates_unknown_type():
     assert e.data == {"anything": True}
 
 
+@pytest.mark.parametrize("missing", ["type", "id", "schema_version", "created_at", "data"])
+def test_ws_event_rejects_missing_required_envelope_field(missing):
+    payload = _envelope({})
+    del payload[missing]
+    with pytest.raises(ValueError, match="missing required envelope fields"):
+        WSEvent.from_payload(payload)
+
+
+def test_ws_event_preserves_future_envelope_versions_and_fields():
+    payload = _envelope({"future": True})
+    payload["schema_version"] = "2"
+    payload["future_envelope_field"] = True
+    event = WSEvent.from_payload(payload)
+    assert event.schema_version == "2"
+    assert event.raw["future_envelope_field"] is True
+
+
 # ── _connect_and_stream ──────────────────────────────────────────
 
 
@@ -250,6 +267,9 @@ async def test_wsstream_no_reconnect_exits():
 
     fake_notif = WSEvent(
         type="email.received",
+        id="evt_1",
+        schema_version="1",
+        created_at="2026-04-27T10:00:00Z",
         data={
             "message_id": "msg_1",
             "from": "alice@example.com",

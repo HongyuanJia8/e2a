@@ -184,22 +184,29 @@ class WSEvent:
     """
 
     type: str
-    data: Dict[str, Any] = field(default_factory=dict)
-    id: Optional[str] = None
-    created_at: Optional[str] = None
-    schema_version: Optional[str] = None
+    id: str
+    schema_version: str
+    created_at: str
+    data: Dict[str, Any]
     #: The full parsed envelope (all fields, for forward-compatibility).
     raw: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_payload(cls, payload: dict) -> "WSEvent":
-        data = payload.get("data")
+        if not (
+            isinstance(payload.get("type"), str)
+            and isinstance(payload.get("id"), str)
+            and isinstance(payload.get("schema_version"), str)
+            and isinstance(payload.get("created_at"), str)
+            and isinstance(payload.get("data"), dict)
+        ):
+            raise ValueError("WebSocket event is missing required envelope fields")
         return cls(
-            type=payload.get("type", ""),
-            data=data if isinstance(data, dict) else {},
-            id=payload.get("id"),
-            created_at=payload.get("created_at"),
-            schema_version=payload.get("schema_version"),
+            type=payload["type"],
+            id=payload["id"],
+            schema_version=payload["schema_version"],
+            created_at=payload["created_at"],
+            data=payload["data"],
             raw=payload,
         )
 

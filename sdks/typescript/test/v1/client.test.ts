@@ -278,6 +278,8 @@ describe("E2AClient", () => {
     const event = {
       id: "evt_1",
       type: "email.received",
+      schema_version: "1",
+      created_at: "2026-06-21T10:15:00Z",
       data: { message_id: "msg_9", delivered_to: "bot@test.dev" },
     };
     const msg = await client.webhooks.fetchMessage(event);
@@ -292,10 +294,16 @@ describe("E2AClient", () => {
 
   it("webhooks.fetchMessage rejects a non-received event or missing fetch keys", async () => {
     expect(() =>
-      client.webhooks.fetchMessage({ type: "email.bounced", data: { message_id: "m", delivered_to: "r" } }),
+      client.webhooks.fetchMessage({
+        type: "email.bounced", id: "evt_1", schema_version: "1",
+        created_at: "2026-06-21T10:15:00Z", data: { message_id: "m", delivered_to: "r" },
+      }),
     ).toThrow(/email\.received/);
     expect(() =>
-      client.webhooks.fetchMessage({ type: "email.received", data: { message_id: "m" } }),
+      client.webhooks.fetchMessage({
+        type: "email.received", id: "evt_1", schema_version: "1",
+        created_at: "2026-06-21T10:15:00Z", data: { message_id: "m" },
+      }),
     ).toThrow(/delivered_to/);
   });
 

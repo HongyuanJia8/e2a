@@ -51,9 +51,10 @@ ws = ["websockets>=14"]
 
 [tool.mypy]
 python_version = "3.9"
-files = ["tests/test_e2e.py"]
+files = ["tests/test_e2e.py", "tests/typecheck_event_envelope.py"]
 follow_imports = "silent"
 show_error_codes = true
+warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
 module = ["pytest", "pytest.*", "_pytest", "_pytest.*"]

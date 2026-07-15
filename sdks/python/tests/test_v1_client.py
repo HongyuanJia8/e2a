@@ -251,6 +251,8 @@ async def test_webhooks_fetch_message_resolves_keys(httpx_mock):
         type="email.received",
         data={"message_id": "msg_9", "delivered_to": "bot@test.dev"},
         id="evt_1",
+        schema_version="1",
+        created_at="2026-06-21T10:15:00Z",
     )
     async with _client() as c:
         msg = await c.webhooks.fetch_message(event)
@@ -267,11 +269,18 @@ async def test_webhooks_fetch_message_rejects_bad_event():
     async with _client() as c:
         with pytest.raises(ValueError, match="email.received"):
             await c.webhooks.fetch_message(
-                WebhookEvent(type="email.bounced", data={"message_id": "m", "delivered_to": "r"})
+                WebhookEvent(
+                    type="email.bounced", id="evt_1", schema_version="1",
+                    created_at="2026-06-21T10:15:00Z",
+                    data={"message_id": "m", "delivered_to": "r"},
+                )
             )
         with pytest.raises(ValueError, match="delivered_to"):
             await c.webhooks.fetch_message(
-                WebhookEvent(type="email.received", data={"message_id": "m"})
+                WebhookEvent(
+                    type="email.received", id="evt_1", schema_version="1",
+                    created_at="2026-06-21T10:15:00Z", data={"message_id": "m"},
+                )
             )
 
 

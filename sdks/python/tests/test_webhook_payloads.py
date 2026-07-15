@@ -151,6 +151,23 @@ def test_unknown_event_type_still_parses():
     assert e.data == {"anything": True}
 
 
+def test_future_envelope_version_stays_generic():
+    raw = json.dumps({
+        "type": "email.received",
+        "id": "evt_v2",
+        "schema_version": "2",
+        "created_at": "2030-01-02T03:04:05Z",
+        "data": {"future": True},
+        "future_envelope_field": True,
+    })
+    t = str(int(time.time()))
+    sig = hmac.new(SECRET.encode(), f"{t}.{raw}".encode(), hashlib.sha256).hexdigest()
+    e = construct_event(raw, f"t={t},v1={sig}", SECRET)
+    assert e.schema_version == "2"
+    assert e.raw["future_envelope_field"] is True
+    assert not is_email_received(e)
+
+
 # ── Minimal (required-fields-only) fixtures ─────────────────────────────
 # The same files the server's presence-semantics lock generates. Parsing
 # them proves every optional field is genuinely optional (ABSENT, not
