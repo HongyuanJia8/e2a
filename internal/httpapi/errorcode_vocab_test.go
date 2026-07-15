@@ -410,18 +410,53 @@ func TestErrorCodeVocabularyIsDocumented(t *testing.T) {
 	for _, status := range []int{400, 401, 403, 404, 405, 406, 409, 413, 415, 422, 429, 500, 503} {
 		all = append(all, defaultCodeForStatus(status))
 	}
-	seen := map[string]bool{}
+	want := map[string]bool{}
 	for _, code := range all {
-		if seen[code] {
+		if want[code] {
 			continue
 		}
-		seen[code] = true
+		want[code] = true
 		if !snakeCase.MatchString(code) {
 			t.Errorf("code %q violates snake_case", code)
 		}
-		if !strings.Contains(doc, code) {
-			t.Errorf("code %q is not documented in the ErrorBody.Code doc tag (the published error.code catalog)", code)
+	}
+
+	const prefix = "Exact current vocabulary (machine-checked): "
+	start := strings.Index(doc, prefix)
+	if start < 0 {
+		t.Fatalf("ErrorBody.Code doc tag is missing %q", prefix)
+	}
+	section := doc[start+len(prefix):]
+	end := strings.Index(section, ". Grouped semantics:")
+	if end < 0 {
+		t.Fatal("ErrorBody.Code exact vocabulary must end before '. Grouped semantics:'")
+	}
+	got := map[string]bool{}
+	for _, token := range strings.Split(section[:end], ",") {
+		code := strings.TrimSpace(token)
+		if code == "" {
+			continue
 		}
+		if got[code] {
+			t.Errorf("ErrorBody.Code exact vocabulary lists %q twice", code)
+		}
+		got[code] = true
+	}
+	var missing, extra []string
+	for code := range want {
+		if !got[code] {
+			missing = append(missing, code)
+		}
+	}
+	for code := range got {
+		if !want[code] {
+			extra = append(extra, code)
+		}
+	}
+	sort.Strings(missing)
+	sort.Strings(extra)
+	if len(missing) > 0 || len(extra) > 0 {
+		t.Errorf("ErrorBody.Code exact vocabulary drift: missing=%v extra=%v", missing, extra)
 	}
 }
 

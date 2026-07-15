@@ -379,6 +379,11 @@ func TestDocumentedExperimentalOperationsMatchOpenAPI(t *testing.T) {
 			documented = append(documented, match[1])
 		}
 	}
+	sortedDocumented := append([]string(nil), documented...)
+	sort.Strings(sortedDocumented)
+	if !reflect.DeepEqual(documented, sortedDocumented) {
+		t.Errorf("docs/api.md experimental operation table must be sorted by operationId: got %v", documented)
+	}
 	sort.Strings(documented)
 	if !reflect.DeepEqual(documented, marked) {
 		t.Errorf("docs/api.md experimental operations = %v, OpenAPI marks %v", documented, marked)
