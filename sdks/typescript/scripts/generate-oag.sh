@@ -34,4 +34,9 @@ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$ROOT:/work" "$IMG" 
 find "$OUT" -name '*.ts' -print0 | xargs -0 perl -i -ne \
   'print unless /^\s*import\s+["'"'"']whatwg-fetch["'"'"'];\s*$/'
 
+# The upstream template emits a whitespace-only JSDoc line in standalone
+# component models. Normalize the newly published docs-only envelope so the
+# repository's `git diff --check` release gate remains clean and reproducible.
+perl -pi -e 's/[ \t]+$//' "$OUT/models/EventEnvelope.ts"
+
 echo "TS /v1 client base regenerated at sdks/typescript/src/v1/generated"
