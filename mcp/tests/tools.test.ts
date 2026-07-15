@@ -126,6 +126,7 @@ function makeStubClient(
       sendingStatus: "verified",
     })),
     deleteDomain: vi.fn(async (domain: string) => ({ deleted: true, domain })),
+    deleteWebhook: vi.fn(async (id: string) => ({ deleted: true, id })),
     listWebhookDeliveries: vi.fn(
       async (id: string, _params: { status?: string; cursor?: string; limit?: number }) => ({
         items: [{ id: "whd_1", webhookId: id, status: "delivered", attempts: 1 }],
@@ -261,7 +262,7 @@ function makeStubClient(
       ...(body.expiresAt ? { expiresAt: body.expiresAt.toISOString() } : {}),
       key: "e2a_agt_new1_PLAINTEXT_ONCE",
     })),
-    deleteApiKey: vi.fn(async () => undefined),
+    deleteApiKey: vi.fn(async (id: string) => ({ deleted: true, id })),
     getStarterTemplate: vi.fn(async (alias: string) => ({
       alias,
       name: "Approval request",
@@ -845,7 +846,11 @@ describe("e2a MCP server", () => {
     });
     expect(stub.deleteAgent).toHaveBeenCalledWith("bot@example.com");
     const content = res.content as Array<{ type: string; text: string }>;
-    expect(content[0]?.text).toMatch(/bot@example\.com/);
+    expect(JSON.parse(content[0]!.text)).toEqual({
+      deleted: true,
+      email: "bot@example.com",
+      messagesDeleted: 0,
+    });
   });
 
   it("delete_agent passes undefined when email omitted (wrapper resolves bound agent)", async () => {
@@ -932,7 +937,17 @@ describe("e2a MCP server", () => {
     });
     expect(stub.deleteDomain).toHaveBeenCalledWith("mail.acme.com");
     const content = res.content as Array<{ type: string; text: string }>;
-    expect(content[0]?.text).toMatch(/mail\.acme\.com/);
+    expect(JSON.parse(content[0]!.text)).toEqual({ deleted: true, domain: "mail.acme.com" });
+  });
+
+  it("delete_webhook returns the REST deletion receipt unchanged", async () => {
+    const res = await client.callTool({
+      name: "delete_webhook",
+      arguments: { id: "wh_1", confirm: true },
+    });
+    expect(stub.deleteWebhook).toHaveBeenCalledWith("wh_1");
+    const content = res.content as Array<{ type: string; text: string }>;
+    expect(JSON.parse(content[0]!.text)).toEqual({ deleted: true, id: "wh_1" });
   });
 
   // ── API keys (admin tier; create is agent-scope-only by construction) ─────
@@ -1004,7 +1019,7 @@ describe("e2a MCP server", () => {
     });
     expect(stub.deleteApiKey).toHaveBeenCalledWith("key_1");
     const content = res.content as Array<{ type: string; text: string }>;
-    expect(content[0]?.text).toMatch(/key_1/);
+    expect(JSON.parse(content[0]!.text)).toEqual({ deleted: true, id: "key_1" });
   });
 
   it("list_reviews calls the SDK", async () => {
@@ -1619,7 +1634,27 @@ describe("e2a MCP server", () => {
       arguments: { id: "tmpl_1", confirm: true },
     });
     expect(stub.deleteTemplate).toHaveBeenCalledWith("tmpl_1");
-    expect((res.content as Array<{ text: string }>)[0]?.text).toMatch(/tmpl_1/);
+    expect(JSON.parse((res.content as Array<{ text: string }>)[0]!.text)).toEqual({
+      deleted: true,
+      id: "tmpl_1",
+    });
+  });
+
+  it("delete tool descriptions match REST's reversible-agent and guarded-domain semantics", async () => {
+    const { tools } = await client.listTools();
+    const byName = new Map(tools.map((tool) => [tool.name, tool.description ?? ""]));
+
+    expect(byName.get("delete_agent")).toContain("trash");
+    expect(byName.get("delete_agent")).not.toContain("Permanently delete");
+    expect(byName.get("delete_domain")).toContain(
+      "permanently delete every live or trashed agent",
+    );
+    expect(byName.get("delete_domain")).toContain(
+      "Moving an agent to trash is not sufficient",
+    );
+    expect(byName.get("delete_domain")).toContain("trashed agents still belong to the domain");
+    expect(byName.get("delete_domain")).not.toContain("move those inboxes");
+    expect(byName.get("delete_domain")).not.toContain("CASCADES to every agent");
   });
 
   it("validate_template forwards source parts + test_data", async () => {

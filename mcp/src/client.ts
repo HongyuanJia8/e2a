@@ -41,6 +41,7 @@ import type {
   DeleteDomainResult,
   DeleteWebhookResult,
   DeleteTemplateResult,
+  DeleteApiKeyResult,
   Page,
 } from "@e2a/sdk/v1";
 import type { McpConfig } from "./config.js";
@@ -498,8 +499,8 @@ export class McpClient {
     return this.sdk.account.apiKeys.create(req);
   }
 
-  async deleteApiKey(id: string): Promise<void> {
-    await this.sdk.account.apiKeys.delete(id);
+  deleteApiKey(id: string): Promise<DeleteApiKeyResult> {
+    return this.sdk.account.apiKeys.delete(id);
   }
 
   // ── Templates (beta) ────────────────────────────────────────────
