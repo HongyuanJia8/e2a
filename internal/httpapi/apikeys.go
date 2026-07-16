@@ -59,7 +59,11 @@ type CreateAPIKeyRequest struct {
 	Agent     string `json:"agent_email,omitempty" doc:"Inbox email to bind the key to; required when scope=agent."`
 }
 
-type createAPIKeyInput struct{ Body CreateAPIKeyRequest }
+type createAPIKeyInput struct {
+	RawBody        []byte
+	IdempotencyKey string `header:"Idempotency-Key" doc:"Optional idempotency key for safe retries (unique per logical request). A retry with the same key and byte-identical body replays the first request's response — the SAME key — instead of minting a second live credential. Completed keys are remembered for at least 24 hours (the published minimum dedup window). Within the window: same key + different body → 422 idempotency_key_reuse (do not retry as-is); same key while the first request is still executing → 409 idempotency_in_flight (wait, then retry unchanged). Dedup is best-effort: under idempotency-store degradation or a mid-request crash the guarantee degrades to at-least-once — a keyed retry may mint a new key rather than replay."`
+	Body           CreateAPIKeyRequest
+}
 type createAPIKeyOutput struct{ Body CreateAPIKeyResponse }
 
 type deleteAPIKeyInput struct {
@@ -177,14 +181,27 @@ func (s *Server) handleCreateAPIKey(ctx context.Context, in *createAPIKeyInput) 
 		agentID = ag.ID
 	}
 
-	key, err := s.deps.CreateScopedAPIKey(ctx, user.ID, in.Body.Name, scope, agentID, expiresAt)
+	// Wrap the mint in the keyed-idempotency guard (same machinery as
+	// send/reply/rotate-secret): a network-retried create carrying the same
+	// Idempotency-Key + byte-identical body replays the first response — the
+	// SAME key — instead of silently minting a SECOND live credential. Without a
+	// key the mint runs unguarded (idempotency is opt-in). See issue #493.
+	_, body, err := runIdempotent(s, ctx, user.ID, in.IdempotencyKey,
+		"/v1/account/api-keys", in.RawBody,
+		func() (int, CreateAPIKeyResponse, error) {
+			key, kerr := s.deps.CreateScopedAPIKey(ctx, user.ID, in.Body.Name, scope, agentID, expiresAt)
+			if kerr != nil {
+				return 0, CreateAPIKeyResponse{}, NewError(http.StatusInternalServerError, "internal_error", "failed to create API key")
+			}
+			return http.StatusCreated, CreateAPIKeyResponse{
+				APIKeyView: apiKeyView(*key),
+				Key:        key.PlaintextKey,
+			}, nil
+		})
 	if err != nil {
-		return nil, NewError(http.StatusInternalServerError, "internal_error", "failed to create API key")
+		return nil, err
 	}
-	return &createAPIKeyOutput{Body: CreateAPIKeyResponse{
-		APIKeyView: apiKeyView(*key),
-		Key:        key.PlaintextKey,
-	}}, nil
+	return &createAPIKeyOutput{Body: body}, nil
 }
 
 func (s *Server) handleDeleteAPIKey(ctx context.Context, in *deleteAPIKeyInput) (*deleteAPIKeyOutput, error) {

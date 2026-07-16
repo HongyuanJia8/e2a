@@ -141,6 +141,13 @@ export interface AccountApiCreateApiKeyRequest {
      * @memberof AccountApicreateApiKey
      */
     createAPIKeyRequest: CreateAPIKeyRequest
+    /**
+     * Optional idempotency key for safe retries (unique per logical request). A retry with the same key and byte-identical body replays the first request\&#39;s response — the SAME key — instead of minting a second live credential. Completed keys are remembered for at least 24 hours (the published minimum dedup window). Within the window: same key + different body → 422 idempotency_key_reuse (do not retry as-is); same key while the first request is still executing → 409 idempotency_in_flight (wait, then retry unchanged). Dedup is best-effort: under idempotency-store degradation or a mid-request crash the guarantee degrades to at-least-once — a keyed retry may mint a new key rather than replay.
+     * Defaults to: undefined
+     * @type string
+     * @memberof AccountApicreateApiKey
+     */
+    idempotencyKey?: string
 }
 
 export interface AccountApiDeleteAccountRequest {
@@ -244,7 +251,7 @@ export class ObjectAccountApi {
      * @param param the request object
      */
     public createApiKeyWithHttpInfo(param: AccountApiCreateApiKeyRequest, options?: ConfigurationOptions): Promise<HttpInfo<CreateAPIKeyResponse>> {
-        return this.api.createApiKeyWithHttpInfo(param.createAPIKeyRequest,  options).toPromise();
+        return this.api.createApiKeyWithHttpInfo(param.createAPIKeyRequest, param.idempotencyKey,  options).toPromise();
     }
 
     /**
@@ -253,7 +260,7 @@ export class ObjectAccountApi {
      * @param param the request object
      */
     public createApiKey(param: AccountApiCreateApiKeyRequest, options?: ConfigurationOptions): Promise<CreateAPIKeyResponse> {
-        return this.api.createApiKey(param.createAPIKeyRequest,  options).toPromise();
+        return this.api.createApiKey(param.createAPIKeyRequest, param.idempotencyKey,  options).toPromise();
     }
 
     /**
