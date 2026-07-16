@@ -60,9 +60,10 @@ run_oasdiff() {
   GOWORK=off go run github.com/oasdiff/oasdiff@v1.23.0 "$@"
 }
 
-# e2a retains its public x-stability marker and also emits oasdiff's native
-# x-stability-level mirror. The stable threshold excludes beta operations even
-# when an entire experimental path has been removed from the revision.
+# The canonical x-stability-level marker lets the stable threshold exclude beta
+# operations even when an entire beta path has been removed from the revision.
+# Historical x-stability: experimental markers were translated during the
+# normalization step above.
 run_oasdiff breaking \
   --allow-external-refs=false \
   --fail-on WARN \
