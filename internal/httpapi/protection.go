@@ -171,7 +171,7 @@ func (s *Server) registerAgentProtection() {
 		Description: "Read the agent's protection posture — inbound/outbound trust gate, content-scan sensitivity, and hold-queue mechanism. Account scope only: an agent-scoped credential cannot read its own protection config. " + protectionBetaDoc,
 		Tags:        []string{"agents"},
 		Security:    []map[string][]string{{"bearer": {}}},
-		Extensions:  experimental(),
+		Extensions:  beta(),
 	}, s.handleGetProtection)
 
 	huma.Register(s.API, huma.Operation{
@@ -182,7 +182,7 @@ func (s *Server) registerAgentProtection() {
 		Description: "Replace the agent's protection posture wholesale. The three top-level keys (inbound, outbound, holds) are required; leaves default. Account scope only. " + protectionBetaDoc,
 		Tags:        []string{"agents"},
 		Security:    []map[string][]string{{"bearer": {}}},
-		Extensions:  experimental(),
+		Extensions:  beta(),
 	}, s.handlePutProtection)
 }
 

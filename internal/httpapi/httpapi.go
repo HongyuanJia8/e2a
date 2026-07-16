@@ -368,8 +368,8 @@ func New(deps Deps) *Server {
 	config.Transformers = []huma.Transformer{stampRequestID}
 	// The stability policy below is the contract's constitution — the
 	// machine-readable markers it refers to (`additionalProperties`,
-	// `x-stability`, `x-experimental-values`) are stamped onto the document by
-	// applyEvolutionStance (stability.go). Keep the three in sync.
+	// `x-stability-level`, `x-experimental-values`) are stamped
+	// onto the document by applyEvolutionStance (stability.go). Keep them in sync.
 	config.Info.Description = "e2a — authenticated email gateway for AI agents. v1 contract.\n\n" +
 		"## Stability policy\n\n" +
 		"The v1 surface is stable and evolves **additively only**: new endpoints, new optional request " +
@@ -378,10 +378,10 @@ func New(deps Deps) *Server {
 		"unknown values in open string sets. This is machine-readable in the schemas: response schemas " +
 		"declare `additionalProperties: true`; request schemas stay strict (`additionalProperties: false` " +
 		"— an unknown request field is rejected with 422).\n\n" +
-		"Operations and schemas marked `x-stability: experimental` are exempt from this freeze and may " +
+		"Operations and schemas marked `x-stability-level: beta` are exempt from this freeze and may " +
 		"change or be removed without a major version. A field marked `x-experimental-values` is itself " +
 		"stable, but the listed values (and their event payloads) are experimental. Everything not marked " +
-		"experimental is stable.\n\n" +
+		"beta, or enumerated as experimental, is stable.\n\n" +
 		"Removing or changing stable surface only happens on a new major version path (/v2); deprecations " +
 		"are announced ahead of time via `deprecated: true` in this document and keep working within v1."
 	// Canonical production host (api-v1-redesign §1: "Canonical base URL
@@ -414,7 +414,7 @@ func New(deps Deps) *Server {
 	// octet-stream request-body variants first (a Huma RawBody artifact), then
 	// stamp the forward-compat stance onto the cleaned document — response
 	// schemas open (additionalProperties: true), request schemas strict,
-	// x-stability markers derived from the experimental operations. See
+	// Stability markers derived from the beta operations. See
 	// stability.go.
 	s.suppressRawBodyOctetStream()
 	s.applyEvolutionStance()

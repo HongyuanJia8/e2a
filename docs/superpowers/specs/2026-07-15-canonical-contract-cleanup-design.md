@@ -171,9 +171,9 @@ second trash-detail endpoint.
 
 ### 5. Stability inventory
 
-`x-stability: experimental` remains the machine-readable source on operations.
-`docs/api.md` will publish an operation-ID table containing the exact current
-experimental set and explain that those operations are excluded from the `/v1`
+`x-stability-level: beta` is the sole canonical machine-readable source on
+operations. `docs/api.md` publishes an operation-ID table containing the exact
+current beta set and explains that those operations are excluded from the `/v1`
 GA compatibility freeze.
 
 The intended operation-ID inventory is:
@@ -190,8 +190,8 @@ assert operation-ID uniqueness. Adding, removing, or moving an experimental
 marker therefore requires an explicit documentation change and contract
 review.
 
-Schemas reachable only from experimental operations continue inheriting the
-experimental marker through the existing evolution-stance pass. Shared stable
+Schemas reachable only from beta operations continue inheriting the beta
+markers through the existing evolution-stance pass. Shared stable
 schemas remain stable.
 
 ## Error handling and compatibility
@@ -257,5 +257,5 @@ commitments and must not be weakened without a major API version.
 - Server emitters, the structured catalog, OpenAPI prose, and `docs/api.md`
   contain the same error codes and allowed statuses.
 - Trashed-message direct-read behavior is explicit and regression-tested.
-- The documented experimental operation IDs exactly equal OpenAPI markers.
+- The documented beta operation IDs exactly equal the canonical OpenAPI markers.
 - Spec and generated SDK checks are clean, with no unrelated API changes.

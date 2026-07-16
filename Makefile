@@ -1,4 +1,4 @@
-.PHONY: build run test test-unit test-integration test-e2e cover cover-check clean docker-up docker-down migrate spec spec-check generate generate-check generate-sdk generate-sdk-check generate-sdk-ts generate-sdk-py
+.PHONY: build run test test-unit test-integration test-e2e cover cover-check clean docker-up docker-down migrate spec spec-check openapi-compat-check openapi-compat-test generate generate-check generate-sdk generate-sdk-check generate-sdk-ts generate-sdk-py
 
 # OpenAPI Generator for the /v1 SDK base. Pinned to a released tag (never
 # :latest/SNAPSHOT) so output is reproducible for the drift gate. Run via
@@ -63,6 +63,18 @@ spec:
 # this is the explicit entrypoint.
 spec-check:
 	go test ./internal/httpapi/ -run TestSpecGoldenNoDrift -count=1
+
+# Compare the freshly verified Huma contract with another Git revision or file.
+# Examples:
+#   make openapi-compat-check
+#   make openapi-compat-check OPENAPI_BASE=v1.1.0:api/openapi.yaml
+OPENAPI_BASE ?= origin/main:api/openapi.yaml
+OPENAPI_REVISION ?= api/openapi.yaml
+openapi-compat-check: spec-check
+	bash scripts/check-openapi-compat.sh "$(OPENAPI_BASE)" "$(OPENAPI_REVISION)"
+
+openapi-compat-test:
+	bash scripts/test-openapi-compat.sh
 
 generate: spec generate-sdk
 

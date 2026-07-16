@@ -177,7 +177,7 @@ func (s *Server) registerTemplates() {
 		Summary: "Create a template (beta)", Tags: []string{"templates"},
 		Description: "Create a reusable email template. subject and text (and html when present) must parse: {{variable}} interpolation with dot paths; {{{variable}}} renders raw in the HTML part. Alternatively set from_starter to copy a starter template verbatim. " + templatesBetaDoc,
 		Security:    []map[string][]string{{"bearer": {}}}, DefaultStatus: http.StatusCreated,
-		Extensions: experimental(),
+		Extensions: beta(),
 	}, s.handleCreateTemplate)
 
 	huma.Register(s.API, huma.Operation{
@@ -185,7 +185,7 @@ func (s *Server) registerTemplates() {
 		Summary: "List templates (beta)", Tags: []string{"templates"},
 		Description: "List the account's templates, newest first. Returns metadata only (no text/html); fetch one by id for the full sources. " + templatesBetaDoc,
 		Security:    []map[string][]string{{"bearer": {}}},
-		Extensions:  experimental(),
+		Extensions:  beta(),
 	}, s.handleListTemplates)
 
 	huma.Register(s.API, huma.Operation{
@@ -193,7 +193,7 @@ func (s *Server) registerTemplates() {
 		Summary: "Get a template (beta)", Tags: []string{"templates"},
 		Description: "Fetch one template by id. " + templatesBetaDoc,
 		Security:    []map[string][]string{{"bearer": {}}},
-		Extensions:  experimental(),
+		Extensions:  beta(),
 	}, s.handleGetTemplate)
 
 	huma.Register(s.API, huma.Operation{
@@ -201,7 +201,7 @@ func (s *Server) registerTemplates() {
 		Summary: "Update a template (beta)", Tags: []string{"templates"},
 		Description: "Partial update. Changed template parts are re-parsed; set alias or html to \"\" to clear them. " + templatesBetaDoc,
 		Security:    []map[string][]string{{"bearer": {}}},
-		Extensions:  experimental(),
+		Extensions:  beta(),
 	}, s.handleUpdateTemplate)
 
 	huma.Register(s.API, huma.Operation{
@@ -209,7 +209,7 @@ func (s *Server) registerTemplates() {
 		Summary: "Delete a template (beta)", Tags: []string{"templates"},
 		Description: "Delete a template. In-flight sends are unaffected (rendering happens at send time). Requires ?confirm=DELETE. Returns 200 with a deletion object ({deleted:true, id}). " + templatesBetaDoc,
 		Security:    []map[string][]string{{"bearer": {}}},
-		Extensions:  experimental(),
+		Extensions:  beta(),
 	}, s.handleDeleteTemplate)
 
 	huma.Register(s.API, huma.Operation{
@@ -217,7 +217,7 @@ func (s *Server) registerTemplates() {
 		Summary: "Validate template source (beta)", Tags: []string{"templates"},
 		Description: "Dry-run template source without persisting: reports per-part parse errors, a rendered preview (against test_data when provided), and suggested_data — a placeholder value for every variable the source references. " + templatesBetaDoc,
 		Security:    []map[string][]string{{"bearer": {}}},
-		Extensions:  experimental(),
+		Extensions:  beta(),
 	}, s.handleValidateTemplate)
 }
 

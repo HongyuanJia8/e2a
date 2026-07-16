@@ -126,7 +126,7 @@ func (s *Server) registerAgentWrites() {
 		Description: "Bring a trashed (soft-deleted) agent back into service, messages and configuration intact. Returns the restored agent. 409 not_in_trash when the agent is not in the trash.",
 		Tags:        []string{"agents"},
 		Security:    []map[string][]string{{"bearer": {}}},
-		Extensions:  experimental(),
+		Extensions:  beta(),
 	}, s.handleRestoreAgent)
 }
 
