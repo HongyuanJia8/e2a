@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/testutil"
 )
 
 type threadSendResp struct {

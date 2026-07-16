@@ -13,13 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/agent"
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/limits"
-	"github.com/Mnexa-AI/e2a/internal/outbound"
-	"github.com/Mnexa-AI/e2a/internal/startertemplates"
-	"github.com/Mnexa-AI/e2a/internal/webhook"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/tokencanopy/e2a/internal/agent"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/limits"
+	"github.com/tokencanopy/e2a/internal/outbound"
+	"github.com/tokencanopy/e2a/internal/startertemplates"
+	"github.com/tokencanopy/e2a/internal/webhook"
 )
 
 // sampleAgent is the canonical fixture agent owned by user u_1.

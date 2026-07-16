@@ -9,9 +9,9 @@
 
 Receive inbound over **webhook · WebSocket · REST · MCP**. Send through an **HTTP API**. Every sender — human or agent — **identity-verified**.
 
-[![Tests](https://github.com/Mnexa-AI/e2a/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/Mnexa-AI/e2a/actions/workflows/test.yml)
-[![Build image](https://github.com/Mnexa-AI/e2a/actions/workflows/build-image.yml/badge.svg?branch=main)](https://github.com/Mnexa-AI/e2a/actions/workflows/build-image.yml)
-[![License](https://img.shields.io/github/license/Mnexa-AI/e2a)](LICENSE)
+[![Tests](https://github.com/tokencanopy/e2a/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/tokencanopy/e2a/actions/workflows/test.yml)
+[![Build image](https://github.com/tokencanopy/e2a/actions/workflows/build-image.yml/badge.svg?branch=main)](https://github.com/tokencanopy/e2a/actions/workflows/build-image.yml)
+[![License](https://img.shields.io/github/license/tokencanopy/e2a)](LICENSE)
 [![npm @e2a/sdk](https://img.shields.io/npm/v/%40e2a%2Fsdk?label=%40e2a%2Fsdk)](https://www.npmjs.com/package/@e2a/sdk)
 [![PyPI e2a](https://img.shields.io/pypi/v/e2a)](https://pypi.org/project/e2a/)
 
@@ -24,7 +24,7 @@ Receive inbound over **webhook · WebSocket · REST · MCP**. Send through an **
 ---
 
 > [!IMPORTANT]
-> **e2a v1.0 reaches GA in mid-July 2026.** The `/v1` API and SDKs are in release-candidate shape today — any breaking changes land *before* GA, after which the interface is stable. Pin your SDK versions and watch [Releases](https://github.com/Mnexa-AI/e2a/releases).
+> **e2a v1.0 reaches GA in mid-July 2026.** The `/v1` API and SDKs are in release-candidate shape today — any breaking changes land *before* GA, after which the interface is stable. Pin your SDK versions and watch [Releases](https://github.com/tokencanopy/e2a/releases).
 
 e2a is an **authenticated email gateway for AI agents**. It receives inbound mail, verifies the sender (SPF/DKIM), and delivers it to your agent as structured data with HMAC-signed `X-E2A-Auth-*` headers — over whichever channel fits your runtime. Outbound goes back out through an HTTP API, with an optional human-in-the-loop approval gate.
 
@@ -52,19 +52,19 @@ The fastest path is to give your AI agent an inbox directly. Install the e2a plu
 **Claude Code**
 
 ```
-claude plugin marketplace add Mnexa-AI/e2a
+claude plugin marketplace add tokencanopy/e2a
 claude plugin install e2a@e2a
 ```
 
 **Codex**
 
 ```
-codex plugin marketplace add Mnexa-AI/e2a
+codex plugin marketplace add tokencanopy/e2a
 ```
 
 Then launch `codex`, run `/plugins`, and install **e2a**.
 
-**Cursor** — run `/add-plugin e2a`, or paste `https://github.com/Mnexa-AI/e2a` into the marketplace search in Cursor Settings.
+**Cursor** — run `/add-plugin e2a`, or paste `https://github.com/tokencanopy/e2a` into the marketplace search in Cursor Settings.
 
 **Other MCP clients** (Zed, Goose, Windsurf, Claude Desktop, raw `mcp.json`) — point straight at `https://api.e2a.dev/mcp`; ready-to-paste configs are in [plugins/e2a/clients/](plugins/e2a/clients). See [plugins/e2a/README.md](plugins/e2a/README.md) for the full per-client guide.
 
@@ -386,8 +386,8 @@ If you want a full MTA, run an MTA — Postfix and Postal are great. e2a isn't t
 
 Two reasons:
 
-1. **Auditability.** Identity infrastructure for your agents should be readable code, not a vendor black box. You can verify the cosign signature on `ghcr.io/mnexa-ai/e2a`, reproduce the build, and confirm what's actually running.
-2. **Self-host as a real option.** The hosted instance at e2a.dev runs the same `ghcr.io/mnexa-ai/e2a` image you can pull right now. Convenience features on the hosted side (the shared `agents.e2a.dev` domain, managed deliverability) are config + DNS, not closed-source extras.
+1. **Auditability.** Identity infrastructure for your agents should be readable code, not a vendor black box. You can verify the cosign signature on `ghcr.io/tokencanopy/e2a`, reproduce the build, and confirm what's actually running.
+2. **Self-host as a real option.** The hosted instance at e2a.dev runs the same `ghcr.io/tokencanopy/e2a` image you can pull right now. Convenience features on the hosted side (the shared `agents.e2a.dev` domain, managed deliverability) are config + DNS, not closed-source extras.
 
 The hosted version at [e2a.dev](https://e2a.dev) has paid tiers (a free tier plus paid plans); billing is opt-in on the hosted side — config (settable via env) points the OSS server at an external limits/billing sidecar, and the OSS code path stays unchanged. Self-hosting runs on generous default limits with no billing.
 
@@ -411,7 +411,7 @@ See [CLAUDE.md](CLAUDE.md) for the full developer guide (architecture, tests, co
 Requires Docker.
 
 ```bash
-git clone https://github.com/Mnexa-AI/e2a.git
+git clone https://github.com/tokencanopy/e2a.git
 cd e2a
 docker compose up -d
 ```

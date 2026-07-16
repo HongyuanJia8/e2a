@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/config"
-	"github.com/Mnexa-AI/e2a/internal/hitlworker"
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/outbound"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
-	"github.com/Mnexa-AI/e2a/internal/usage"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tokencanopy/e2a/internal/config"
+	"github.com/tokencanopy/e2a/internal/hitlworker"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/outbound"
+	"github.com/tokencanopy/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/usage"
 )
 
 // setupWorker wires a worker + fake SMTP on a fresh test database. Returns

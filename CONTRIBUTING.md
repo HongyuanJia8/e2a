@@ -27,14 +27,14 @@ you read it).
 ## Fork and pull request workflow
 
 e2a is a public repository, so **you don't need to be granted access to
-contribute** — you don't push to `Mnexa-AI/e2a` directly. Instead you
+contribute** — you don't push to `tokencanopy/e2a` directly. Instead you
 work on your own fork and open a pull request. If you cloned the
-upstream repo and got a `remote: Permission to Mnexa-AI/e2a.git denied`
+upstream repo and got a `remote: Permission to tokencanopy/e2a.git denied`
 (or `403`) error on `git push`, that's the "no access" symptom — the
 fix is to push to your fork, not upstream.
 
 ```bash
-# 1. Fork on GitHub: click "Fork" at https://github.com/Mnexa-AI/e2a
+# 1. Fork on GitHub: click "Fork" at https://github.com/tokencanopy/e2a
 #    (creates https://github.com/<you>/e2a).
 
 # 2. Clone YOUR fork (not the upstream repo):
@@ -42,7 +42,7 @@ git clone https://github.com/<you>/e2a.git
 cd e2a
 
 # 3. Add upstream so you can pull in new changes later:
-git remote add upstream https://github.com/Mnexa-AI/e2a.git
+git remote add upstream https://github.com/tokencanopy/e2a.git
 
 # 4. Branch, commit, and push to YOUR fork (origin):
 git checkout -b my-feature
@@ -50,7 +50,7 @@ git checkout -b my-feature
 git commit -am "feat(scope): my change"
 git push origin my-feature
 
-# 5. Open a PR from your fork's branch → Mnexa-AI/e2a:main.
+# 5. Open a PR from your fork's branch → tokencanopy/e2a:main.
 #    GitHub shows a "Compare & pull request" button after you push.
 ```
 
@@ -70,7 +70,7 @@ upstream repo.
 
 **Want to be added as a direct collaborator instead?** That's only for
 trusted, ongoing contributors and is at the maintainers' discretion —
-ask in a [discussion](https://github.com/Mnexa-AI/e2a/discussions).
+ask in a [discussion](https://github.com/tokencanopy/e2a/discussions).
 The fork workflow above is the expected path for everyone else.
 
 ---
@@ -331,8 +331,8 @@ flake hits you, re-run the job rather than disabling the test.
 
 ## Where to ask
 
-- **Bug reports** — open a [GitHub issue](https://github.com/Mnexa-AI/e2a/issues)
-- **Feature ideas / design discussion** — open a [GitHub discussion](https://github.com/Mnexa-AI/e2a/discussions)
+- **Bug reports** — open a [GitHub issue](https://github.com/tokencanopy/e2a/issues)
+- **Feature ideas / design discussion** — open a [GitHub discussion](https://github.com/tokencanopy/e2a/discussions)
 - **Security issues** — see [SECURITY.md](./SECURITY.md). Don't open a
   public issue for security reports.
 

@@ -18,7 +18,7 @@ import (
 	"context"
 	"math"
 
-	"github.com/Mnexa-AI/e2a/internal/emailauth"
+	"github.com/tokencanopy/e2a/internal/emailauth"
 )
 
 // Direction is the screening direction. Inbound screens a received message aimed at

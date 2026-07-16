@@ -9,8 +9,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 
-	"github.com/Mnexa-AI/e2a/internal/jobs"
-	"github.com/Mnexa-AI/e2a/internal/webhook"
+	"github.com/tokencanopy/e2a/internal/jobs"
+	"github.com/tokencanopy/e2a/internal/webhook"
 )
 
 // reconcileInterval is how often the live reconciler re-enqueues any pending

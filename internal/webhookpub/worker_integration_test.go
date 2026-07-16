@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
-	"github.com/Mnexa-AI/e2a/internal/webhookpub"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 )
 
 // fakeDeliveryEnqueuer records the delivery ids it was asked to enqueue and

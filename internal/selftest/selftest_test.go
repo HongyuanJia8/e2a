@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/selftest"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/selftest"
+	"github.com/tokencanopy/e2a/internal/testutil"
 )
 
 // TestSelftestAll_AgainstRealServer boots a real in-process server (HTTP + SMTP

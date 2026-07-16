@@ -3,7 +3,7 @@ package usage_test
 import (
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/usage"
+	"github.com/tokencanopy/e2a/internal/usage"
 )
 
 func TestPolicyFor(t *testing.T) {

@@ -3,8 +3,8 @@ package agent
 import (
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/webhookpub"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 )
 
 // TestBuildInboundReleasedEvent_Envelope pins the design-critical shape of the

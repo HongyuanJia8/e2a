@@ -5,9 +5,9 @@ import (
 	"crypto/x509"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/testutil"
 )
 
 func dkimMaster() []byte {

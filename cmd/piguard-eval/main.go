@@ -21,7 +21,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/piguard"
+	"github.com/tokencanopy/e2a/internal/piguard"
 )
 
 type manifestEntry struct {

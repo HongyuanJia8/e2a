@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/testutil"
 )
 
 // B1 (review correctness bug): outbound messages must carry their sender (the

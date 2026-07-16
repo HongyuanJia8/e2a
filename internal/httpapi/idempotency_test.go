@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Mnexa-AI/e2a/internal/idempotency"
+	"github.com/tokencanopy/e2a/internal/idempotency"
 )
 
 // fakeIdem is a programmable in-memory IdemStore for unit tests.

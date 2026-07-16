@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 // resolveOutboundConversationID is the #328 fix: an outbound send that omits a

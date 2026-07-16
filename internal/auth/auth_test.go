@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/auth"
-	"github.com/Mnexa-AI/e2a/internal/config"
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/auth"
+	"github.com/tokencanopy/e2a/internal/config"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/testutil"
 )
 
 func setupUserAuth(t *testing.T) (*auth.UserAuth, *identity.Store, string) {

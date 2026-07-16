@@ -3,7 +3,7 @@ package webhookpub
 import (
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 // TestMatches covers the filter-matching guardrails (matches/contains/intersects)

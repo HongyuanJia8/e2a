@@ -10,8 +10,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 
-	"github.com/Mnexa-AI/e2a/internal/jobs"
-	"github.com/Mnexa-AI/e2a/internal/telemetry"
+	"github.com/tokencanopy/e2a/internal/jobs"
+	"github.com/tokencanopy/e2a/internal/telemetry"
 )
 
 // FanOutArgs drives one webhook fan-out: match the event user's enabled webhooks,

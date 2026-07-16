@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/oauth"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/oauth"
 	jose "github.com/go-jose/go-jose/v3"
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx/v5"

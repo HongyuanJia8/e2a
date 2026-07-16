@@ -3,8 +3,8 @@ package delivery_test
 import (
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/delivery"
-	"github.com/Mnexa-AI/e2a/internal/webhookpub"
+	"github.com/tokencanopy/e2a/internal/delivery"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 )
 
 // TestDeliveryEventConstantsInCatalog pins the delivery package's locally-defined

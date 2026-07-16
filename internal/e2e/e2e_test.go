@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/headers"
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/headers"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/testutil"
 )
 
 // setupDomainAndAgent is a helper that creates a user, claims a domain, verifies it,

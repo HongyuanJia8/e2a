@@ -152,18 +152,19 @@ Triggered by GitHub release publish or `workflow_dispatch`.
 4. `gh workflow run "Publish CLI" --ref main`
 
 ### MCP server
-Triggered by tag push (`mcp-v*`) or `workflow_dispatch`. Publishes `@e2a/mcp-server` to npm with provenance.
-1. Bump `version` in `mcp/package.json`
-2. `npm run build --workspace @e2a/mcp-server`
-3. Commit and push to main
-4. `git tag mcp-v<VERSION> && git push origin mcp-v<VERSION>`
+**npm publishing is retired.** `publish-mcp.yml` was deleted in #247 ("re-curate
+MCP (hosted-only)"); `@e2a/mcp-server` is frozen on npm at 0.4.0, and the 0.5.0
+in `mcp/package.json` was never shipped. Do not configure a trusted publisher
+for it.
 
-The first publish requires `@e2a/mcp-server` to be configured as a trusted publisher on npmjs.com against `Mnexa-AI/e2a` + `publish-mcp.yml` (one-time, done in the npm web UI).
+The hosted HTTP MCP server is the current path: `publish-mcp-http.yml` builds
+and pushes the image to `ghcr.io/tokencanopy/e2a-mcp-http` on tag push, using
+the built-in `GITHUB_TOKEN` (no trusted publisher involved).
 
 ## Key Conventions
 
-- **npm workspaces**: root `package.json` declares `cli` and `sdks/typescript` as workspaces. Always use `--workspace` flag for workspace commands. Use `--package-lock=false` for install.
-- **Go module**: `github.com/Mnexa-AI/e2a`, Go 1.25
+- **npm workspaces**: root `package.json` declares `cli`, `sdks/typescript`, `mcp`, and `design-system` as workspaces. Always use `--workspace` flag for workspace commands. Use `--package-lock=false` for install.
+- **Go module**: `github.com/tokencanopy/e2a`, Go 1.25
 - **Go test tiers**: `test-unit` needs no DB. `test-integration` needs Postgres (runs identity/agent packages). `test-e2e` uses build tag `integration` and runs `internal/e2e/`. `make test` runs everything (including e2e) with `-tags integration -p 1`.
 - **Schema changes**: when changing a table shape, add or update DB-backed tests for every package that writes direct SQL against that table. Higher-level e2e tests are not enough. Our migration helper is idempotent and will not automatically catch old query assumptions if runtime SQL drifts from the redesigned schema.
 - **Migrations**: every `migrations/00N_*.sql` must be **idempotent** (use `CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, etc.) and **non-destructive on prod-sized tables** (`ALTER TABLE ... ADD COLUMN` is safe; `ALTER COLUMN TYPE` can rewrite the whole table — avoid on `messages` and `usage_events`). The e2a binary embeds `migrations/*.sql` via `migrations/embed.go` and auto-applies pending ones at startup against a `schema_migrations` tracker table; `E2A_MIGRATION_MODE` controls the behavior (`auto` default, `verify` to refuse and report pending, `skip` for emergency surgery). New migrations land in prod on the next binary deploy with zero manual ceremony.

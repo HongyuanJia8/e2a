@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 // fakeSendingStatus is a SendingStatusLookup returning a fixed status/error.

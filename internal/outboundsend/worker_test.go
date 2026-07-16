@@ -9,7 +9,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 
-	"github.com/Mnexa-AI/e2a/internal/outboundsend"
+	"github.com/tokencanopy/e2a/internal/outboundsend"
 )
 
 type fakeStore struct {

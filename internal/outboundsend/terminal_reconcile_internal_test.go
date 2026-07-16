@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/jobs"
+	"github.com/tokencanopy/e2a/internal/jobs"
 )
 
 func TestTerminalReconcilePeriodicConstructor_RoutesToMaintenance(t *testing.T) {

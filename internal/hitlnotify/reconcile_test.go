@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/hitlnotify"
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/jobs"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/hitlnotify"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/jobs"
+	"github.com/tokencanopy/e2a/internal/testutil"
 )
 
 // TestReconcilePending_EnqueuesStrandedAndStamps stands up a REAL River client and

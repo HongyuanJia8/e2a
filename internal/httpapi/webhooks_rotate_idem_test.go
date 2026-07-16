@@ -14,8 +14,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Mnexa-AI/e2a/internal/idempotency"
-	"github.com/Mnexa-AI/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/idempotency"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 // statefulIdem is an in-memory idempotency store: first Claim of a key wins

@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/auth"
-	"github.com/Mnexa-AI/e2a/internal/config"
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/auth"
+	"github.com/tokencanopy/e2a/internal/config"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/testutil"
 	"golang.org/x/oauth2"
 )
 

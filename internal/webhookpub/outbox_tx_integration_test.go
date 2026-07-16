@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
-	"github.com/Mnexa-AI/e2a/internal/webhookpub"
 	"github.com/jackc/pgx/v5"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 )
 
 // TestOutbox_Integration_RelayTxShape exercises the actual slice-3 tx

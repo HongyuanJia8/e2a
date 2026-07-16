@@ -13,13 +13,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/dkim"
-	"github.com/Mnexa-AI/e2a/internal/emailauth"
-	"github.com/Mnexa-AI/e2a/internal/eventpayload"
-	"github.com/Mnexa-AI/e2a/internal/inboundpolicy"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tokencanopy/e2a/internal/dkim"
+	"github.com/tokencanopy/e2a/internal/emailauth"
+	"github.com/tokencanopy/e2a/internal/eventpayload"
+	"github.com/tokencanopy/e2a/internal/inboundpolicy"
 	"golang.org/x/net/idna"
 )
 

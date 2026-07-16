@@ -10,8 +10,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Mnexa-AI/e2a/internal/agent"
-	"github.com/Mnexa-AI/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/agent"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 // bigAttachmentJSON builds the attachments_json for a single attachment whose

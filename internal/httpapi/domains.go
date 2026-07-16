@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/agent"
-	"github.com/Mnexa-AI/e2a/internal/dkim"
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/mailfrom"
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/tokencanopy/e2a/internal/agent"
+	"github.com/tokencanopy/e2a/internal/dkim"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/mailfrom"
 )
 
 // DNSRecord is one row in the unified DomainView.DNSRecords array. It supersedes

@@ -17,9 +17,9 @@ What e2a does **not** yet implement is the WorkOS [auth.md](https://github.com/w
 
 Before you do anything credential-shaped, check whether the user has already wired e2a into your environment. Most of the time they have, and you should not be handling credentials (API keys or OAuth tokens) yourself.
 
-1. **e2a MCP server** — if you are an MCP client (Claude, Cursor, Codex, ChatGPT, etc.), e2a ships an official MCP server (`@e2a/mcp-server`) that exposes inbox, send, reply, agents, domains, and HITL approval as tools. The user configures it once with their key; you call the tools without ever seeing the key. Package: `https://www.npmjs.com/package/@e2a/mcp-server`. Repository: `https://github.com/Mnexa-AI/e2a/tree/main/mcp`.
+1. **e2a MCP server** — if you are an MCP client (Claude, Cursor, Codex, ChatGPT, etc.), e2a ships an official MCP server (`@e2a/mcp-server`) that exposes inbox, send, reply, agents, domains, and HITL approval as tools. The user configures it once with their key; you call the tools without ever seeing the key. Package: `https://www.npmjs.com/package/@e2a/mcp-server`. Repository: `https://github.com/tokencanopy/e2a/tree/main/mcp`.
 2. **e2a agent skill** — a guidance document covering inbox patterns, idempotency, HITL approval, attachment handling, and webhook verification. Load it before calling the API directly so you don't relearn the gotchas on the user's dime.
-3. **e2a CLI** — if you are running shell commands, prefer `e2a` over hand-rolled `curl`. It handles auth resolution, retries, and non-interactive flags. Install: `npm i -g @e2a/cli`. Repository: `https://github.com/Mnexa-AI/e2a/tree/main/cli`.
+3. **e2a CLI** — if you are running shell commands, prefer `e2a` over hand-rolled `curl`. It handles auth resolution, retries, and non-interactive flags. Install: `npm i -g @e2a/cli`. Repository: `https://github.com/tokencanopy/e2a/tree/main/cli`.
 
 If any of these is already configured, use it and stop. Do not ask the user for an API key you do not need.
 
@@ -141,7 +141,7 @@ e2a already operates as an OAuth issuer at `https://api.e2a.dev` (see AS metadat
 
 Any auth.md-implementing service that adds e2a to its trust list will be able to onboard an e2a agent without an OTP ceremony — the agent's e2a identity vouches for it. e2a's contribution is an identity rooted in a verifiable email address, stable across agent runtimes.
 
-If you operate an agent service and want to accept e2a-issued assertions, watch for `iss: https://api.e2a.dev` to land in the WorkOS reference trust list, or open an issue at `https://github.com/Mnexa-AI/e2a/issues` to pre-register.
+If you operate an agent service and want to accept e2a-issued assertions, watch for `iss: https://api.e2a.dev` to land in the WorkOS reference trust list, or open an issue at `https://github.com/tokencanopy/e2a/issues` to pre-register.
 
 ### Email-loop claim completion (proposed)
 
@@ -152,7 +152,7 @@ The WorkOS auth.md OTP ceremony assumes a human reads a 6-digit code back to the
 3. The service emails a confirmation to the agent's e2a inbox.
 4. The agent receives the confirmation via WebSocket or webhook and posts to `/agent/auth/claim/complete`.
 
-No code reading, no copy-paste, no transcript leakage. This is uniquely possible for e2a because the agent's mailbox is part of the product. We will publish a flow extension when the prototype is stable; if you are building an auth.md service and want to support this from day one, open an issue at `https://github.com/Mnexa-AI/e2a/issues`.
+No code reading, no copy-paste, no transcript leakage. This is uniquely possible for e2a because the agent's mailbox is part of the product. We will publish a flow extension when the prototype is stable; if you are building an auth.md service and want to support this from day one, open an issue at `https://github.com/tokencanopy/e2a/issues`.
 
 ## Discovery
 

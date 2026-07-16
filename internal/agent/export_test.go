@@ -6,7 +6,7 @@ package agent
 import (
 	"net/http"
 
-	"github.com/Mnexa-AI/e2a/internal/outbound"
+	"github.com/tokencanopy/e2a/internal/outbound"
 )
 
 // IsSelfSendForTest is the agent_test-package handle for isSelfSend.

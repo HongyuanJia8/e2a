@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Mnexa-AI/e2a/internal/webhookpub"
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 )
 
 // Forward-compatibility stance of the /v1 contract (GA review #22/#23).

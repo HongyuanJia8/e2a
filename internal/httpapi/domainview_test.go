@@ -3,7 +3,7 @@ package httpapi
 import (
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 // byPurpose indexes a domainView's unified DNS-records array by purpose so the

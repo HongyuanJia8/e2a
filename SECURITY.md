@@ -11,7 +11,7 @@ For what e2a stores, how long it lives, log handling, and the user/operator data
 
 ## Reporting a vulnerability
 
-Email **josh@mnexa.ai** with:
+Email **josh@tokencanopy.com** with:
 
 - A description of the issue
 - Steps to reproduce (or a proof-of-concept)
@@ -19,7 +19,7 @@ Email **josh@mnexa.ai** with:
   the `VERSION` file)
 - Any mitigations you suggest
 
-You can also use GitHub's [private vulnerability reporting](https://github.com/Mnexa-AI/e2a/security/advisories/new)
+You can also use GitHub's [private vulnerability reporting](https://github.com/tokencanopy/e2a/security/advisories/new)
 to file a draft advisory directly against this repo.
 
 We aim to:

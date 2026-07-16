@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/testutil"
 )
 
 // TestReplyForwardOutboundE2E drives the reply-to-/forward-your-own-outbound

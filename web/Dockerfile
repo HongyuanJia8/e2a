@@ -69,7 +69,7 @@ RUN npm run build
 #   docker run \
 #     -e E2A_BACKEND=http://e2a-server:8080 \
 #     -e WEB_PORT=8081 \
-#     -p 8081:8081 ghcr.io/mnexa-ai/e2a-web
+#     -p 8081:8081 ghcr.io/tokencanopy/e2a-web
 FROM caddy:2-alpine
 # wget is provided by alpine's busybox applet, but caddy:2-alpine doesn't
 # guarantee it stays — Caddy's official Dockerfile doesn't `apk add` it.

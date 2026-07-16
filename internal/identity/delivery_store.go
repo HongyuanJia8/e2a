@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/delivery"
 	"github.com/jackc/pgx/v5"
+	"github.com/tokencanopy/e2a/internal/delivery"
 )
 
 // OutboundSendClaimStaleWindow exceeds River's one-minute worker timeout and

@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/loopback"
-	"github.com/Mnexa-AI/e2a/internal/outbound"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/loopback"
+	"github.com/tokencanopy/e2a/internal/outbound"
 )
 
 // isSelfSend / stripAgentSelfAliases delegate to internal/loopback so the

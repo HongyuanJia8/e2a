@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 // Agent protection config sub-resource (design 2026-06-22-agent-protection-config.md).

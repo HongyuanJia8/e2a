@@ -21,11 +21,11 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Mnexa-AI/e2a",
+    "url": "https://github.com/tokencanopy/e2a",
     "directory": "cli"
   },
-  "homepage": "https://github.com/Mnexa-AI/e2a/tree/main/cli",
-  "bugs": "https://github.com/Mnexa-AI/e2a/issues",
+  "homepage": "https://github.com/tokencanopy/e2a/tree/main/cli",
+  "bugs": "https://github.com/tokencanopy/e2a/issues",
   "dependencies": {
     "@e2a/sdk": "^5.0.0"
   },

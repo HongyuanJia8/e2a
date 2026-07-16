@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/testutil"
 )
 
 // TestLegacyAPIv1Retired is an over-the-wire guard (full chi+mux apiserver via

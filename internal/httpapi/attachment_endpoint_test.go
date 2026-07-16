@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/ratelimit"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/ratelimit"
 )
 
 // attMultipart: text body + base64 PDF (index 0) + named inline png (index 1).

@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/outbound"
+	"github.com/tokencanopy/e2a/internal/outbound"
 )
 
 // sendURL is POST /v1/agents/{address}/messages for the test agent. The sender

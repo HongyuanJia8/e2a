@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/webhookpub"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 )
 
 var experimentalOperationIDs = []string{

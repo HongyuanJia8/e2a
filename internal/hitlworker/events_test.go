@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/webhookpub"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 )
 
 // capPub captures published events for the TTL-resolution emission tests.

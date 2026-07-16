@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/testutil"
-	"github.com/Mnexa-AI/e2a/internal/webhookpub"
+	"github.com/tokencanopy/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 )
 
 // seedUser inserts a users row so the FK on webhook_events.user_id is

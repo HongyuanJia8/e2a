@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/piguard"
+	"github.com/tokencanopy/e2a/internal/piguard"
 )
 
 // TestBuildAgentScreenEngine_HeuristicsOnly guards against re-wiring GeminiDetector

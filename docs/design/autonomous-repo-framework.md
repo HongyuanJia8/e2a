@@ -530,7 +530,7 @@ installable, not just copy-able:
   **`${CLAUDE_PLUGIN_ROOT}/skills/agentify/`** — the whole plugin ships to the
   install cache, so the bundled `agentify-render.sh` / `templates/` /
   `references/` resolve at runtime. (The CI workflows follow the same path.)
-- Install: `/plugin marketplace add Mnexa-AI/e2a` → `/plugin install e2a` →
+- Install: `/plugin marketplace add tokencanopy/e2a` → `/plugin install e2a` →
   `/agentify` is available (plus the e2a MCP tools).
 
 ## 10. Implementation reconciliation (`feat/agentify-feedback-loop`)

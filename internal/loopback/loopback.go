@@ -31,8 +31,8 @@ import (
 
 	"context"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/outbound"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/outbound"
 )
 
 // IsSelfSend reports whether req targets only the sender's own inbox —

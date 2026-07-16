@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/testutil"
 )
 
 func seedHeldAgent(t *testing.T, store *identity.Store, ctx context.Context, domain string) string {

@@ -20,8 +20,8 @@ import (
 
 	"github.com/riverqueue/river"
 
-	"github.com/Mnexa-AI/e2a/internal/jobs"
-	"github.com/Mnexa-AI/e2a/internal/oauth"
+	"github.com/tokencanopy/e2a/internal/jobs"
+	"github.com/tokencanopy/e2a/internal/oauth"
 )
 
 // janitorInterval is the cleanup cadence — matches the prior time.Ticker(1h).

@@ -14,11 +14,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/loopback"
-	"github.com/Mnexa-AI/e2a/internal/outbound"
-	"github.com/Mnexa-AI/e2a/internal/usage"
-	"github.com/Mnexa-AI/e2a/internal/webhookpub"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/loopback"
+	"github.com/tokencanopy/e2a/internal/outbound"
+	"github.com/tokencanopy/e2a/internal/usage"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 )
 
 // OutboundEnqueuer inserts an outbound_send job (QueueOutbound) in the caller's

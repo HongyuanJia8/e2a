@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/webhookpub"
 	"github.com/go-chi/chi/v5"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 	"nhooyr.io/websocket"
 )
 

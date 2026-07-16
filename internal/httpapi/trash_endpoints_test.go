@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/agent"
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/outbound"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/tokencanopy/e2a/internal/agent"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/outbound"
 )
 
 var errUnauthorizedTest = errors.New("unauthorized")

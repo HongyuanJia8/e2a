@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/approvaltoken"
+	"github.com/tokencanopy/e2a/internal/approvaltoken"
 )
 
 const testSecret = "test-hmac-secret-for-approvaltoken"

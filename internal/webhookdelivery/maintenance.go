@@ -6,7 +6,7 @@ import (
 
 	"github.com/riverqueue/river"
 
-	"github.com/Mnexa-AI/e2a/internal/jobs"
+	"github.com/tokencanopy/e2a/internal/jobs"
 )
 
 // maintenanceInterval is the janitor cadence — matches the prior AutoDisableWorker

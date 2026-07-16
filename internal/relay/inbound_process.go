@@ -10,7 +10,7 @@ import (
 	"github.com/emersion/go-smtp"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 // acceptInbound is the queue-first accept-tx (E2A_INBOUND_MODE=async): it durably

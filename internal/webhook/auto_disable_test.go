@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
-	"github.com/Mnexa-AI/e2a/internal/webhook"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/webhook"
 )
 
 // TestAutoDisableWorker_TickDisablesAFailingWebhook drives the worker

@@ -245,8 +245,8 @@ domain-named array plus `next_cursor` while more pages remain).
 ## Links
 
 - [e2a docs](https://e2a.dev)
-- [Source](https://github.com/Mnexa-AI/e2a/tree/main/mcp)
-- [Issues](https://github.com/Mnexa-AI/e2a/issues)
+- [Source](https://github.com/tokencanopy/e2a/tree/main/mcp)
+- [Issues](https://github.com/tokencanopy/e2a/issues)
 - [Model Context Protocol](https://modelcontextprotocol.io)
 
 ## License

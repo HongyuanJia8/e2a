@@ -4,7 +4,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/startertemplates"
+	"github.com/tokencanopy/e2a/internal/startertemplates"
 )
 
 // GET /v1/starter-templates — the read-only embedded catalog (beta).

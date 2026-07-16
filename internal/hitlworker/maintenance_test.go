@@ -7,7 +7,7 @@ import (
 
 	"github.com/riverqueue/river"
 
-	"github.com/Mnexa-AI/e2a/internal/jobs"
+	"github.com/tokencanopy/e2a/internal/jobs"
 )
 
 // fakeSweeper records how many times RunOnce ran and returns a canned error, so

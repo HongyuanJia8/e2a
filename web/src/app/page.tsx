@@ -25,7 +25,7 @@ const NAV_LINKS: { label: string; href: string; external?: boolean }[] = [
 
 const DOCS_LINKS: { label: string; href: string; external?: boolean }[] = [
   { label: "API Reference", href: "/api-docs" },
-  { label: "Claude Code skill", href: "https://github.com/Mnexa-AI/e2a/blob/main/plugins/e2a/skills/e2a/SKILL.md", external: true },
+  { label: "Claude Code skill", href: "https://github.com/tokencanopy/e2a/blob/main/plugins/e2a/skills/e2a/SKILL.md", external: true },
   { label: "Python SDK", href: "https://pypi.org/project/e2a/", external: true },
   { label: "TypeScript SDK", href: "https://www.npmjs.com/package/@e2a/sdk", external: true },
   { label: "CLI", href: "https://www.npmjs.com/package/@e2a/cli", external: true },
@@ -41,13 +41,13 @@ const USE_CASES: { eyebrow: string; title: string; desc: string }[] = [
 ];
 
 const FOOTER_LINKS: { label: string; href: string; external?: boolean }[] = [
-  { label: "GitHub", href: "https://github.com/Mnexa-AI/e2a", external: true },
+  { label: "GitHub", href: "https://github.com/tokencanopy/e2a", external: true },
   { label: "API Docs", href: "/api-docs" },
   { label: "Blog", href: "/blog" },
   { label: "Python SDK", href: "https://pypi.org/project/e2a/", external: true },
   { label: "TypeScript SDK", href: "https://www.npmjs.com/package/@e2a/sdk", external: true },
   { label: "CLI", href: "https://www.npmjs.com/package/@e2a/cli", external: true },
-  { label: "Claude Skill", href: "https://github.com/Mnexa-AI/e2a/blob/main/plugins/e2a/skills/e2a/SKILL.md", external: true },
+  { label: "Claude Skill", href: "https://github.com/tokencanopy/e2a/blob/main/plugins/e2a/skills/e2a/SKILL.md", external: true },
   { label: "Feedback", href: "/feedback" },
 ];
 
@@ -162,7 +162,7 @@ export default function Home() {
                 )}
               </div>
               <a
-                href="https://github.com/Mnexa-AI/e2a"
+                href="https://github.com/tokencanopy/e2a"
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="View source on GitHub"

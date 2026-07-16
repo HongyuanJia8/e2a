@@ -29,7 +29,7 @@ package eventpayload
 import (
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/mailparse"
+	"github.com/tokencanopy/e2a/internal/mailparse"
 )
 
 // AttachmentMeta is metadata for one attachment of the received message —

@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
 	"github.com/jackc/pgx/v5"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/testutil"
 )
 
 // TestInboundIntake_InsertLoadDedup covers the accept-side surface: insert reports

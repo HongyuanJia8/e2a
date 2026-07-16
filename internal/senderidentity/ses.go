@@ -11,7 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sesv2"
 	ststypes "github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 
-	"github.com/Mnexa-AI/e2a/internal/mailfrom"
+	"github.com/tokencanopy/e2a/internal/mailfrom"
 )
 
 // sesAPI is the slice of the SES v2 client the provider uses. Narrowing to an

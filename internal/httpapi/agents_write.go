@@ -7,10 +7,10 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/limits"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/limits"
 )
 
 // isUniqueViolation reports whether err is a Postgres unique-constraint

@@ -10,12 +10,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/agent"
-	"github.com/Mnexa-AI/e2a/internal/agentauth"
-	"github.com/Mnexa-AI/e2a/internal/config"
-	"github.com/Mnexa-AI/e2a/internal/outbound"
-	"github.com/Mnexa-AI/e2a/internal/usage"
 	"github.com/gorilla/mux"
+	"github.com/tokencanopy/e2a/internal/agent"
+	"github.com/tokencanopy/e2a/internal/agentauth"
+	"github.com/tokencanopy/e2a/internal/config"
+	"github.com/tokencanopy/e2a/internal/outbound"
+	"github.com/tokencanopy/e2a/internal/usage"
 )
 
 // jwksServer builds an httptest server exposing /.well-known/jwks.json with the

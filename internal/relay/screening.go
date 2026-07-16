@@ -6,10 +6,10 @@ import (
 	"log"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/emailauth"
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/inboundpolicy"
-	"github.com/Mnexa-AI/e2a/internal/piguard"
+	"github.com/tokencanopy/e2a/internal/emailauth"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/inboundpolicy"
+	"github.com/tokencanopy/e2a/internal/piguard"
 )
 
 // inboundScreenResult is the outcome of content-screening one inbound message: the

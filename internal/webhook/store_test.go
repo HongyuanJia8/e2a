@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
-	"github.com/Mnexa-AI/e2a/internal/webhook"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/webhook"
 )
 
 func setupDeliveryFixture(t *testing.T) (*pgxpool.Pool, *identity.Store, *webhook.DeliveryStore, *identity.AgentIdentity, *identity.Message) {

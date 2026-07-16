@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/selftest"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/selftest"
 )
 
 // run is one full battery execution with a timestamp.

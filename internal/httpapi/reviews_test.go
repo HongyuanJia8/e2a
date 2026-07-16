@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 func reviewsServer(t *testing.T) *httptest.Server {

@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/eventpayload"
-	"github.com/Mnexa-AI/e2a/internal/headers"
-	"github.com/Mnexa-AI/e2a/internal/httpapi"
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/webhookpub"
+	"github.com/tokencanopy/e2a/internal/eventpayload"
+	"github.com/tokencanopy/e2a/internal/headers"
+	"github.com/tokencanopy/e2a/internal/httpapi"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 	"nhooyr.io/websocket"
 )
 

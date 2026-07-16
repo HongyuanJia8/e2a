@@ -30,7 +30,7 @@ Google's [Agent Development Kit](https://adk.dev/) gives you a clean abstraction
 
 The problem is that "stateful chat" usually means a UI you built, a WebSocket you maintain, or a Slack bot whose installation is its own project. None of that reaches the people who actually want to talk to your agent — customers replying from Gmail, vendors using Outlook, anyone who already has an inbox.
 
-This post walks through giving an ADK agent a real email address, with HMAC-verified inbound delivery and multi-turn memory that survives across email replies. The full runnable example lives at [examples/adk-cloud-webhook](https://github.com/Mnexa-AI/e2a/tree/main/examples/adk-cloud-webhook) in the e2a repo; this post is the narrated tour.
+This post walks through giving an ADK agent a real email address, with HMAC-verified inbound delivery and multi-turn memory that survives across email replies. The full runnable example lives at [examples/adk-cloud-webhook](https://github.com/tokencanopy/e2a/tree/main/examples/adk-cloud-webhook) in the e2a repo; this post is the narrated tour.
 
 ## What you'll have when you're done
 
@@ -50,7 +50,7 @@ The whole webhook is ~30 lines of business logic. ADK does the memory work; e2a 
 ## Step 1: Clone the example and install
 
 ```bash
-git clone https://github.com/Mnexa-AI/e2a.git
+git clone https://github.com/tokencanopy/e2a.git
 cd e2a/examples/adk-cloud-webhook
 python -m venv .venv && source .venv/bin/activate
 pip install -e .
@@ -199,4 +199,4 @@ This isn't optional. Anyone on the internet can POST to your public webhook URL 
 - **Move sessions to Postgres.** ADK's `DatabaseSessionService` is a one-line swap and survives restarts + multi-worker deployments.
 - **Run the whole thing in production.** The webhook is a regular FastAPI app; deploy to Cloud Run, Fly, Railway, or anywhere else that runs HTTP. Use a secrets manager for the three env vars and you're done.
 
-The full runnable example, with smoke-testable signature verification and the type hints to make it easy to swap in your own agent, is at [examples/adk-cloud-webhook](https://github.com/Mnexa-AI/e2a/tree/main/examples/adk-cloud-webhook). PRs welcome — particularly for `DatabaseSessionService` recipes, attachment handling, and other framework integrations.
+The full runnable example, with smoke-testable signature verification and the type hints to make it easy to swap in your own agent, is at [examples/adk-cloud-webhook](https://github.com/tokencanopy/e2a/tree/main/examples/adk-cloud-webhook). PRs welcome — particularly for `DatabaseSessionService` recipes, attachment handling, and other framework integrations.

@@ -10,7 +10,7 @@ import (
 	"net/mail"
 	"strings"
 
-	"github.com/Mnexa-AI/e2a/internal/mailparse"
+	"github.com/tokencanopy/e2a/internal/mailparse"
 )
 
 // ForwardContext captures the header + body fields from an inbound message

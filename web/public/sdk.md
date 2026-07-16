@@ -4,8 +4,8 @@ Typed clients for the e2a REST API + webhook verification, for when you're
 driving e2a from your own code (a webhook handler, a worker) rather than over
 MCP. Two SDKs, same surface.
 
-- **TypeScript** — `@e2a/sdk` (npm) · [README](https://github.com/Mnexa-AI/e2a/blob/main/sdks/typescript/README.md)
-- **Python** — `e2a` (PyPI) · [README](https://github.com/Mnexa-AI/e2a/blob/main/sdks/python/README.md)
+- **TypeScript** — `@e2a/sdk` (npm) · [README](https://github.com/tokencanopy/e2a/blob/main/sdks/typescript/README.md)
+- **Python** — `e2a` (PyPI) · [README](https://github.com/tokencanopy/e2a/blob/main/sdks/python/README.md)
 
 Prefer a typed client; if you're calling the REST API raw, see
 [Raw REST](#raw-rest-without-an-sdk) below. The exhaustive contract is
@@ -98,7 +98,7 @@ if event.type == "email.received":
 
 A full, runnable example (FastAPI + Google ADK agent, webhook → agent turn →
 reply) is at
-[examples/adk-cloud-webhook](https://github.com/Mnexa-AI/e2a/tree/main/examples/adk-cloud-webhook).
+[examples/adk-cloud-webhook](https://github.com/tokencanopy/e2a/tree/main/examples/adk-cloud-webhook).
 
 ## Human-in-the-loop
 

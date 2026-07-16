@@ -5,7 +5,7 @@
   "description": "Authenticated email gateway for AI agents — per-agent inboxes, HITL approval, SPF/DKIM verified.",
   "websiteUrl": "https://e2a.dev",
   "repository": {
-    "url": "https://github.com/Mnexa-AI/e2a",
+    "url": "https://github.com/tokencanopy/e2a",
     "source": "github",
     "subfolder": "mcp"
   },

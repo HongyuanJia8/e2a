@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/testutil"
 )
 
 func seedRetentionAgent(t *testing.T, store *identity.Store, ctx context.Context, domain string) (userID, agentID string) {

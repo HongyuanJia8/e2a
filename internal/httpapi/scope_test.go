@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 // Slice 5a — the hard scope ceiling. This exercises the 403 matrix over the

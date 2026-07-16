@@ -8,9 +8,9 @@ import (
 	"net/mail"
 	"strings"
 
-	"github.com/Mnexa-AI/e2a/internal/dkim"
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/mailfrom"
+	"github.com/tokencanopy/e2a/internal/dkim"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/mailfrom"
 )
 
 // DKIMKeyLookup returns the DKIM selector and PKCS#1 DER private key

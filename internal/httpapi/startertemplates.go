@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/Mnexa-AI/e2a/internal/startertemplates"
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/tokencanopy/e2a/internal/startertemplates"
 )
 
 // starterTemplatesCursor is the opaque keyset position over the alias-sorted

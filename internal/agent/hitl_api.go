@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/outbound"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/outbound"
 )
 
 // approveRequest is the JSON body accepted by the approve endpoint. Every

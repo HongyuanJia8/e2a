@@ -35,11 +35,11 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Mnexa-AI/e2a.git",
+    "url": "git+https://github.com/tokencanopy/e2a.git",
     "directory": "mcp"
   },
-  "homepage": "https://github.com/Mnexa-AI/e2a/tree/main/mcp",
-  "bugs": "https://github.com/Mnexa-AI/e2a/issues",
+  "homepage": "https://github.com/tokencanopy/e2a/tree/main/mcp",
+  "bugs": "https://github.com/tokencanopy/e2a/issues",
   "dependencies": {
     "@e2a/sdk": "^5.0.0",
     "@modelcontextprotocol/sdk": "^1.29.0",

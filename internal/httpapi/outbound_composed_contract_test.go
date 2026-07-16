@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/outbound"
+	"github.com/tokencanopy/e2a/internal/outbound"
 )
 
 func specOperation(t *testing.T, doc map[string]any, operationID string) map[string]any {

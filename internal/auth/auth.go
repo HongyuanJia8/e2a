@@ -18,8 +18,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/config"
-	"github.com/Mnexa-AI/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/config"
+	"github.com/tokencanopy/e2a/internal/identity"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )
