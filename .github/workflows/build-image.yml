@@ -87,7 +87,7 @@ jobs:
       - uses: docker/metadata-action@v6
         id: meta
         with:
-          images: ghcr.io/mnexa-ai/${{ matrix.image }}
+          images: ghcr.io/tokencanopy/${{ matrix.image }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -126,8 +126,8 @@ jobs:
       # Keyless signing: the workflow's OIDC token gets exchanged for a
       # short-lived cert from Sigstore's Fulcio CA. No long-lived keys
       # to manage or rotate. Verify with:
-      #   cosign verify ghcr.io/mnexa-ai/<image>:<tag> \
-      #     --certificate-identity-regexp '^https://github\.com/Mnexa-AI/e2a/' \
+      #   cosign verify ghcr.io/tokencanopy/<image>:<tag> \
+      #     --certificate-identity-regexp '^https://github\.com/tokencanopy/e2a/' \
       #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
       - name: Sign image with cosign
         if: github.event_name != 'pull_request'

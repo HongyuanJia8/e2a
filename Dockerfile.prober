@@ -1,7 +1,7 @@
 # e2a-prober image — the critical-path self-test runner (cmd/e2a-prober).
 #
 # Co-versioned with the server: the hosted deploy pins e2a-prober to the same
-# release tag as ghcr.io/mnexa-ai/e2a. Env-driven (E2A_PROBE_*), no config file.
+# release tag as ghcr.io/tokencanopy/e2a. Env-driven (E2A_PROBE_*), no config file.
 # See docs/design/prober-selftest.md. Modes: seed | validate | run-once | serve
 # (serve is the default — the continuous monitor + deploy bake-gate signal).
 #

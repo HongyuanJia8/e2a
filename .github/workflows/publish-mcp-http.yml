@@ -46,7 +46,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/mnexa-ai/e2a-mcp-http
+          images: ghcr.io/tokencanopy/e2a-mcp-http
           tags: |
             type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,prefix=sha-,format=long
