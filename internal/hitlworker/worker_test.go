@@ -2,6 +2,7 @@ package hitlworker_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,14 @@ import (
 	"github.com/tokencanopy/e2a/internal/usage"
 	"github.com/tokencanopy/e2a/internal/webhookpub"
 )
+
+type workerCaptureHub struct{ payload []byte }
+
+func (h *workerCaptureHub) IsConnected(string) bool { return true }
+func (h *workerCaptureHub) Send(_ string, p []byte) bool {
+	h.payload = append([]byte(nil), p...)
+	return true
+}
 
 // setupWorker wires a worker + fake SMTP on a fresh test database. Returns
 // the worker, the shared store, the underlying pool (for backdating
@@ -206,10 +215,13 @@ func TestWorkerAutoApproveSelfSendDeliversViaLoopback(t *testing.T) {
 	ctx := context.Background()
 
 	agent := prepareAgent(t, store, "auto-approve-self", identity.HITLExpirationApprove)
+	hub := &workerCaptureHub{}
+	w.SetWebSocketHub(hub)
+	const replyTo = "Support <support@example.com>"
 	msg, err := store.CreatePendingOutboundMessage(ctx, agent.ID,
 		[]string{agent.EmailAddress()}, nil, nil,
 		"self auto-approve", "note to self body", "", nil,
-		"send", "", "", "", 60)
+		"send", "", "", replyTo, 60)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,6 +286,19 @@ func TestWorkerAutoApproveSelfSendDeliversViaLoopback(t *testing.T) {
 	}
 	if outcomeEvents != 2 {
 		t.Errorf("self-send outcome events=%d want 2", outcomeEvents)
+	}
+	var live struct {
+		Type string `json:"type"`
+		Data struct {
+			From              string `json:"from"`
+			AuthenticatedFrom string `json:"authenticated_from"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(hub.payload, &live); err != nil {
+		t.Fatalf("live WebSocket payload: %v (%q)", err, hub.payload)
+	}
+	if live.Type != webhookpub.EventEmailReceived || live.Data.From != "support@example.com" || live.Data.AuthenticatedFrom != agent.EmailAddress() {
+		t.Errorf("loopback live event drift: %+v", live)
 	}
 	var usageCount int
 	if err := pool.QueryRow(ctx,

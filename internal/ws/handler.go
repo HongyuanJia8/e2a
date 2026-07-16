@@ -26,6 +26,10 @@ type HandlerStore interface {
 	GetMessagesByAgent(ctx context.Context, f identity.MessageListFilter) ([]identity.Message, error)
 }
 
+type eventEnvelopeStore interface {
+	GetEventEnvelope(ctx context.Context, messageID, eventType string) ([]byte, error)
+}
+
 // Handler upgrades HTTP connections to WebSocket. Open to any agent the
 // caller owns — the legacy local-mode gate was removed (migration 029).
 type Handler struct {
@@ -178,8 +182,10 @@ func (h *Handler) drainUnread(agent *identity.AgentIdentity) {
 	}
 
 	for _, msg := range messages {
-		notification := BuildNotification(&msg)
-		h.hub.Send(agent.ID, notification)
+		notification := NotificationForMessage(ctx, h.store, &msg)
+		if len(notification) > 0 {
+			h.hub.Send(agent.ID, notification)
+		}
 	}
 
 	if len(messages) > 0 {
@@ -187,14 +193,29 @@ func (h *Handler) drainUnread(agent *identity.AgentIdentity) {
 	}
 }
 
-// BuildNotification renders the WS frame for one inbound message: the SAME
-// versioned event envelope the webhook channel delivers —
+// NotificationForMessage prefers the immutable envelope persisted by the
+// transactional outbox. The fallback preserves compatibility for test/legacy
+// stores without the outbox lookup seam.
+func NotificationForMessage(ctx context.Context, store HandlerStore, msg *identity.Message) []byte {
+	if events, ok := store.(eventEnvelopeStore); ok {
+		if envelope, err := events.GetEventEnvelope(ctx, msg.ID, webhookpub.EventEmailReceived); err == nil && len(envelope) > 0 {
+			return envelope
+		}
+		// A production store promises exact cross-channel envelopes. If its
+		// durable event is unavailable, fail closed instead of inventing a
+		// different payload under the deterministic event id.
+		return nil
+	}
+	return BuildNotification(msg)
+}
+
+// BuildNotification reconstructs the same versioned envelope SHAPE for stores
+// that cannot return the durable event —
 // {type:"email.received", id, schema_version, created_at, data} with the
 // canonical typed eventpayload.EmailReceivedData — so a consumer can share one
-// parser across both channels. The event id is the same deterministic
+// parser across both channels. The event id uses the same deterministic
 // derivation the outbox uses (sha256(message_id|type)), so a subscriber that
-// receives the message on both channels can dedup on it, and the drain path
-// re-emits a byte-stable id across reconnects.
+// receives the message on both channels can dedup on it.
 //
 // This drain-path rebuild populates what the message ROW provides, including
 // the persisted signed auth attestation: auth_headers is stored at intake
@@ -206,11 +227,9 @@ func (h *Handler) drainUnread(agent *identity.AgentIdentity) {
 // deterministic event id with the webhook delivery, so a mistrusted drain
 // frame would permanently mistrust a verified message).
 //
-// The only genuine drain divergences from the live event are:
-//   - attachments: raw_message is not selected by the drain's list query →
-//     omitted (fetch the message for attachment metadata + bytes).
-//   - timestamps: created_at / received_at are the message ROW's created_at,
-//     not the original event's publish time.
+// Production reconnect drain uses NotificationForMessage and therefore reuses
+// the exact persisted envelope. This builder remains the compatibility fallback
+// for stores that do not expose durable events.
 //
 // The live relay path (internal/relay) marshals the actual outbox event: the
 // same event envelope — identical fields and event id — as the webhook
@@ -225,6 +244,13 @@ func BuildNotification(msg *identity.Message) []byte {
 	if to == nil {
 		to = []string{}
 	}
+	authenticatedFrom := authHeaders[headers.HeaderSender]
+	// Providerless local delivery has no signed transport attestation because it
+	// never crosses SMTP. Its server-owned method marker records that the
+	// authenticated agent sent to its own mailbox.
+	if authenticatedFrom == "" && msg.Sender != "" && msg.Method == "loopback" {
+		authenticatedFrom = msg.AgentID
+	}
 	ev := webhookpub.Event{
 		ID:        webhookpub.DeterministicEventID(msg.ID, webhookpub.EventEmailReceived),
 		Type:      webhookpub.EventEmailReceived,
@@ -235,7 +261,7 @@ func BuildNotification(msg *identity.Message) []byte {
 			Direction:         "inbound",
 			ConversationID:    msg.ConversationID,
 			From:              msg.Sender,
-			AuthenticatedFrom: authHeaders[headers.HeaderSender],
+			AuthenticatedFrom: authenticatedFrom,
 			To:                to,
 			CC:                msg.CC,
 			ReplyTo:           msg.ReplyTo,

@@ -68,6 +68,7 @@ func StartContractServer(ctx context.Context, dbURL string) (*ContractServer, er
 	api.RegisterRoutes(router)
 
 	wsHub := ws.NewHub()
+	api.SetWebSocketHub(wsHub)
 	wsHandler := ws.NewHandler(wsHub, store)
 
 	// Wrap the legacy mux with the typed /v1 surface using the SAME builder

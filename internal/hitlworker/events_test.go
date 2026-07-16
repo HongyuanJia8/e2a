@@ -179,6 +179,28 @@ func TestWorkerEmitsOutboundReviewApprovedOnExpiry(t *testing.T) {
 	}
 }
 
+func TestWorkerLoopbackReviewApprovedOmitsProviderID(t *testing.T) {
+	w, store, pool, _ := setupWorker(t)
+	cap := &capPub{}
+	w.SetPublisher(cap)
+	ctx := context.Background()
+	agent := prepareAgent(t, store, "emit-loopback-approve", identity.HITLExpirationApprove)
+	msg, err := store.CreatePendingOutboundMessage(ctx, agent.ID,
+		[]string{agent.EmailAddress()}, nil, nil, "Held self", "body", "", nil, "send", "", "", "", 60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backdateExpiry(t, pool, msg.ID)
+	w.RunOnce(ctx)
+	d := dataOf(t, cap.waitFor(t, webhookpub.EventEmailReviewApproved))
+	if d["method"] != "loopback" {
+		t.Fatalf("method = %v", d["method"])
+	}
+	if _, exists := d["provider_message_id"]; exists {
+		t.Fatalf("providerless loopback review event leaked provider_message_id: %v", d)
+	}
+}
+
 // TestWorkerNilPublisherStillResolves: with no publisher wired the sweep still
 // transitions rows (emission is best-effort, never load-bearing for resolution).
 func TestWorkerNilPublisherStillResolves(t *testing.T) {

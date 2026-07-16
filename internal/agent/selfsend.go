@@ -2,9 +2,11 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"net/mail"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tokencanopy/e2a/internal/eventpayload"
@@ -71,6 +73,7 @@ func (a *API) performSelfSend(
 	}
 
 	var outboundMsg *identity.Message
+	var receivedEvent webhookpub.Event
 	err = a.store.WithTx(ctx, func(tx pgx.Tx) error {
 		var txErr error
 		outboundMsg, txErr = a.store.CreateOutboundMessageTx(
@@ -83,16 +86,20 @@ func (a *API) performSelfSend(
 		}
 
 		inboundMsg, txErr := a.store.CreateInboundMessageInTx(
-			ctx, tx, "", agent.ID, email, email, providerID, req.Subject,
+			ctx, tx, "", agent.ID, loopbackDisplayFrom(req, email), email, providerID, req.Subject,
 			req.ConversationID, "unread", rawMessage, nil, nil, false, "",
 			[]string{email}, nil, replyToList(req.ReplyTo), identity.InboundScreening{},
 		)
 		if txErr != nil {
 			return fmt.Errorf("self-send inbound row: %w", txErr)
 		}
+		if _, txErr = tx.Exec(ctx, `UPDATE messages SET method='loopback' WHERE id=$1`, inboundMsg.ID); txErr != nil {
+			return fmt.Errorf("self-send inbound method: %w", txErr)
+		}
+		inboundMsg.Method = "loopback"
 
 		if a.outbox != nil {
-			if txErr = a.publishLoopbackEventsTx(ctx, tx, agent, outboundMsg, inboundMsg, req, msgType, rawMessage); txErr != nil {
+			if receivedEvent, txErr = a.publishLoopbackEventsTx(ctx, tx, agent, outboundMsg, inboundMsg, req, msgType, rawMessage); txErr != nil {
 				return txErr
 			}
 		}
@@ -114,6 +121,7 @@ func (a *API) performSelfSend(
 		a.emit().OutboxEventsPublished(webhookpub.EventEmailSent)
 		a.emit().OutboxEventsPublished(webhookpub.EventEmailReceived)
 	}
+	a.pushLoopbackReceived(agent.ID, receivedEvent)
 	return outboundMsg, nil
 }
 
@@ -125,7 +133,7 @@ func (a *API) publishLoopbackEventsTx(
 	req outbound.SendRequest,
 	msgType string,
 	rawMessage []byte,
-) error {
+) (webhookpub.Event, error) {
 	sentResult := &outbound.SendResult{
 		Method: "loopback", To: []string{agent.EmailAddress()},
 		SentAs: "own_address", Raw: rawMessage,
@@ -133,14 +141,14 @@ func (a *API) publishLoopbackEventsTx(
 	sentEvent := a.buildSentEvent(agent, outboundMsg, sentResult, req, msgType)
 	sentEvent.ID = webhookpub.DeterministicEventID(outboundMsg.ID, webhookpub.EventEmailSent)
 	if err := a.outbox.PublishTx(ctx, tx, sentEvent); err != nil {
-		return fmt.Errorf("self-send email.sent event: %w", err)
+		return webhookpub.Event{}, fmt.Errorf("self-send email.sent event: %w", err)
 	}
 
 	receivedEvent := buildLoopbackReceivedEvent(agent, inboundMsg, req, rawMessage)
 	if err := a.outbox.PublishTx(ctx, tx, receivedEvent); err != nil {
-		return fmt.Errorf("self-send email.received event: %w", err)
+		return webhookpub.Event{}, fmt.Errorf("self-send email.received event: %w", err)
 	}
-	return nil
+	return receivedEvent, nil
 }
 
 func (a *API) approveSelfSend(
@@ -151,6 +159,7 @@ func (a *API) approveSelfSend(
 	idemCompleteTx ApproveIdemCompleter,
 ) (*identity.Message, error) {
 	var req outbound.SendRequest
+	var receivedEvent webhookpub.Event
 	sent, err := a.store.ApproveAndDeliverLocal(ctx, messageID, userID, edits,
 		func(locked *identity.Message) (identity.SendResult, error) {
 			var buildErr error
@@ -171,12 +180,15 @@ func (a *API) approveSelfSend(
 				ProviderMessageID: providerID,
 				Method:            "loopback",
 				To:                []string{agent.EmailAddress()},
+				Sender:            loopbackDisplayFrom(req, agent.EmailAddress()),
 				Raw:               raw,
 			}, nil
 		},
 		func(ctx context.Context, tx pgx.Tx, outboundMsg, inboundMsg *identity.Message, result identity.SendResult) error {
 			if a.outbox != nil {
-				if hookErr := a.publishLoopbackEventsTx(ctx, tx, agent, outboundMsg, inboundMsg, req, outboundMsg.Type, result.Raw); hookErr != nil {
+				var hookErr error
+				receivedEvent, hookErr = a.publishLoopbackEventsTx(ctx, tx, agent, outboundMsg, inboundMsg, req, outboundMsg.Type, result.Raw)
+				if hookErr != nil {
 					return hookErr
 				}
 			}
@@ -193,6 +205,7 @@ func (a *API) approveSelfSend(
 		a.emit().OutboxEventsPublished(webhookpub.EventEmailSent)
 		a.emit().OutboxEventsPublished(webhookpub.EventEmailReceived)
 	}
+	a.pushLoopbackReceived(agent.ID, receivedEvent)
 	return sent, nil
 }
 
@@ -217,7 +230,7 @@ func buildLoopbackReceivedEvent(agent *identity.AgentIdentity, msg *identity.Mes
 		AgentEmail:        agent.EmailAddress(),
 		Direction:         "inbound",
 		ConversationID:    req.ConversationID,
-		From:              agent.EmailAddress(),
+		From:              loopbackDisplayFrom(req, agent.EmailAddress()),
 		AuthenticatedFrom: agent.EmailAddress(),
 		To:                []string{agent.EmailAddress()},
 		CC:                []string{},
@@ -234,4 +247,24 @@ func buildLoopbackReceivedEvent(agent *identity.AgentIdentity, msg *identity.Mes
 	e.ConversationID = req.ConversationID
 	e.MessageID = msg.ID
 	return e
+}
+
+func loopbackDisplayFrom(req outbound.SendRequest, agentEmail string) string {
+	if req.ReplyTo != "" {
+		if address, err := mail.ParseAddress(req.ReplyTo); err == nil {
+			return address.Address
+		}
+		return req.ReplyTo
+	}
+	return agentEmail
+}
+
+func (a *API) pushLoopbackReceived(agentID string, event webhookpub.Event) {
+	if a.wsHub == nil || event.ID == "" || !a.wsHub.IsConnected(agentID) {
+		return
+	}
+	payload, err := json.Marshal(event.AsEnvelope())
+	if err == nil {
+		a.wsHub.Send(agentID, payload)
+	}
 }

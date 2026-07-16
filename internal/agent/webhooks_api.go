@@ -116,16 +116,18 @@ func (a *API) buildApprovedEvent(
 	reviewerUserID string,
 ) webhookpub.Event {
 	data := map[string]interface{}{
-		"message_id":          sent.ID,
-		"direction":           "outbound",
-		"agent_email":         agent.EmailAddress(),
-		"provider_message_id": sent.ProviderMessageID,
-		"method":              sent.Method,
-		"from":                agent.EmailAddress(),
-		"to":                  sent.ToRecipients,
-		"subject":             sent.Subject,
-		"message_type":        sent.Type,
-		"edited":              sent.Edited,
+		"message_id":   sent.ID,
+		"direction":    "outbound",
+		"agent_email":  agent.EmailAddress(),
+		"method":       sent.Method,
+		"from":         agent.EmailAddress(),
+		"to":           sent.ToRecipients,
+		"subject":      sent.Subject,
+		"message_type": sent.Type,
+		"edited":       sent.Edited,
+	}
+	if sent.ProviderMessageID != "" && sent.Method != "loopback" {
+		data["provider_message_id"] = sent.ProviderMessageID
 	}
 	return webhookpub.Event{
 		ID:        generateEventIDForAgent(),

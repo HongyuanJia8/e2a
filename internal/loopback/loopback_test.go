@@ -62,3 +62,19 @@ func TestComposeMIMEReplyToOverride(t *testing.T) {
 		t.Errorf("plain self-send Reply-To = %q, want empty", got)
 	}
 }
+
+func TestComposeMIMEIncludesSyntheticMessageID(t *testing.T) {
+	agent := &identity.AgentIdentity{ID: "bot@example.com", Domain: "example.com"}
+	providerID := ProviderID("example.com")
+	raw, err := ComposeMIME(agent, outbound.SendRequest{To: []string{agent.ID}, Subject: "hi", Body: "note"}, providerID, "example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := mail.ReadMessage(strings.NewReader(string(raw)))
+	if err != nil {
+		t.Fatalf("parse loopback MIME: %v", err)
+	}
+	if got := m.Header.Get("Message-ID"); got != providerID {
+		t.Fatalf("Message-ID = %q, want %q", got, providerID)
+	}
+}

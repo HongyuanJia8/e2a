@@ -2,7 +2,9 @@ package agent_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -15,7 +17,16 @@ import (
 	"github.com/tokencanopy/e2a/internal/testutil"
 	"github.com/tokencanopy/e2a/internal/usage"
 	"github.com/tokencanopy/e2a/internal/webhookpub"
+	wsnotify "github.com/tokencanopy/e2a/internal/ws"
 )
+
+type captureHub struct{ payload []byte }
+
+func (h *captureHub) IsConnected(string) bool { return true }
+func (h *captureHub) Send(_ string, payload []byte) bool {
+	h.payload = append([]byte(nil), payload...)
+	return true
+}
 
 // TestSelfSend_DetectionEdgeCases: case-insensitive, whitespace-
 // trimmed, single-address requirement. Mixed/external recipients must
@@ -102,9 +113,13 @@ func TestSelfSend_HappyPath(t *testing.T) {
 	api, store, pool := setupCoreAPI(t)
 	ctx := context.Background()
 	user, ag := selfAgent(t, store, "owner")
+	hub := &captureHub{}
+	api.SetWebSocketHub(hub)
+	const replyTo = "Support <support@example.com>"
 
 	res, oerr := api.DeliverOutbound(ctx, user, ag, outbound.SendRequest{
-		To: []string{ag.EmailAddress()}, Subject: "note to self", Body: "remember to refill coffee",
+		To: []string{ag.EmailAddress()}, Subject: "note to self", Body: "remember to refill coffee", ReplyTo: replyTo,
+		Attachments: []outbound.Attachment{{Filename: "note.txt", ContentType: "text/plain", Data: "aGVsbG8="}},
 	}, "send", "", nil, nil)
 	if oerr != nil {
 		t.Fatalf("DeliverOutbound: status=%d code=%s msg=%s", oerr.Status, oerr.Code, oerr.Msg)
@@ -133,12 +148,12 @@ func TestSelfSend_HappyPath(t *testing.T) {
 		t.Errorf("inbound rows=%d want 1", inboundCount)
 	}
 
-	var sender, recipient string
+	var inboundID, sender, recipient string
 	pool.QueryRow(ctx,
-		`SELECT sender, recipient FROM messages WHERE agent_id=$1 AND direction='inbound' AND subject='note to self'`,
-		ag.ID).Scan(&sender, &recipient)
-	if sender != ag.EmailAddress() || recipient != ag.EmailAddress() {
-		t.Errorf("self-note row sender=%q recipient=%q; both must be the agent's own address", sender, recipient)
+		`SELECT id, sender, recipient FROM messages WHERE agent_id=$1 AND direction='inbound' AND subject='note to self'`,
+		ag.ID).Scan(&inboundID, &sender, &recipient)
+	if sender != "support@example.com" || recipient != ag.EmailAddress() {
+		t.Errorf("self-note row sender=%q recipient=%q; want Reply-To and agent address", sender, recipient)
 	}
 
 	var method, deliveryStatus, providerID string
@@ -165,6 +180,9 @@ func TestSelfSend_HappyPath(t *testing.T) {
 	}
 	if providerID == "" || inboundProviderID != providerID {
 		t.Errorf("loopback Message-ID mismatch: outbound=%q inbound=%q", providerID, inboundProviderID)
+	}
+	if !strings.Contains(string(outboundRaw), "Message-ID: "+providerID) {
+		t.Errorf("loopback MIME missing its synthetic Message-ID header: %q", outboundRaw)
 	}
 
 	rows, err := pool.Query(ctx,
@@ -196,6 +214,49 @@ func TestSelfSend_HappyPath(t *testing.T) {
 	}
 	if sentEventHasProviderID {
 		t.Error("providerless loopback email.sent must omit provider_message_id")
+	}
+	var durableEnvelope []byte
+	if err := pool.QueryRow(ctx,
+		`SELECT envelope FROM webhook_events WHERE message_id=$1 AND type='email.received'`, inboundID,
+	).Scan(&durableEnvelope); err != nil {
+		t.Fatalf("read durable received envelope: %v", err)
+	}
+	var durable, live map[string]any
+	if err := json.Unmarshal(durableEnvelope, &durable); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(hub.payload, &live); err != nil {
+		t.Fatalf("live WebSocket payload: %v (%q)", err, hub.payload)
+	}
+	if !reflect.DeepEqual(live, durable) {
+		t.Errorf("live WebSocket envelope drifted from durable webhook event\nlive=%v\ndurable=%v", live, durable)
+	}
+	listed, err := store.GetMessagesByAgent(ctx, identity.MessageListFilter{
+		AgentID: ag.ID, Status: "all", Direction: "inbound", Limit: 10,
+	})
+	if err != nil || len(listed) != 1 {
+		t.Fatalf("list reconnect message: len=%d err=%v", len(listed), err)
+	}
+	if listed[0].Method != "loopback" {
+		t.Fatalf("reconnect row method = %q, want durable loopback marker", listed[0].Method)
+	}
+	var reconnect map[string]any
+	if err := json.Unmarshal(wsnotify.NotificationForMessage(ctx, store, &listed[0]), &reconnect); err != nil {
+		t.Fatal(err)
+	}
+	reconnectData := reconnect["data"].(map[string]any)
+	if !reflect.DeepEqual(reconnect, durable) {
+		t.Errorf("reconnect envelope drifted from durable event\nreconnect=%v\ndurable=%v", reconnect, durable)
+	}
+	if reconnect["id"] != live["id"] || reconnectData["from"] != "support@example.com" || reconnectData["authenticated_from"] != ag.EmailAddress() {
+		t.Errorf("reconnect identity drift: %v", reconnect)
+	}
+	data := live["data"].(map[string]any)
+	if data["from"] != "support@example.com" || data["authenticated_from"] != ag.EmailAddress() {
+		t.Errorf("received identities = from:%v authenticated_from:%v", data["from"], data["authenticated_from"])
+	}
+	if attachments, ok := data["attachments"].([]any); !ok || len(attachments) != 1 {
+		t.Errorf("live/durable/reconnect envelope lost attachment metadata: %v", data["attachments"])
 	}
 }
 

@@ -251,6 +251,15 @@ func TestBuildApprovedEvent(t *testing.T) {
 	if _, ok := data["reviewed_by_user_id"]; ok {
 		t.Errorf("reviewed_by_user_id must not be exposed, got %v", data["reviewed_by_user_id"])
 	}
+	if data["provider_message_id"] != "ses_a" {
+		t.Errorf("provider_message_id = %v, want ses_a", data["provider_message_id"])
+	}
+	sent.Method = "loopback"
+	sent.ProviderMessageID = "<local@loopback.x.example.com>"
+	localData := a.buildApprovedEvent(agent, sent, "u_reviewer").Data.(map[string]interface{})
+	if _, ok := localData["provider_message_id"]; ok {
+		t.Errorf("providerless loopback review event leaked provider_message_id: %v", localData)
+	}
 }
 
 func TestBuildRejectedEvent(t *testing.T) {

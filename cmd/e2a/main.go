@@ -603,6 +603,8 @@ func main() {
 	// handler are constructed here and threaded in.
 	wsHub := ws.NewHub()
 	defer wsHub.Close()
+	api.SetWebSocketHub(wsHub)
+	hitlWorker.SetWebSocketHub(wsHub)
 	wsHandler := ws.NewHandler(wsHub, store)
 
 	// v1 contract layer (api-v1-redesign Slice 1). The new chi + Huma surface

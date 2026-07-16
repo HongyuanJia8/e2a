@@ -223,7 +223,16 @@ type API struct {
 	// DeliverOutbound persists the message + enqueues the outbound_send job in one
 	// transaction and returns accepted before provider submission.
 	outboundEnq OutboundEnqueuer
+	wsHub       WebSocketHub
 }
+
+// WebSocketHub is the narrow live-delivery seam shared with internal/ws.
+type WebSocketHub interface {
+	IsConnected(agentID string) bool
+	Send(agentID string, msg []byte) bool
+}
+
+func (a *API) SetWebSocketHub(h WebSocketHub) { a.wsHub = h }
 
 // SetOutboundEnqueuer wires the mandatory queue-first outbound pipeline. Tests may
 // leave it unset to verify that a miswired process fails closed before provider I/O.

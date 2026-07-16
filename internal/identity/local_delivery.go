@@ -16,6 +16,18 @@ import (
 // pair.
 type LocalDeliveryTxHook func(ctx context.Context, tx pgx.Tx, outbound, inbound *Message, result SendResult) error
 
+// GetEventEnvelope returns the exact durable event envelope for a message.
+// WebSocket reconnect drain uses this instead of rebuilding an event whose
+// timestamp or attachment metadata could differ under the same event id.
+func (s *Store) GetEventEnvelope(ctx context.Context, messageID, eventType string) ([]byte, error) {
+	var envelope []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT envelope FROM webhook_events WHERE message_id=$1 AND type=$2`,
+		messageID, eventType,
+	).Scan(&envelope)
+	return envelope, err
+}
+
 // ApproveAndDeliverLocal atomically resolves a pending outbound review hold
 // whose only recipient is a mailbox owned by this service. Unlike
 // ApproveAndSend, compose must be a local, side-effect-free operation: the
@@ -56,7 +68,7 @@ func (s *Store) ApproveAndDeliverLocal(
 	if err != nil {
 		return nil, err
 	}
-	if result.Method != "loopback" || len(result.To) != 1 || len(result.Raw) == 0 || result.ProviderMessageID == "" {
+	if result.Method != "loopback" || len(result.To) != 1 || len(result.Raw) == 0 || result.ProviderMessageID == "" || result.Sender == "" {
 		return nil, errors.New("identity: invalid local delivery result")
 	}
 
@@ -102,19 +114,16 @@ func (s *Store) ExpireAndDeliverLocal(
 		}
 	}()
 
-	m, _, err := loadPendingOutboundForLocalDelivery(txCtx, tx, messageID)
+	m, _, err := loadExpiredPendingOutboundForLocalDelivery(txCtx, tx, messageID)
 	if err != nil {
 		return nil, err
-	}
-	if m.ApprovalExpiresAt == nil || m.ApprovalExpiresAt.After(time.Now()) {
-		return nil, ErrNotPendingApproval
 	}
 
 	result, err := compose(m)
 	if err != nil {
 		return nil, err
 	}
-	if result.Method != "loopback" || len(result.To) != 1 || len(result.Raw) == 0 || result.ProviderMessageID == "" {
+	if result.Method != "loopback" || len(result.To) != 1 || len(result.Raw) == 0 || result.ProviderMessageID == "" || result.Sender == "" {
 		return nil, errors.New("identity: invalid local delivery result")
 	}
 
@@ -181,7 +190,7 @@ func finalizeLocalDeliveryTx(
 	}
 
 	inbound, err := createInboundMessage(
-		ctx, tx, "", m.AgentID, m.AgentID, m.AgentID,
+		ctx, tx, "", m.AgentID, result.Sender, m.AgentID,
 		result.ProviderMessageID, m.Subject, m.ConversationID, "unread",
 		result.Raw, nil, nil, false, "", result.To, result.CC, m.ReplyTo,
 		InboundScreening{},
@@ -189,6 +198,10 @@ func finalizeLocalDeliveryTx(
 	if err != nil {
 		return nil, fmt.Errorf("local delivery inbound row: %w", err)
 	}
+	if _, err := tx.Exec(ctx, `UPDATE messages SET method='loopback' WHERE id=$1`, inbound.ID); err != nil {
+		return nil, fmt.Errorf("local delivery inbound method: %w", err)
+	}
+	inbound.Method = "loopback"
 
 	m.Status = targetStatus
 	m.DeliveryStatus = "sent"
@@ -210,7 +223,30 @@ func finalizeLocalDeliveryTx(
 	return inbound, nil
 }
 
+func loadExpiredPendingOutboundForLocalDelivery(ctx context.Context, tx pgx.Tx, messageID string) (*Message, string, error) {
+	return scanPendingOutboundForLocalDelivery(tx.QueryRow(ctx, localDeliverySelect+
+		` AND m.approval_expires_at < now()
+		  FOR NO KEY UPDATE OF m SKIP LOCKED`, messageID), ErrNotPendingApproval)
+}
+
 func loadPendingOutboundForLocalDelivery(ctx context.Context, tx pgx.Tx, messageID string) (*Message, string, error) {
+	return scanPendingOutboundForLocalDelivery(tx.QueryRow(ctx, localDeliverySelect+
+		` FOR NO KEY UPDATE OF m`, messageID), ErrMessageNotFound)
+}
+
+const localDeliverySelect = `SELECT m.id, m.agent_id, m.direction, m.sender, m.recipient, m.subject,
+		m.email_message_id, m.method, m.message_type,
+		m.conversation_id, m.created_at, m.expires_at,
+		m.to_recipients, m.cc, m.bcc, m.reply_to,
+		m.status, m.approval_expires_at, m.edited,
+		m.body_text, m.body_html, m.attachments_json,
+		a.user_id
+	 FROM messages m
+	 JOIN agent_identities a ON a.id = m.agent_id
+	WHERE m.id = $1 AND m.direction = 'outbound'
+	  AND a.deleted_at IS NULL`
+
+func scanPendingOutboundForLocalDelivery(row pgx.Row, noRowError error) (*Message, string, error) {
 	var (
 		m                  Message
 		ownerUserID        string
@@ -219,21 +255,7 @@ func loadPendingOutboundForLocalDelivery(ctx context.Context, tx pgx.Tx, message
 		method, msgType    *string
 		approvalExpires    *time.Time
 	)
-	err := tx.QueryRow(ctx,
-		`SELECT m.id, m.agent_id, m.direction, m.sender, m.recipient, m.subject,
-		        m.email_message_id, m.method, m.message_type,
-		        m.conversation_id, m.created_at, m.expires_at,
-		        m.to_recipients, m.cc, m.bcc, m.reply_to,
-		        m.status, m.approval_expires_at, m.edited,
-		        m.body_text, m.body_html, m.attachments_json,
-		        a.user_id
-		   FROM messages m
-		   JOIN agent_identities a ON a.id = m.agent_id
-		  WHERE m.id = $1 AND m.direction = 'outbound'
-		    AND a.deleted_at IS NULL
-		  FOR NO KEY UPDATE OF m`,
-		messageID,
-	).Scan(
+	err := row.Scan(
 		&m.ID, &m.AgentID, &m.Direction, &m.Sender, &m.Recipient, &m.Subject,
 		&m.EmailMessageID, &method, &msgType,
 		&m.ConversationID, &m.CreatedAt, &m.ExpiresAt,
@@ -243,7 +265,10 @@ func loadPendingOutboundForLocalDelivery(ctx context.Context, tx pgx.Tx, message
 		&ownerUserID,
 	)
 	if err != nil {
-		return nil, "", ErrMessageNotFound
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, "", noRowError
+		}
+		return nil, "", err
 	}
 	if m.Status != MessageStatusPendingReview {
 		return nil, "", ErrNotPendingApproval

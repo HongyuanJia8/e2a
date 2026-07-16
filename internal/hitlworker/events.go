@@ -84,17 +84,19 @@ func (w *Worker) emitOutboundApproved(agent *identity.AgentIdentity, sent *ident
 		return
 	}
 	data := map[string]interface{}{
-		"message_id":          sent.ID,
-		"direction":           "outbound",
-		"agent_email":         agent.EmailAddress(),
-		"provider_message_id": sent.ProviderMessageID,
-		"method":              sent.Method,
-		"from":                agent.EmailAddress(),
-		"to":                  sent.ToRecipients,
-		"subject":             sent.Subject,
-		"message_type":        sent.Type,
-		"edited":              false,
-		"auto_resolved":       true,
+		"message_id":    sent.ID,
+		"direction":     "outbound",
+		"agent_email":   agent.EmailAddress(),
+		"method":        sent.Method,
+		"from":          agent.EmailAddress(),
+		"to":            sent.ToRecipients,
+		"subject":       sent.Subject,
+		"message_type":  sent.Type,
+		"edited":        false,
+		"auto_resolved": true,
+	}
+	if sent.ProviderMessageID != "" && sent.Method != "loopback" {
+		data["provider_message_id"] = sent.ProviderMessageID
 	}
 	e := webhookpub.NewEvent(webhookpub.EventEmailReviewApproved, agent.UserID, data)
 	e.AgentID = agent.ID

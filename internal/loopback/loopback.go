@@ -167,5 +167,6 @@ func ComposeMIME(agent *identity.AgentIdentity, req outbound.SendRequest, provid
 		email,
 		time.Now().UTC().Format(time.RFC1123Z),
 	)
-	return append([]byte(received), msg...), nil
+	messageID := fmt.Sprintf("Message-ID: %s\r\n", providerID)
+	return append([]byte(received+messageID), msg...), nil
 }
