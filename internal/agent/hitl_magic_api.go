@@ -208,21 +208,7 @@ func (a *API) magicApprove(w http.ResponseWriter, r *http.Request, messageID, us
 		return
 	}
 
-	sent, err = a.store.ApproveAndSend(r.Context(), messageID, userID, identity.PendingApprovalEdit{},
-		func(locked *identity.Message) (identity.SendResult, error) {
-			sendReq, err := buildSendRequestFromMessage(locked)
-			if err != nil {
-				return identity.SendResult{}, err
-			}
-			attachReferencesChain(r.Context(), a.store, agent.ID, &sendReq)
-			// Self-sends (including the Test email button) deliver via
-			// loopback — see the dashboard-approve branch in hitl_api.go
-			// for the rationale; both paths must stay symmetric.
-			if !isSelfSend(sendReq, agent.EmailAddress()) {
-				return identity.SendResult{}, errors.New("external outbound approval must be queued")
-			}
-			return a.selfSendApprovalDelivery(r.Context(), agent, sendReq)
-		})
+	sent, err = a.approveSelfSend(r.Context(), agent, messageID, userID, identity.PendingApprovalEdit{}, nil)
 	if err != nil {
 		switch {
 		case errors.Is(err, identity.ErrMessageNotFound):
@@ -248,9 +234,7 @@ func (a *API) magicApprove(w http.ResponseWriter, r *http.Request, messageID, us
 		return
 	}
 
-	if _, err := a.usage.RecordAndCheck(r.Context(), userID, agent.ID, agent.Domain, "outbound"); err != nil {
-		log.Printf("[api] magic-approve usage error: %v", err)
-	}
+	a.recordLoopbackUsage(r.Context(), userID, agent)
 	log.Printf("[mail:%s] dir=outbound type=%s status=%s agent=%s to=%v approved=magic-link:user:%s",
 		sent.ID, sent.Type, sent.Status, agent.EmailAddress(), sent.ToRecipients, userID)
 

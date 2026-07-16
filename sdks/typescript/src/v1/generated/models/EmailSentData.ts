@@ -28,10 +28,10 @@ export class EmailSentData {
     */
     'messageType': string;
     /**
-    * Transport used for the send. Open set; tolerate unknown values. Known values: smtp.
+    * Transport used for the send. Open set; tolerate unknown values. Known values: smtp, loopback.
     */
     'method': string;
-    'providerMessageId': string;
+    'providerMessageId'?: string;
     'subject': string;
     'to': Array<string>;
 

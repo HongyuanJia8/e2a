@@ -15,6 +15,19 @@ import (
 	"github.com/tokencanopy/e2a/internal/identity"
 )
 
+func TestApproveResultLoopbackOmitsProviderMessageID(t *testing.T) {
+	_, view := approveResult(&identity.Message{
+		ID: "msg_local", Method: "loopback", ProviderMessageID: "<local@loopback.e2a.test>",
+		DeliveryStatus: "sent", SentAs: "own_address",
+	})
+	if view.MessageID != "msg_local" {
+		t.Fatalf("message_id=%q want msg_local", view.MessageID)
+	}
+	if view.ProviderMessageID != "" {
+		t.Fatalf("provider_message_id=%q want omitted for providerless loopback", view.ProviderMessageID)
+	}
+}
+
 // These exercise the account-scoped review queue approve/reject dispatch
 // (/v1/reviews/{id}/approve|reject) — the only approve/reject path since the
 // deprecated agent-path (/v1/agents/{email}/messages/{id}/approve|reject) was

@@ -13,6 +13,7 @@ import (
 	"github.com/tokencanopy/e2a/internal/outbound"
 	"github.com/tokencanopy/e2a/internal/testutil"
 	"github.com/tokencanopy/e2a/internal/usage"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 )
 
 // setupWorker wires a worker + fake SMTP on a fresh test database. Returns
@@ -32,6 +33,7 @@ func setupWorker(t *testing.T) (
 	smtpRelay := outbound.NewSMTPRelay(&config.OutboundSMTPConfig{Host: smtpAddr.Host, Port: smtpAddr.Port})
 	sender := outbound.NewSender(smtpRelay, "test.e2a.dev")
 	w := hitlworker.New(store, sender, usage.NewUsageTracker(usage.NewStore(pool)), "test.e2a.dev")
+	w.SetOutbox(webhookpub.NewOutbox(pool, webhookpub.StaticFlag(true)))
 	w.SetOutboundEnqueuer(&fakeEnq{})
 	return w, store, pool, smtpDone
 }
@@ -221,13 +223,15 @@ func TestWorkerAutoApproveSelfSendDeliversViaLoopback(t *testing.T) {
 	}
 
 	// Outbound row → expired_approved, method=loopback, body scrubbed.
-	var status, method string
+	var status, method, deliveryStatus string
 	var providerID *string
 	var bodyText *string
+	var raw []byte
 	err = pool.QueryRow(ctx,
-		`SELECT status, method, provider_message_id, body_text FROM messages WHERE id = $1`,
+		`SELECT status, method, COALESCE(delivery_status,''), provider_message_id, body_text, raw_message
+		   FROM messages WHERE id = $1`,
 		msg.ID,
-	).Scan(&status, &method, &providerID, &bodyText)
+	).Scan(&status, &method, &deliveryStatus, &providerID, &bodyText, &raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,8 +241,14 @@ func TestWorkerAutoApproveSelfSendDeliversViaLoopback(t *testing.T) {
 	if method != "loopback" {
 		t.Errorf("method = %q, want loopback", method)
 	}
+	if deliveryStatus != "sent" {
+		t.Errorf("delivery_status = %q, want sent", deliveryStatus)
+	}
 	if providerID == nil || *providerID == "" {
 		t.Error("provider_message_id should be populated after loopback delivery")
+	}
+	if len(raw) == 0 || !strings.Contains(string(raw), "note to self body") {
+		t.Errorf("approved Sent copy must retain readable MIME; raw=%q", raw)
 	}
 	if bodyText != nil {
 		t.Errorf("body_text not scrubbed: %v", bodyText)
@@ -253,6 +263,18 @@ func TestWorkerAutoApproveSelfSendDeliversViaLoopback(t *testing.T) {
 	if inboundCount != 1 {
 		t.Errorf("inbound rows after self-send auto-approve = %d, want 1", inboundCount)
 	}
+	var outcomeEvents int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM webhook_events
+		  WHERE message_id IN (
+		    SELECT id FROM messages WHERE agent_id=$1 AND subject='self auto-approve'
+		  ) AND type IN ('email.sent','email.received')`, agent.ID,
+	).Scan(&outcomeEvents); err != nil {
+		t.Fatal(err)
+	}
+	if outcomeEvents != 2 {
+		t.Errorf("self-send outcome events=%d want 2", outcomeEvents)
+	}
 	var usageCount int
 	if err := pool.QueryRow(ctx,
 		`SELECT count(*) FROM usage_events WHERE agent_id=$1 AND direction='outbound'`,
@@ -262,6 +284,16 @@ func TestWorkerAutoApproveSelfSendDeliversViaLoopback(t *testing.T) {
 	}
 	if usageCount != 1 {
 		t.Errorf("outbound usage events after self-send auto-approve = %d, want 1", usageCount)
+	}
+	var inboundUsageCount int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM usage_events WHERE agent_id=$1 AND direction='inbound'`,
+		agent.ID,
+	).Scan(&inboundUsageCount); err != nil {
+		t.Fatal(err)
+	}
+	if inboundUsageCount != 1 {
+		t.Errorf("inbound usage events after self-send auto-approve = %d, want 1", inboundUsageCount)
 	}
 }
 

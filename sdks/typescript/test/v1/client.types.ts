@@ -1,7 +1,7 @@
 import type { FieldError } from "../../src/v1/generated/models/FieldError.js";
 import type { ErrorBody } from "../../src/v1/generated/models/ErrorBody.js";
 import type { ListMessagesParams } from "../../src/v1/index.js";
-import type { WebhookEvent } from "../../src/v1/webhook-signature.js";
+import type { EmailSentData, WebhookEvent } from "../../src/v1/webhook-signature.js";
 import type { WSEvent } from "../../src/v1/ws.js";
 
 const senderFilter: ListMessagesParams = { from_: "alice@example.com" };
@@ -40,6 +40,18 @@ const eventEnvelope: WebhookEvent = {
 };
 const wsEnvelope: WSEvent = eventEnvelope;
 void wsEnvelope;
+
+const loopbackSentData: EmailSentData = {
+  message_id: "msg_local",
+  agent_email: "bot@example.com",
+  direction: "outbound",
+  method: "loopback",
+  from: "bot@example.com",
+  to: ["bot@example.com"],
+  subject: "Note to self",
+  message_type: "send",
+};
+void loopbackSentData;
 
 // @ts-expect-error all five core envelope fields are required.
 const incompleteEventEnvelope: WebhookEvent = { type: "email.received", data: {} };

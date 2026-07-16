@@ -139,18 +139,7 @@ func (a *API) ApprovePendingCore(ctx context.Context, userID, messageID, expecte
 		return sent, nil
 	}
 
-	sent, err = a.store.ApproveAndSend(ctx, messageID, userID, edits,
-		func(locked *identity.Message) (identity.SendResult, error) {
-			sendReq, err := buildSendRequestFromMessage(locked)
-			if err != nil {
-				return identity.SendResult{}, err
-			}
-			attachReferencesChain(ctx, a.store, agent.ID, &sendReq)
-			if !isSelfSend(sendReq, agent.EmailAddress()) {
-				return identity.SendResult{}, errors.New("external outbound approval must be queued")
-			}
-			return a.selfSendApprovalDelivery(ctx, agent, sendReq)
-		})
+	sent, err = a.approveSelfSend(ctx, agent, messageID, userID, edits, idemCompleteTx)
 	if err != nil {
 		switch {
 		case errors.Is(err, identity.ErrMessageNotFound):
@@ -167,9 +156,7 @@ func (a *API) ApprovePendingCore(ctx context.Context, userID, messageID, expecte
 		}
 	}
 
-	if _, err := a.usage.RecordAndCheck(ctx, userID, agent.ID, agent.Domain, "outbound"); err != nil {
-		log.Printf("[api] usage recording error: %v", err)
-	}
+	a.recordLoopbackUsage(ctx, userID, agent)
 	slug, _, _ := strings.Cut(agent.EmailAddress(), "@")
 	log.Printf("[mail:%s] dir=outbound type=%s status=%s from=%s to=%v slug=%s subject=%q edited=%v approved=user:%s",
 		sent.ID, sent.Type, sent.Status, agent.EmailAddress(), sent.ToRecipients, slug, sent.Subject, sent.Edited, userID)

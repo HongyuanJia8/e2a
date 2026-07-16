@@ -339,6 +339,9 @@ func main() {
 	// publisher as the agent API). Load-bearing for inbound approve: a TTL-released
 	// inbound message has no other push signal.
 	hitlWorker.SetPublisher(outboxPublisher)
+	// Self-send auto-approval is a local DB delivery, so its Sent/Inbox rows and
+	// email.sent/email.received outcome records share one transaction.
+	hitlWorker.SetOutbox(webhookOutbox)
 	// Route the sweep's auto-approve send onto QueueOutbound (the
 	// SendWorker does the SMTP submit) instead of a blocking in-process send, so the
 	// sweep is DB-only. Two-phase like the API's SetOutboundEnqueuer: pass the

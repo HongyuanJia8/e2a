@@ -2,11 +2,16 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/tokencanopy/e2a/internal/eventpayload"
 	"github.com/tokencanopy/e2a/internal/identity"
 	"github.com/tokencanopy/e2a/internal/loopback"
 	"github.com/tokencanopy/e2a/internal/outbound"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 )
 
 // isSelfSend / stripAgentSelfAliases delegate to internal/loopback so the
@@ -33,12 +38,11 @@ func stripAgentSelfAliases(addrs []string, agentEmail string) []string {
 // list_messages, threading, and downstream tooling don't need any
 // special-casing.
 //
-// This is the non-HITL fast path. The HITL-gated counterpart
-// (selfSendApprovalDelivery) writes ONLY the inbound row; the outbound
-// row already exists from holdForApproval and gets updated to
-// status=sent by ApproveAndSend.
+// HITL approval uses the same transactional local-delivery invariants through
+// approveSelfSend while preserving its pre-existing outbound resource id.
 //
-// Returns the provider-style message id used for the outbound row.
+// Returns the GET-able outbound message resource. The provider-style RFC
+// Message-ID remains an internal threading key shared with the inbound twin.
 // Method on the outbound row is "loopback" so operators can tell the
 // difference from "smtp" in logs and audits.
 // msgType is one of "send", "reply", or "forward" — recorded on the
@@ -52,7 +56,8 @@ func (a *API) performSelfSend(
 	agent *identity.AgentIdentity,
 	req outbound.SendRequest,
 	msgType string,
-) (string, error) {
+	idemCompleteTx AcceptIdemCompleter,
+) (*identity.Message, error) {
 	email := agent.EmailAddress()
 
 	// Allocate providerID up front so the outbound row and inbound row
@@ -60,72 +65,173 @@ func (a *API) performSelfSend(
 	// SMTP roundtrip produces.
 	providerID := loopback.ProviderID(a.fromDomain)
 
-	if _, err := a.store.CreateOutboundMessage(
-		ctx,
-		agent.ID,
-		[]string{email},
-		nil,
-		nil,
-		req.Subject,
-		msgType,
-		"loopback",
-		providerID,
-		req.ConversationID,
-		nil, // self-send body is retained on the inbound twin row; don't double-store
-	); err != nil {
-		return "", fmt.Errorf("self-send outbound row: %w", err)
-	}
-
 	rawMessage, err := loopback.ComposeMIME(agent, req, providerID, a.fromDomain)
 	if err != nil {
-		return "", fmt.Errorf("self-send compose: %w", err)
-	}
-	if _, err := a.store.CreateInboundMessage(
-		ctx,
-		"",
-		agent.ID,
-		email,
-		email,
-		providerID,
-		req.Subject,
-		req.ConversationID,
-		"unread",
-		rawMessage,
-		nil,
-		nil,
-		false,
-		"",
-		[]string{email},
-		nil,
-		nil,
-		identity.InboundScreening{}, // self-send: not externally screened
-	); err != nil {
-		return "", fmt.Errorf("self-send inbound row: %w", err)
+		return nil, fmt.Errorf("self-send compose: %w", err)
 	}
 
-	return providerID, nil
+	var outboundMsg *identity.Message
+	err = a.store.WithTx(ctx, func(tx pgx.Tx) error {
+		var txErr error
+		outboundMsg, txErr = a.store.CreateOutboundMessageTx(
+			ctx, tx, agent.ID, []string{email}, nil, nil, req.Subject, msgType,
+			"loopback", providerID, req.ConversationID, rawMessage,
+			"sent", "", "own_address",
+		)
+		if txErr != nil {
+			return fmt.Errorf("self-send outbound row: %w", txErr)
+		}
+
+		inboundMsg, txErr := a.store.CreateInboundMessageInTx(
+			ctx, tx, "", agent.ID, email, email, providerID, req.Subject,
+			req.ConversationID, "unread", rawMessage, nil, nil, false, "",
+			[]string{email}, nil, replyToList(req.ReplyTo), identity.InboundScreening{},
+		)
+		if txErr != nil {
+			return fmt.Errorf("self-send inbound row: %w", txErr)
+		}
+
+		if a.outbox != nil {
+			if txErr = a.publishLoopbackEventsTx(ctx, tx, agent, outboundMsg, inboundMsg, req, msgType, rawMessage); txErr != nil {
+				return txErr
+			}
+		}
+
+		if idemCompleteTx != nil {
+			if txErr = idemCompleteTx(ctx, tx, &OutboundResult{
+				MessageID: outboundMsg.ID, SentAs: "own_address", Method: "loopback",
+			}); txErr != nil {
+				return txErr
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if a.outbox != nil {
+		a.emit().OutboxEventsPublished(webhookpub.EventEmailSent)
+		a.emit().OutboxEventsPublished(webhookpub.EventEmailReceived)
+	}
+	return outboundMsg, nil
 }
 
-// selfSendApprovalDelivery is the HITL-gated counterpart of performSelfSend:
-// it writes ONLY the inbound row (via loopback.DeliverInbound) and returns
-// an identity.SendResult shaped for ApproveAndSend's send callback. The
-// pre-existing held outbound row is finalized to status=sent by
-// ApproveAndSend itself using the result's provider_message_id + method
-// columns — calling CreateOutboundMessage here would create a duplicate
-// row and unanchor the operator-visible audit trail (held → sent for a
-// specific row id).
-//
-// Failure-mode note: the inbound row write happens INSIDE ApproveAndSend's
-// send callback but uses a non-tx connection. If the callback succeeds but
-// the subsequent tx UPDATE / Commit fails, the inbound row will exist
-// while the outbound row stays pending_review. Same crash-window class
-// as the existing SES-side issue documented on ApproveAndSend's docstring.
-// Operator-visible symptom: a "self-message" inbox row with no matching
-// status=sent outbound row.
-func (a *API) selfSendApprovalDelivery(
+func (a *API) publishLoopbackEventsTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	agent *identity.AgentIdentity,
+	outboundMsg, inboundMsg *identity.Message,
+	req outbound.SendRequest,
+	msgType string,
+	rawMessage []byte,
+) error {
+	sentResult := &outbound.SendResult{
+		Method: "loopback", To: []string{agent.EmailAddress()},
+		SentAs: "own_address", Raw: rawMessage,
+	}
+	sentEvent := a.buildSentEvent(agent, outboundMsg, sentResult, req, msgType)
+	sentEvent.ID = webhookpub.DeterministicEventID(outboundMsg.ID, webhookpub.EventEmailSent)
+	if err := a.outbox.PublishTx(ctx, tx, sentEvent); err != nil {
+		return fmt.Errorf("self-send email.sent event: %w", err)
+	}
+
+	receivedEvent := buildLoopbackReceivedEvent(agent, inboundMsg, req, rawMessage)
+	if err := a.outbox.PublishTx(ctx, tx, receivedEvent); err != nil {
+		return fmt.Errorf("self-send email.received event: %w", err)
+	}
+	return nil
+}
+
+func (a *API) approveSelfSend(
 	ctx context.Context,
 	agent *identity.AgentIdentity,
-	req outbound.SendRequest,
-) (identity.SendResult, error) {
-	return loopback.DeliverInbound(ctx, a.store, agent, req, a.fromDomain)
+	messageID, userID string,
+	edits identity.PendingApprovalEdit,
+	idemCompleteTx ApproveIdemCompleter,
+) (*identity.Message, error) {
+	var req outbound.SendRequest
+	sent, err := a.store.ApproveAndDeliverLocal(ctx, messageID, userID, edits,
+		func(locked *identity.Message) (identity.SendResult, error) {
+			var buildErr error
+			req, buildErr = buildSendRequestFromMessage(locked)
+			if buildErr != nil {
+				return identity.SendResult{}, buildErr
+			}
+			attachReferencesChain(ctx, a.store, agent.ID, &req)
+			if !isSelfSend(req, agent.EmailAddress()) {
+				return identity.SendResult{}, errors.New("external outbound approval must be queued")
+			}
+			providerID := loopback.ProviderID(a.fromDomain)
+			raw, composeErr := loopback.ComposeMIME(agent, req, providerID, a.fromDomain)
+			if composeErr != nil {
+				return identity.SendResult{}, composeErr
+			}
+			return identity.SendResult{
+				ProviderMessageID: providerID,
+				Method:            "loopback",
+				To:                []string{agent.EmailAddress()},
+				Raw:               raw,
+			}, nil
+		},
+		func(ctx context.Context, tx pgx.Tx, outboundMsg, inboundMsg *identity.Message, result identity.SendResult) error {
+			if a.outbox != nil {
+				if hookErr := a.publishLoopbackEventsTx(ctx, tx, agent, outboundMsg, inboundMsg, req, outboundMsg.Type, result.Raw); hookErr != nil {
+					return hookErr
+				}
+			}
+			if idemCompleteTx != nil {
+				return idemCompleteTx(ctx, tx, outboundMsg)
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	if a.outbox != nil {
+		a.emit().OutboxEventsPublished(webhookpub.EventEmailSent)
+		a.emit().OutboxEventsPublished(webhookpub.EventEmailReceived)
+	}
+	return sent, nil
+}
+
+func (a *API) recordLoopbackUsage(ctx context.Context, userID string, agent *identity.AgentIdentity) {
+	for _, direction := range []string{"outbound", "inbound"} {
+		if _, err := a.usage.RecordAndCheck(ctx, userID, agent.ID, agent.Domain, direction); err != nil {
+			log.Printf("[api] self-send %s usage recording error: %v", direction, err)
+		}
+	}
+}
+
+func replyToList(replyTo string) []string {
+	if replyTo == "" {
+		return nil
+	}
+	return []string{replyTo}
+}
+
+func buildLoopbackReceivedEvent(agent *identity.AgentIdentity, msg *identity.Message, req outbound.SendRequest, raw []byte) webhookpub.Event {
+	data := eventpayload.EmailReceivedData{
+		MessageID:         msg.ID,
+		AgentEmail:        agent.EmailAddress(),
+		Direction:         "inbound",
+		ConversationID:    req.ConversationID,
+		From:              agent.EmailAddress(),
+		AuthenticatedFrom: agent.EmailAddress(),
+		To:                []string{agent.EmailAddress()},
+		CC:                []string{},
+		ReplyTo:           replyToList(req.ReplyTo),
+		DeliveredTo:       agent.EmailAddress(),
+		Subject:           req.Subject,
+		AuthHeaders:       map[string]string{},
+		ReceivedAt:        msg.CreatedAt.UTC(),
+		Attachments:       eventpayload.AttachmentMetadata(raw),
+	}
+	e := webhookpub.NewEvent(webhookpub.EventEmailReceived, agent.UserID, data)
+	e.ID = webhookpub.DeterministicEventID(msg.ID, webhookpub.EventEmailReceived)
+	e.AgentID = agent.ID
+	e.ConversationID = req.ConversationID
+	e.MessageID = msg.ID
+	return e
 }

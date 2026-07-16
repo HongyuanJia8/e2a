@@ -1027,7 +1027,7 @@ type OutboundResult struct {
 	Held              bool
 	PendingMessageID  string
 	ApprovalExpiresAt *time.Time
-	MessageID         string // the e2a msg_ id when sent (GET-able); loopback id for self-send
+	MessageID         string // the e2a msg_ id (GET-able) for every send method
 	ProviderMessageID string // provider/SES id when sent via smtp
 	SentAs            string // "own_address" | "relay" (decision 4)
 	Method            string // "smtp" | "loopback"
@@ -1157,19 +1157,17 @@ func (a *API) DeliverOutbound(ctx context.Context, user *identity.User, agent *i
 	// §7.2 / async-send-contract.md): billing must not run ahead of a durable
 	// message row, or a crash between meter and persist bills an invisible send.
 	if isSelfSend(req, agent.EmailAddress()) {
-		providerID, err := a.performSelfSend(ctx, agent, req, msgType)
+		outMsg, err := a.performSelfSend(ctx, agent, req, msgType, idemCompleteTx)
 		if err != nil {
 			log.Printf("[api] self-send failed: agent=%s error=%v", agent.EmailAddress(), err)
 			return nil, &OutboundError{Status: http.StatusInternalServerError, Code: "internal_error", Msg: "self-send failed"}
 		}
-		// Meter after the loopback delivery succeeds (side-effect only — never
-		// block on quota; the cap pre-check is the gate).
-		if _, err := a.usage.RecordAndCheck(ctx, user.ID, agent.ID, agent.Domain, "outbound"); err != nil {
-			log.Printf("[api] usage recording error: %v", err)
-		}
+		// Meter both durable copies after the local delivery commits. Never block
+		// on metering; the pre-check remains the quota gate.
+		a.recordLoopbackUsage(ctx, user.ID, agent)
 		slug, _, _ := strings.Cut(agent.EmailAddress(), "@")
-		log.Printf("[mail] dir=outbound type=%s method=loopback from=%s to=%s slug=%s conv_id=%s subject=%q provider_id=%s", msgType, agent.EmailAddress(), agent.EmailAddress(), slug, req.ConversationID, req.Subject, providerID)
-		return &OutboundResult{MessageID: providerID, Method: "loopback"}, nil
+		log.Printf("[mail:%s] dir=outbound type=%s method=loopback status=sent from=%s to=%s slug=%s conv_id=%s subject=%q", outMsg.ID, msgType, agent.EmailAddress(), agent.EmailAddress(), slug, req.ConversationID, req.Subject)
+		return &OutboundResult{MessageID: outMsg.ID, SentAs: "own_address", Method: "loopback"}, nil
 	}
 
 	// Queue-first accept path. We are past self-send / hold / block, so this is the
@@ -1215,7 +1213,7 @@ func (a *API) DeliverOutbound(ctx context.Context, user *identity.User, agent *i
 			return err
 		}
 		if idemCompleteTx != nil {
-			if err := idemCompleteTx(ctx, tx, msg.ID); err != nil {
+			if err := idemCompleteTx(ctx, tx, &OutboundResult{MessageID: msg.ID, Status: "accepted"}); err != nil {
 				return err
 			}
 		}
