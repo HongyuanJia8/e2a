@@ -187,8 +187,7 @@ Our commitment, and what you can rely on:
 ### Beta operations
 
 This is the complete operation-level exception list. These operations carry
-`x-stability-level: beta` (with `x-stability: beta` as a documentation
-compatibility alias) and may change before they are promoted to stable;
+`x-stability-level: beta` and may change before they are promoted to stable;
 every `/v1` operation not listed here is covered by the GA freeze.
 
 | operationId | Method and path | Surface |
@@ -222,8 +221,7 @@ every `/v1` operation not listed here is covered by the GA freeze.
   with a 422, which is intentional input validation (it catches typos like
   `body` vs `text`), not a stability concern.
 - **Beta surfaces are marked `x-stability-level: beta`** in the spec
-  for automated compatibility tools and mirrored as
-  `x-stability: beta` for documentation-tool compatibility
+  for automated compatibility tools
   (operations, schemas, and individual fields — e.g. the `template_*` fields on
   send) and `(beta)` in prose — today: templates, starter templates, the agent
   protection config, and the agent/message trash operations listed above. They are **exempt from the

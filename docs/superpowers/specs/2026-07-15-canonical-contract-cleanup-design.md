@@ -171,11 +171,10 @@ second trash-detail endpoint.
 
 ### 5. Stability inventory
 
-`x-stability-level: beta` is the canonical machine-readable source on
-operations. `x-stability: beta` is retained as a documentation-tool
-compatibility alias. `docs/api.md` publishes an operation-ID table containing
-the exact current beta set and explains that those operations are excluded from
-the `/v1` GA compatibility freeze.
+`x-stability-level: beta` is the sole canonical machine-readable source on
+operations. `docs/api.md` publishes an operation-ID table containing the exact
+current beta set and explains that those operations are excluded from the `/v1`
+GA compatibility freeze.
 
 The intended operation-ID inventory is:
 

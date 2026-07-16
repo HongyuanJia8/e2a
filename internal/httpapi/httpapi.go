@@ -368,7 +368,7 @@ func New(deps Deps) *Server {
 	config.Transformers = []huma.Transformer{stampRequestID}
 	// The stability policy below is the contract's constitution — the
 	// machine-readable markers it refers to (`additionalProperties`,
-	// `x-stability`, `x-stability-level`, `x-experimental-values`) are stamped
+	// `x-stability-level`, `x-experimental-values`) are stamped
 	// onto the document by applyEvolutionStance (stability.go). Keep them in sync.
 	config.Info.Description = "e2a — authenticated email gateway for AI agents. v1 contract.\n\n" +
 		"## Stability policy\n\n" +
@@ -379,8 +379,7 @@ func New(deps Deps) *Server {
 		"declare `additionalProperties: true`; request schemas stay strict (`additionalProperties: false` " +
 		"— an unknown request field is rejected with 422).\n\n" +
 		"Operations and schemas marked `x-stability-level: beta` are exempt from this freeze and may " +
-		"change or be removed without a major version. The `x-stability: beta` marker is a " +
-		"compatibility alias for documentation tooling. A field marked `x-experimental-values` is itself " +
+		"change or be removed without a major version. A field marked `x-experimental-values` is itself " +
 		"stable, but the listed values (and their event payloads) are experimental. Everything not marked " +
 		"beta, or enumerated as experimental, is stable.\n\n" +
 		"Removing or changing stable surface only happens on a new major version path (/v2); deprecations " +

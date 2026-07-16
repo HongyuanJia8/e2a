@@ -30,10 +30,10 @@ response objects and value sets are explicitly forward-compatible. Tightening
 requests, removing response fields, changing types or nullability, removing
 success responses, and other incompatible changes remain blocked by oasdiff.
 
-Beta operations carry the canonical `x-stability-level: beta`
-lifecycle marker understood by oasdiff. They also retain
-`x-stability: beta` as a compatibility alias for documentation tools. Historical
-specs that used `x-stability: experimental` are normalized to beta for comparison.
+Beta operations carry the canonical `x-stability-level: beta` lifecycle marker
+understood by oasdiff. Historical specs that used
+`x-stability: experimental` are normalized to beta for comparison, but new
+specs emit only the canonical marker.
 The gate uses the `stable` threshold, so beta operations are excluded
 even when an entire path disappears. Removing the canonical marker promotes an
 operation into the stable gate; adding it to a stable operation is a blocked

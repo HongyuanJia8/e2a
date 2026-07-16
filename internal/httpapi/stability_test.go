@@ -32,8 +32,8 @@ var betaOperationIDs = []string{
 // applyEvolutionStance (GA review #22/#23) so it can't silently regress:
 //   - response schemas open (additionalProperties: true), request schemas
 //     strict (additionalProperties: false), and never both for one schema;
-//   - canonical x-stability-level: beta on every beta operation, with the
-//     x-stability: beta compatibility alias, derived onto schemas only they use;
+//   - canonical x-stability-level: beta on every beta operation, derived onto
+//     schemas only they use, with no duplicate lifecycle extension;
 //   - x-experimental-values on the event-type fields whose value set has beta
 //     members.
 
@@ -250,9 +250,8 @@ func TestSpecEvolutionStanceCoversUnreachableComponents(t *testing.T) {
 	}
 }
 
-// x-stability-level: beta on exactly the beta surfaces, mirrored to the
-// GitBook-compatible x-stability: beta alias; the stable core must
-// NOT carry either.
+// x-stability-level: beta on exactly the beta surfaces; no duplicate
+// x-stability alias is emitted, and the stable core carries neither marker.
 func TestSpecBetaMarkers(t *testing.T) {
 	doc := renderSpec(t)
 
@@ -271,8 +270,8 @@ func TestSpecBetaMarkers(t *testing.T) {
 	}
 
 	for _, id := range betaOperationIDs {
-		if got := opExt(id, "x-stability"); got != "beta" {
-			t.Errorf("%s must carry x-stability: beta compatibility alias, got %v", id, got)
+		if got := opExt(id, "x-stability"); got != nil {
+			t.Errorf("%s must not carry duplicate x-stability alias, got %v", id, got)
 		}
 		if got := opExt(id, "x-stability-level"); got != "beta" {
 			t.Errorf("%s must carry canonical x-stability-level: beta, got %v", id, got)
@@ -297,8 +296,8 @@ func TestSpecBetaMarkers(t *testing.T) {
 		return sc[extension]
 	}
 	for _, name := range []string{"TemplateView", "CreateTemplateRequest", "StarterTemplateView", "ProtectionConfigView", "ProtectionConfigRequest"} {
-		if got := schemaExt(name, "x-stability"); got != "beta" {
-			t.Errorf("schema %s must carry x-stability: beta compatibility alias, got %v", name, got)
+		if got := schemaExt(name, "x-stability"); got != nil {
+			t.Errorf("schema %s must not carry duplicate x-stability alias, got %v", name, got)
 		}
 		if got := schemaExt(name, "x-stability-level"); got != "beta" {
 			t.Errorf("schema %s must carry canonical x-stability-level: beta, got %v", name, got)
@@ -317,8 +316,8 @@ func TestSpecBetaMarkers(t *testing.T) {
 	props := schemaProps(t, doc, "SendEmailRequest")
 	for _, f := range []string{"template_alias", "template_id", "template_data"} {
 		p, _ := props[f].(map[string]any)
-		if p == nil || p["x-stability"] != "beta" {
-			t.Errorf("SendEmailRequest.%s must carry x-stability: beta compatibility alias", f)
+		if p != nil && p["x-stability"] != nil {
+			t.Errorf("SendEmailRequest.%s must not carry duplicate x-stability alias", f)
 		}
 		if p == nil || p["x-stability-level"] != "beta" {
 			t.Errorf("SendEmailRequest.%s must carry canonical x-stability-level: beta", f)
@@ -412,7 +411,7 @@ func TestSpecStabilityPolicyPresent(t *testing.T) {
 	doc := renderSpec(t)
 	info, _ := doc["info"].(map[string]any)
 	desc, _ := info["description"].(string)
-	for _, needle := range []string{"Stability policy", "additive", "x-stability-level: beta", "x-stability: beta", "additionalProperties: true", "additionalProperties: false", "x-experimental-values"} {
+	for _, needle := range []string{"Stability policy", "additive", "x-stability-level: beta", "additionalProperties: true", "additionalProperties: false", "x-experimental-values"} {
 		if !strings.Contains(desc, needle) {
 			t.Errorf("info.description must state the stability policy; missing %q", needle)
 		}

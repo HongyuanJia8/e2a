@@ -20,9 +20,8 @@ import (
 //     validation is intentional (e.g. an unknown field in a send body is a
 //     422, which catches client-side typos like `body` vs `text`).
 //   - Surfaces exempt from the v1 freeze carry the canonical oasdiff-native
-//     `x-stability-level: beta` marker and the GitBook-compatible
-//     `x-stability: beta` alias (operations declare them at
-//     registration; their schemas inherit them here).
+//     `x-stability-level: beta` marker (operations declare it at registration;
+//     their schemas inherit it here).
 //   - Event-type fields whose VALUE SET contains beta members carry
 //     `x-experimental-values` listing exactly those members
 //     (webhookpub.ExperimentalEventTypes).
@@ -34,7 +33,6 @@ import (
 // for ProtectionConfig* and WebhookFilters*).
 
 const (
-	extStability          = "x-stability"
 	stabilityBeta         = "beta"
 	extStabilityLevel     = "x-stability-level"
 	extExperimentalValues = "x-experimental-values"
@@ -45,7 +43,6 @@ const (
 // two operations share mutable state.
 func beta() map[string]any {
 	return map[string]any{
-		extStability:      stabilityBeta,
 		extStabilityLevel: stabilityBeta,
 	}
 }
@@ -139,7 +136,6 @@ func (s *Server) applyEvolutionStance() {
 		if sc.Extensions == nil {
 			sc.Extensions = map[string]any{}
 		}
-		sc.Extensions[extStability] = stabilityBeta
 		sc.Extensions[extStabilityLevel] = stabilityBeta
 	}
 
@@ -148,7 +144,6 @@ func (s *Server) applyEvolutionStance() {
 	// The template hooks on send are beta (templates are beta) even though
 	// sendMessage itself is stable.
 	for _, prop := range []string{"template_alias", "template_id", "template_data"} {
-		markProperty(schemas, "SendEmailRequest", prop, extStability, stabilityBeta)
 		markProperty(schemas, "SendEmailRequest", prop, extStabilityLevel, stabilityBeta)
 	}
 	// The event-type vocabulary is stable EXCEPT the screening + review-hold
