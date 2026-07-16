@@ -107,6 +107,14 @@ func TestRedeliverEventFanout(t *testing.T) {
 	}
 }
 
+func TestRedeliverEventRejectsExplicitNullWebhookID(t *testing.T) {
+	srv := testServer(t)
+	code, body := postJSON(t, srv.URL+"/v1/events/evt_a/redeliver", "good", map[string]any{"webhook_id": nil})
+	if code != http.StatusUnprocessableEntity || errCode(body) != "invalid_request" {
+		t.Fatalf("want 422 invalid_request, got %d %v", code, body)
+	}
+}
+
 // TestEnqueueError_ReportsPendingNotFailure pins the reconciler-backed contract:
 // when the River enqueue seam errors, /test and redelivery must still report
 // success/pending (the row is durable and the periodic reconciler will re-drive it),
