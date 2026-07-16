@@ -7,7 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 
-	"github.com/Mnexa-AI/e2a/internal/jobs"
+	"github.com/tokencanopy/e2a/internal/jobs"
 )
 
 // defaultReaperInterval is how often the orphan-identity backstop sweeps.

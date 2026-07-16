@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/oauth"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/oauth"
+	"github.com/tokencanopy/e2a/internal/testutil"
 
 	"github.com/ory/fosite"
 	"github.com/jackc/pgx/v5/pgxpool"

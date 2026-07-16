@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/usage"
+	"github.com/tokencanopy/e2a/internal/usage"
 )
 
 // Counter is the subset of *usage.Store the enforcer needs. Declared

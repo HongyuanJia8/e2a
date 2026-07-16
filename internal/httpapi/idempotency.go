@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Mnexa-AI/e2a/internal/idempotency"
+	"github.com/tokencanopy/e2a/internal/idempotency"
 )
 
 // IdemStore is the subset of *idempotency.Store the v1 layer needs. Declared

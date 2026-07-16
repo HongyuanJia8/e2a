@@ -5,17 +5,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/agent"
-	"github.com/Mnexa-AI/e2a/internal/apiserver"
-	"github.com/Mnexa-AI/e2a/internal/idempotency"
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/limits"
-	"github.com/Mnexa-AI/e2a/internal/outbound"
-	"github.com/Mnexa-AI/e2a/internal/usage"
-	"github.com/Mnexa-AI/e2a/internal/webhook"
-	"github.com/Mnexa-AI/e2a/internal/webhookpub"
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tokencanopy/e2a/internal/agent"
+	"github.com/tokencanopy/e2a/internal/apiserver"
+	"github.com/tokencanopy/e2a/internal/idempotency"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/limits"
+	"github.com/tokencanopy/e2a/internal/outbound"
+	"github.com/tokencanopy/e2a/internal/usage"
+	"github.com/tokencanopy/e2a/internal/webhook"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 )
 
 // NewEventsAPIHarness spins up a minimal httptest server with the

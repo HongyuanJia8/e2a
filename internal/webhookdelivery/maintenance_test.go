@@ -6,7 +6,7 @@ import (
 
 	"github.com/riverqueue/river"
 
-	"github.com/Mnexa-AI/e2a/internal/webhookdelivery"
+	"github.com/tokencanopy/e2a/internal/webhookdelivery"
 )
 
 type fakeSweeper struct{ ticks int }

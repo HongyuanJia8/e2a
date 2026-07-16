@@ -17,23 +17,23 @@ The same plugin ships native manifests for Claude Code, Codex, and Cursor.
 ### Claude Code
 
 ```
-claude plugin marketplace add Mnexa-AI/e2a
+claude plugin marketplace add tokencanopy/e2a
 claude plugin install e2a@e2a
 ```
 
 ### Codex
 
 ```
-codex plugin marketplace add Mnexa-AI/e2a
+codex plugin marketplace add tokencanopy/e2a
 ```
 
 Then launch `codex`, run `/plugins`, search for **e2a**, and install — it walks
 you through the OAuth path. (Codex desktop: **Plugins → Add more + →** paste
-`https://github.com/Mnexa-AI/e2a`.)
+`https://github.com/tokencanopy/e2a`.)
 
 ### Cursor
 
-In Cursor, run `/add-plugin e2a`, or paste `https://github.com/Mnexa-AI/e2a`
+In Cursor, run `/add-plugin e2a`, or paste `https://github.com/tokencanopy/e2a`
 into the marketplace search in Cursor Settings and add it.
 
 ### Other MCP clients (manual)

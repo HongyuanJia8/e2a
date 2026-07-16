@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 // enableHITL is a tiny helper that enables HITL on an existing agent using

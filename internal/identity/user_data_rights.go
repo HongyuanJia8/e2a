@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/eventpayload"
 	"github.com/jackc/pgx/v5"
+	"github.com/tokencanopy/e2a/internal/eventpayload"
 )
 
 // UserExport is the structured dump returned by ExportUserData. It's

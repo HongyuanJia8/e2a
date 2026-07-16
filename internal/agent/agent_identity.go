@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/agentauth"
-	"github.com/Mnexa-AI/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/agentauth"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 // auth.md autonomous agent-identity path (Slice 5b-2). Two endpoints implement

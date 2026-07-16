@@ -10,8 +10,8 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 
-	"github.com/Mnexa-AI/e2a/internal/hitlnotify"
-	"github.com/Mnexa-AI/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/hitlnotify"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 type fakeStore struct {

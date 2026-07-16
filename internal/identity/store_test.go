@@ -10,9 +10,9 @@ import (
 
 	"encoding/json"
 
-	"github.com/Mnexa-AI/e2a/internal/emailauth"
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/emailauth"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/testutil"
 )
 
 func TestCreateAgent(t *testing.T) {

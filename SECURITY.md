@@ -19,7 +19,7 @@ Email **josh@mnexa.ai** with:
   the `VERSION` file)
 - Any mitigations you suggest
 
-You can also use GitHub's [private vulnerability reporting](https://github.com/Mnexa-AI/e2a/security/advisories/new)
+You can also use GitHub's [private vulnerability reporting](https://github.com/tokencanopy/e2a/security/advisories/new)
 to file a draft advisory directly against this repo.
 
 We aim to:

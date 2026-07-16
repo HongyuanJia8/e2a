@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/eventpayload"
-	"github.com/Mnexa-AI/e2a/internal/eventpayload/goldenassert"
+	"github.com/tokencanopy/e2a/internal/eventpayload"
+	"github.com/tokencanopy/e2a/internal/eventpayload/goldenassert"
 )
 
 // fakeConsumerStore is an in-memory delivery.Store.

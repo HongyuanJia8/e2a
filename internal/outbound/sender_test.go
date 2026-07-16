@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/dkim"
-	"github.com/Mnexa-AI/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/dkim"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 // TestComposeReplyToOverride pins the Reply-To behavior: absent a caller value the

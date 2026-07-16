@@ -24,7 +24,7 @@ import (
 
 	"github.com/riverqueue/river"
 
-	"github.com/Mnexa-AI/e2a/internal/delivery"
+	"github.com/tokencanopy/e2a/internal/delivery"
 )
 
 // sendRetryBackoffs is the per-attempt delay schedule for a failed outbound send —

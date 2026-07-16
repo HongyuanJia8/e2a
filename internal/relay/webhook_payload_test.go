@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/eventpayload"
-	"github.com/Mnexa-AI/e2a/internal/eventpayload/goldenassert"
-	"github.com/Mnexa-AI/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/eventpayload"
+	"github.com/tokencanopy/e2a/internal/eventpayload/goldenassert"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 // TestBuildEmailReceivedPayload_Shape verifies the email.received event is a

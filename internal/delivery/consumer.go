@@ -4,7 +4,7 @@ import (
 	"context"
 	"log"
 
-	"github.com/Mnexa-AI/e2a/internal/eventpayload"
+	"github.com/tokencanopy/e2a/internal/eventpayload"
 )
 
 // Store is the narrow persistence surface the consumer needs. *identity.Store

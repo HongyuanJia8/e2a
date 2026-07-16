@@ -23,9 +23,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/webhook"
-	"github.com/Mnexa-AI/e2a/internal/webhookpub"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/webhook"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 )
 
 // retryBackoffs is the GA-frozen eight-attempt delivery envelope. Entry zero is

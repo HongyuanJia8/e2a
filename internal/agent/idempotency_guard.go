@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Mnexa-AI/e2a/internal/idempotency"
+	"github.com/tokencanopy/e2a/internal/idempotency"
 )
 
 // idempotencyGuard runs the Idempotency-Key handshake at the start of a

@@ -11,7 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Mnexa-AI/e2a/migrations"
+	"github.com/tokencanopy/e2a/migrations"
 )
 
 // readyzHandler reports instance-local readiness: the DB is reachable and the

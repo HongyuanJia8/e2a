@@ -4,11 +4,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/eventpayload"
-	"github.com/Mnexa-AI/e2a/internal/eventpayload/goldenassert"
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/outbound"
-	"github.com/Mnexa-AI/e2a/internal/webhookpub"
+	"github.com/tokencanopy/e2a/internal/eventpayload"
+	"github.com/tokencanopy/e2a/internal/eventpayload/goldenassert"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/outbound"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 )
 
 func TestBuildSentEvent_PopulatesEnvelope(t *testing.T) {

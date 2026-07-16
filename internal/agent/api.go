@@ -16,26 +16,26 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/agentauth"
-	"github.com/Mnexa-AI/e2a/internal/approvaltoken"
-	"github.com/Mnexa-AI/e2a/internal/auth"
-	"github.com/Mnexa-AI/e2a/internal/dkim"
-	"github.com/Mnexa-AI/e2a/internal/idempotency"
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/limits"
-	"github.com/Mnexa-AI/e2a/internal/oauth"
-	"github.com/Mnexa-AI/e2a/internal/outbound"
-	"github.com/Mnexa-AI/e2a/internal/piguard"
-	"github.com/Mnexa-AI/e2a/internal/ratelimit"
-	"github.com/Mnexa-AI/e2a/internal/telemetry"
-	"github.com/Mnexa-AI/e2a/internal/usage"
-	"github.com/Mnexa-AI/e2a/internal/webhook"
-	"github.com/Mnexa-AI/e2a/internal/webhookpub"
 	"github.com/google/go-github/v72/github"
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/ory/fosite"
+	"github.com/tokencanopy/e2a/internal/agentauth"
+	"github.com/tokencanopy/e2a/internal/approvaltoken"
+	"github.com/tokencanopy/e2a/internal/auth"
+	"github.com/tokencanopy/e2a/internal/dkim"
+	"github.com/tokencanopy/e2a/internal/idempotency"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/limits"
+	"github.com/tokencanopy/e2a/internal/oauth"
+	"github.com/tokencanopy/e2a/internal/outbound"
+	"github.com/tokencanopy/e2a/internal/piguard"
+	"github.com/tokencanopy/e2a/internal/ratelimit"
+	"github.com/tokencanopy/e2a/internal/telemetry"
+	"github.com/tokencanopy/e2a/internal/usage"
+	"github.com/tokencanopy/e2a/internal/webhook"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 	"golang.org/x/net/idna"
 )
 
@@ -1379,7 +1379,7 @@ func (a *API) handleFeedback(w http.ResponseWriter, r *http.Request) {
 
 	ghRepo := os.Getenv("GITHUB_FEEDBACK_REPO")
 	if ghRepo == "" {
-		ghRepo = "Mnexa-AI/e2a"
+		ghRepo = "tokencanopy/e2a"
 	}
 	parts := strings.SplitN(ghRepo, "/", 2)
 	if len(parts) != 2 {

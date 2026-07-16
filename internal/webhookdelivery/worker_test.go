@@ -10,10 +10,10 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
-	"github.com/Mnexa-AI/e2a/internal/webhook"
-	"github.com/Mnexa-AI/e2a/internal/webhookdelivery"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/webhook"
+	"github.com/tokencanopy/e2a/internal/webhookdelivery"
 )
 
 type fakeDeliverer struct{ out webhook.DeliveryOutcome }

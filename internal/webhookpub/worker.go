@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/telemetry"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tokencanopy/e2a/internal/telemetry"
 )
 
 // OutboxWorker drains webhook_events. For each pending row it reads

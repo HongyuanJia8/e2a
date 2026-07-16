@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 // AccountUserView is the authenticated principal's identity (A-1). Returned by

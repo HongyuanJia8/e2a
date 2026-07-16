@@ -158,12 +158,12 @@ Triggered by tag push (`mcp-v*`) or `workflow_dispatch`. Publishes `@e2a/mcp-ser
 3. Commit and push to main
 4. `git tag mcp-v<VERSION> && git push origin mcp-v<VERSION>`
 
-The first publish requires `@e2a/mcp-server` to be configured as a trusted publisher on npmjs.com against `Mnexa-AI/e2a` + `publish-mcp.yml` (one-time, done in the npm web UI).
+The first publish requires `@e2a/mcp-server` to be configured as a trusted publisher on npmjs.com against `tokencanopy/e2a` + `publish-mcp.yml` (one-time, done in the npm web UI).
 
 ## Key Conventions
 
 - **npm workspaces**: root `package.json` declares `cli` and `sdks/typescript` as workspaces. Always use `--workspace` flag for workspace commands. Use `--package-lock=false` for install.
-- **Go module**: `github.com/Mnexa-AI/e2a`, Go 1.25
+- **Go module**: `github.com/tokencanopy/e2a`, Go 1.25
 - **Go test tiers**: `test-unit` needs no DB. `test-integration` needs Postgres (runs identity/agent packages). `test-e2e` uses build tag `integration` and runs `internal/e2e/`. `make test` runs everything (including e2e) with `-tags integration -p 1`.
 - **Schema changes**: when changing a table shape, add or update DB-backed tests for every package that writes direct SQL against that table. Higher-level e2e tests are not enough. Our migration helper is idempotent and will not automatically catch old query assumptions if runtime SQL drifts from the redesigned schema.
 - **Migrations**: every `migrations/00N_*.sql` must be **idempotent** (use `CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, etc.) and **non-destructive on prod-sized tables** (`ALTER TABLE ... ADD COLUMN` is safe; `ALTER COLUMN TYPE` can rewrite the whole table — avoid on `messages` and `usage_events`). The e2a binary embeds `migrations/*.sql` via `migrations/embed.go` and auto-applies pending ones at startup against a `schema_migrations` tracker table; `E2A_MIGRATION_MODE` controls the behavior (`auto` default, `verify` to refuse and report pending, `skip` for emergency surgery). New migrations land in prod on the next binary deploy with zero manual ceremony.

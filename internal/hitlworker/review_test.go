@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 // TestWorkerExpiresInboundReview verifies the Slice 4b sweep: an overdue

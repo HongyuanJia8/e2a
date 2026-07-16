@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Mnexa-AI/e2a/internal/oauth"
+	"github.com/tokencanopy/e2a/internal/oauth"
 )
 
 // mustExec wraps a pool.Exec call and fails the test on error. Used

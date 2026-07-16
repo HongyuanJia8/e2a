@@ -147,7 +147,7 @@ describe("Navigation auth state", () => {
     });
     expect(githubLink).toHaveAttribute(
       "href",
-      "https://github.com/Mnexa-AI/e2a",
+      "https://github.com/tokencanopy/e2a",
     );
   });
 });
@@ -168,7 +168,7 @@ describe("Footer", () => {
       .find(
         (l) =>
           l.textContent === "GitHub" &&
-          l.getAttribute("href") === "https://github.com/Mnexa-AI/e2a",
+          l.getAttribute("href") === "https://github.com/tokencanopy/e2a",
       );
     expect(githubLink).toBeInTheDocument();
   });

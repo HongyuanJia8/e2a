@@ -10,7 +10,7 @@ import (
 	"reflect"
 	"testing"
 
-	agentapi "github.com/Mnexa-AI/e2a/internal/agent"
+	agentapi "github.com/tokencanopy/e2a/internal/agent"
 )
 
 func TestErrorBodyOpenEnvelopeSchema(t *testing.T) {

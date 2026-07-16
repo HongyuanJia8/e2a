@@ -16,8 +16,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/emailtemplate"
-	"github.com/Mnexa-AI/e2a/internal/startertemplates"
+	"github.com/tokencanopy/e2a/internal/emailtemplate"
+	"github.com/tokencanopy/e2a/internal/startertemplates"
 )
 
 // exampleData builds the render data for a master from each declared

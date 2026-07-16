@@ -9,9 +9,9 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/inboundprocess"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/inboundprocess"
+	"github.com/tokencanopy/e2a/internal/testutil"
 )
 
 // TestPruneProcessedIntake covers retention: an old processed row is pruned; a recent

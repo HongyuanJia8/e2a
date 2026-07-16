@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 // --- GET /v1/info -----------------------------------------------------------

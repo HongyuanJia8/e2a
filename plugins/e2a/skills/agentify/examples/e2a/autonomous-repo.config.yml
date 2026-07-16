@@ -6,7 +6,7 @@
 # docs/design/autonomous-repo-framework.md.
 
 product_name: "e2a"
-repo: "Mnexa-AI/e2a"
+repo: "tokencanopy/e2a"
 marker: "e2a-feedback"                  # <!-- e2a-feedback --> footer in bot-authored issues/PRs
 
 reviewer: "jiashuoz"                    # PR ship-gate reviewer (requested + assigned)

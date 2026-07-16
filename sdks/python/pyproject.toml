@@ -42,7 +42,7 @@ artifacts = ["src/e2a/py.typed", "src/e2a/v1/py.typed", "src/e2a/v1/generated/py
 
 [project.urls]
 Homepage = "https://e2a.dev"
-Repository = "https://github.com/Mnexa-AI/e2a"
+Repository = "https://github.com/tokencanopy/e2a"
 Documentation = "https://e2a.dev"
 
 [project.optional-dependencies]

@@ -3,8 +3,8 @@ package eventpayload_test
 import (
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/eventpayload"
-	"github.com/Mnexa-AI/e2a/internal/webhookpub"
+	"github.com/tokencanopy/e2a/internal/eventpayload"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 )
 
 func TestStableCatalogPartitionsKnownEvents(t *testing.T) {

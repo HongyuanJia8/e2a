@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/inboundpolicy"
-	"github.com/Mnexa-AI/e2a/internal/piguard"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/inboundpolicy"
+	"github.com/tokencanopy/e2a/internal/piguard"
 )
 
 func testScreenServer() *Server {

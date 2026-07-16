@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/testutil"
-	"github.com/Mnexa-AI/e2a/internal/webhookpub"
 	"github.com/jackc/pgx/v5"
+	"github.com/tokencanopy/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 )
 
 // fakeFanOutSeamEnq implements webhookpub.FanOutEnqueuer for the outbox seam tests. It

@@ -1,4 +1,4 @@
-module github.com/Mnexa-AI/e2a
+module github.com/tokencanopy/e2a
 
 go 1.25.0
 

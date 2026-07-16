@@ -8,11 +8,11 @@ import (
 	"log"
 	"strings"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/outbound"
-	"github.com/Mnexa-AI/e2a/internal/piguard"
-	"github.com/Mnexa-AI/e2a/internal/webhookpub"
 	"github.com/jackc/pgx/v5"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/outbound"
+	"github.com/tokencanopy/e2a/internal/piguard"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 )
 
 // outboundVerdict is the outcome of screening one outbound send: the applied

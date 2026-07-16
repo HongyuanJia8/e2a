@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 // B2 (review correctness bug): the `status` field must mean the same thing on

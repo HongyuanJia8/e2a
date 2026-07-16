@@ -119,7 +119,7 @@ This is the entire trick. The webhook is ~30 lines of business logic;
 ADK does the actual memory work, e2a does the actual email work.
 
 See [webhook.py](webhook.py) for the implementation, including
-[HMAC signature verification](https://github.com/Mnexa-AI/e2a/blob/main/sdks/python/README.md#quick-start)
+[HMAC signature verification](https://github.com/tokencanopy/e2a/blob/main/sdks/python/README.md#quick-start)
 which you should *always* do on a public webhook before trusting any
 field on the parsed payload.
 
@@ -141,6 +141,6 @@ field on the parsed payload.
 - **HITL.** The agent replies immediately. If you want human approval
   before the reply goes out, enable review holds on the agent's
   protection config (`PUT /v1/agents/{address}/protection`,
-  [docs](https://github.com/Mnexa-AI/e2a/blob/main/README.md)) and the
+  [docs](https://github.com/tokencanopy/e2a/blob/main/README.md)) and the
   `client.messages.reply(...)` call returns `status: "pending_review"`
   with the reply held for review.

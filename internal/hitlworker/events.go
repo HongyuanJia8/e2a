@@ -4,8 +4,8 @@ import (
 	"context"
 	"log"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/webhookpub"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
 )
 
 // Event emission for TTL auto-resolution.

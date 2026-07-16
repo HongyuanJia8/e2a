@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 // Scope enforcement — the hard scope ceiling (Slice 5a / design §5 / decision

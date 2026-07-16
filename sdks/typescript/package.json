@@ -40,7 +40,7 @@
   "homepage": "https://e2a.dev",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Mnexa-AI/e2a",
+    "url": "https://github.com/tokencanopy/e2a",
     "directory": "sdks/typescript"
   },
   "engines": {

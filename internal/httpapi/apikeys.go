@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 // APIKeyView is the non-secret metadata for an API key (list + create). The

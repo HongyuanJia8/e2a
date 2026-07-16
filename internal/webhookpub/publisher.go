@@ -4,9 +4,9 @@ import (
 	"context"
 	"log"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tokencanopy/e2a/internal/identity"
 )
 
 // Publisher fires an Event at the webhook pipeline. There is exactly one

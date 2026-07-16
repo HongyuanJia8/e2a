@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/eventpayload"
+	"github.com/tokencanopy/e2a/internal/eventpayload"
 )
 
 // eventPayloadComponentNames are every component schema published by

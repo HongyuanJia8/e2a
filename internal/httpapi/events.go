@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/agent"
+	"github.com/tokencanopy/e2a/internal/agent"
 	"github.com/danielgtaylor/huma/v2"
 )
 

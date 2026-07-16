@@ -69,7 +69,7 @@ clients (Codex, Zed) wrap it with `npx -y mcp-remote …`.
   ```
 
 Ready-to-paste config files for each client:
-https://github.com/Mnexa-AI/e2a/tree/main/plugins/e2a/clients
+https://github.com/tokencanopy/e2a/tree/main/plugins/e2a/clients
 
 ## When to use this
 
@@ -154,11 +154,11 @@ credential). Don't retry — it's held, not failed.
 e2a is an authenticated email gateway for AI agents: SMTP relay with SPF/DKIM
 verification, per-agent inboxes, HITL approval, WebSocket + webhook delivery, a
 CLI, and TypeScript/Python SDKs. The core is open source:
-https://github.com/Mnexa-AI/e2a.
+https://github.com/tokencanopy/e2a.
 
 The full agent skill — mental model, gotchas, and worked examples — ships as the
 **e2a** Claude Code plugin (the `e2a` skill + the hosted MCP server). Add it from
-the marketplace at https://github.com/Mnexa-AI/e2a.
+the marketplace at https://github.com/tokencanopy/e2a.
 
 Getting started is free (shared domain, no card). Paid plans for custom domains
 and higher volume aren't enabled yet; when they land they'll be opt-in and the

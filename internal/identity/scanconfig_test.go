@@ -5,8 +5,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/testutil"
 )
 
 func approxEq(a, b float64) bool { return math.Abs(a-b) < 0.001 }

@@ -8,8 +8,8 @@ import (
 
 	"github.com/riverqueue/river"
 
-	"github.com/Mnexa-AI/e2a/internal/janitor"
-	"github.com/Mnexa-AI/e2a/internal/oauth"
+	"github.com/tokencanopy/e2a/internal/janitor"
+	"github.com/tokencanopy/e2a/internal/oauth"
 )
 
 // fakePruner implements every prune interface (MessagePruner, DeliveryPruner,

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/config"
+	"github.com/tokencanopy/e2a/internal/config"
 )
 
 var smtpRetryBackoffs = []time.Duration{1 * time.Second, 5 * time.Second, 15 * time.Second}

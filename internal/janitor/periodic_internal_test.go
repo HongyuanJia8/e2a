@@ -3,7 +3,7 @@ package janitor
 import (
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/jobs"
+	"github.com/tokencanopy/e2a/internal/jobs"
 )
 
 // TestPeriodicConstructor_RoutesToMaintenance: the periodic's per-fire

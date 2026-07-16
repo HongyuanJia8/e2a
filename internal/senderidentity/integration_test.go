@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mnexa-AI/e2a/internal/identity"
-	"github.com/Mnexa-AI/e2a/internal/jobs"
-	"github.com/Mnexa-AI/e2a/internal/senderidentity"
-	"github.com/Mnexa-AI/e2a/internal/testutil"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tokencanopy/e2a/internal/identity"
+	"github.com/tokencanopy/e2a/internal/jobs"
+	"github.com/tokencanopy/e2a/internal/senderidentity"
+	"github.com/tokencanopy/e2a/internal/testutil"
 )
 
 // freshRiver applies River's schema and clears the job table. testutil does

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Mnexa-AI/e2a/internal/inboundpolicy"
+	"github.com/tokencanopy/e2a/internal/inboundpolicy"
 )
 
 // ContentScanEnabled reports whether the piguard content scan is turned on for

@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/eventpayload"
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/tokencanopy/e2a/internal/eventpayload"
 )
 
 func TestEventEnvelopeIsOpenAndMapped(t *testing.T) {

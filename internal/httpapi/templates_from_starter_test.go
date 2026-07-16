@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Mnexa-AI/e2a/internal/startertemplates"
+	"github.com/tokencanopy/e2a/internal/startertemplates"
 )
 
 // from_starter on POST /v1/templates: copy a starter master verbatim into the
