@@ -20,7 +20,8 @@ import (
 //     validation is intentional (e.g. an unknown field in a send body is a
 //     422, which catches client-side typos like `body` vs `text`).
 //   - Surfaces exempt from the v1 freeze carry `x-stability: experimental`
-//     (operations declare it at registration; their schemas inherit it here).
+//     and its oasdiff-native `x-stability-level: beta` mirror (operations
+//     declare them at registration; their schemas inherit them here).
 //   - Event-type fields whose VALUE SET contains beta members carry
 //     `x-experimental-values` listing exactly those members
 //     (webhookpub.ExperimentalEventTypes).
@@ -34,6 +35,8 @@ import (
 const (
 	extStability          = "x-stability"
 	stabilityExperimental = "experimental"
+	extStabilityLevel     = "x-stability-level"
+	stabilityBeta         = "beta"
 	extExperimentalValues = "x-experimental-values"
 )
 
@@ -41,7 +44,10 @@ const (
 // v1 freeze (may change without a major version). Returns a fresh map so no
 // two operations share mutable state.
 func experimental() map[string]any {
-	return map[string]any{extStability: stabilityExperimental}
+	return map[string]any{
+		extStability:      stabilityExperimental,
+		extStabilityLevel: stabilityBeta,
+	}
 }
 
 // applyEvolutionStance walks the generated OpenAPI document once, after every
@@ -134,6 +140,7 @@ func (s *Server) applyEvolutionStance() {
 			sc.Extensions = map[string]any{}
 		}
 		sc.Extensions[extStability] = stabilityExperimental
+		sc.Extensions[extStabilityLevel] = stabilityBeta
 	}
 
 	// Field-level markers on otherwise-stable schemas.
@@ -142,6 +149,7 @@ func (s *Server) applyEvolutionStance() {
 	// sendMessage itself is stable.
 	for _, prop := range []string{"template_alias", "template_id", "template_data"} {
 		markProperty(schemas, "SendEmailRequest", prop, extStability, stabilityExperimental)
+		markProperty(schemas, "SendEmailRequest", prop, extStabilityLevel, stabilityBeta)
 	}
 	// The event-type vocabulary is stable EXCEPT the screening + review-hold
 	// members (their payloads may still change). The field is stable; the beta

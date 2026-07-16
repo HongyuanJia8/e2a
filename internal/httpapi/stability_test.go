@@ -250,18 +250,18 @@ func TestSpecEvolutionStanceCoversUnreachableComponents(t *testing.T) {
 	}
 }
 
-// x-stability: experimental on exactly the beta surfaces; the stable core must
-// NOT carry it.
+// x-stability: experimental on exactly the beta surfaces, mirrored to the
+// oasdiff-native x-stability-level: beta; the stable core must NOT carry either.
 func TestSpecExperimentalMarkers(t *testing.T) {
 	doc := renderSpec(t)
 
-	opExt := func(operationID string) any {
+	opExt := func(operationID, extension string) any {
 		paths, _ := doc["paths"].(map[string]any)
 		for _, pi := range paths {
 			item, _ := pi.(map[string]any)
 			for _, op := range item {
 				if opm, ok := op.(map[string]any); ok && opm["operationId"] == operationID {
-					return opm["x-stability"]
+					return opm[extension]
 				}
 			}
 		}
@@ -270,33 +270,45 @@ func TestSpecExperimentalMarkers(t *testing.T) {
 	}
 
 	for _, id := range experimentalOperationIDs {
-		if got := opExt(id); got != "experimental" {
+		if got := opExt(id, "x-stability"); got != "experimental" {
 			t.Errorf("%s must carry x-stability: experimental (beta surface), got %v", id, got)
+		}
+		if got := opExt(id, "x-stability-level"); got != "beta" {
+			t.Errorf("%s must carry x-stability-level: beta for oasdiff, got %v", id, got)
 		}
 	}
 	for _, id := range []string{"sendMessage", "createAgent", "listMessages", "createWebhook", "listEvents"} {
-		if got := opExt(id); got != nil {
+		if got := opExt(id, "x-stability"); got != nil {
 			t.Errorf("%s is stable GA surface and must NOT carry x-stability, got %v", id, got)
+		}
+		if got := opExt(id, "x-stability-level"); got != nil {
+			t.Errorf("%s is stable GA surface and must NOT carry x-stability-level, got %v", id, got)
 		}
 	}
 
 	comps, _ := doc["components"].(map[string]any)
 	schemas, _ := comps["schemas"].(map[string]any)
-	schemaExt := func(name string) any {
+	schemaExt := func(name, extension string) any {
 		sc, ok := schemas[name].(map[string]any)
 		if !ok {
 			t.Fatalf("schema %q not found", name)
 		}
-		return sc["x-stability"]
+		return sc[extension]
 	}
 	for _, name := range []string{"TemplateView", "CreateTemplateRequest", "StarterTemplateView", "ProtectionConfigView", "ProtectionConfigRequest"} {
-		if got := schemaExt(name); got != "experimental" {
+		if got := schemaExt(name, "x-stability"); got != "experimental" {
 			t.Errorf("schema %s must carry x-stability: experimental, got %v", name, got)
+		}
+		if got := schemaExt(name, "x-stability-level"); got != "beta" {
+			t.Errorf("schema %s must carry x-stability-level: beta for oasdiff, got %v", name, got)
 		}
 	}
 	for _, name := range []string{"MessageView", "AgentView", "WebhookView", "SendEmailRequest", "ErrorEnvelope"} {
-		if got := schemaExt(name); got != nil {
+		if got := schemaExt(name, "x-stability"); got != nil {
 			t.Errorf("schema %s is stable and must NOT carry x-stability, got %v", name, got)
+		}
+		if got := schemaExt(name, "x-stability-level"); got != nil {
+			t.Errorf("schema %s is stable and must NOT carry x-stability-level, got %v", name, got)
 		}
 	}
 
@@ -306,6 +318,9 @@ func TestSpecExperimentalMarkers(t *testing.T) {
 		p, _ := props[f].(map[string]any)
 		if p == nil || p["x-stability"] != "experimental" {
 			t.Errorf("SendEmailRequest.%s must carry x-stability: experimental", f)
+		}
+		if p == nil || p["x-stability-level"] != "beta" {
+			t.Errorf("SendEmailRequest.%s must carry x-stability-level: beta for oasdiff", f)
 		}
 	}
 

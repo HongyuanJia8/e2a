@@ -221,6 +221,7 @@ every `/v1` operation not listed here is covered by the GA freeze.
   with a 422, which is intentional input validation (it catches typos like
   `body` vs `text`), not a stability concern.
 - **Experimental surfaces are marked `x-stability: experimental`** in the spec
+  and mirrored as `x-stability-level: beta` for automated compatibility tools
   (operations, schemas, and individual fields — e.g. the `template_*` fields on
   send) and `(beta)` in prose — today: templates, starter templates, the agent
   protection config, and the agent/message trash operations listed above. They are **exempt from the

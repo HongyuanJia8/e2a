@@ -1,0 +1,12 @@
+openapi: 3.1.0
+info:
+  title: Compatibility fixture
+  version: "1"
+paths:
+  /experimental:
+    get:
+      operationId: experimentalOperation
+      x-stability: experimental
+      responses:
+        "200":
+          description: Success

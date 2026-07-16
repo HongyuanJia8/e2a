@@ -368,8 +368,8 @@ func New(deps Deps) *Server {
 	config.Transformers = []huma.Transformer{stampRequestID}
 	// The stability policy below is the contract's constitution — the
 	// machine-readable markers it refers to (`additionalProperties`,
-	// `x-stability`, `x-experimental-values`) are stamped onto the document by
-	// applyEvolutionStance (stability.go). Keep the three in sync.
+	// `x-stability`, `x-stability-level`, `x-experimental-values`) are stamped
+	// onto the document by applyEvolutionStance (stability.go). Keep them in sync.
 	config.Info.Description = "e2a — authenticated email gateway for AI agents. v1 contract.\n\n" +
 		"## Stability policy\n\n" +
 		"The v1 surface is stable and evolves **additively only**: new endpoints, new optional request " +

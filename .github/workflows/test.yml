@@ -27,8 +27,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Every push compares against its immediate predecessor, so each push needs a
+  # unique group: GitHub replaces older *pending* runs in a shared group even
+  # when cancel-in-progress is false. PR runs are safe to supersede by ref.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   go:
@@ -292,11 +295,14 @@ jobs:
       - run: npm run build --workspace @e2a/mcp-server
 
   spec:
-    name: OpenAPI spec freshness
+    name: OpenAPI contract gates
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          # oasdiff reads the base document directly from the comparison commit.
+          fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
@@ -310,6 +316,20 @@ jobs:
       # until that follow-up PR flips codegen onto api/openapi.yaml.
       - name: Check the /v1 spec is up to date
         run: make spec-check
+      - name: Test the /v1 compatibility policy
+        run: make openapi-compat-test
+      - name: Reject breaking /v1 changes in pull requests
+        if: github.event_name == 'pull_request'
+        env:
+          OPENAPI_BASE: ${{ github.event.pull_request.base.sha }}:api/openapi.yaml
+          OASDIFF_FORMAT: githubactions
+        run: make openapi-compat-check
+      - name: Reject breaking /v1 changes pushed to main
+        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        env:
+          OPENAPI_BASE: ${{ github.event.before }}:api/openapi.yaml
+          OASDIFF_FORMAT: githubactions
+        run: make openapi-compat-check
 
   python-sdk:
     name: Python SDK tests

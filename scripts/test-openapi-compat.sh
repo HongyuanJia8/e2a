@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+checker="$repo_root/scripts/check-openapi-compat.sh"
+fixtures="$repo_root/api/testdata/oasdiff"
+
+if [[ ! -x "$checker" ]]; then
+  echo "missing executable compatibility checker: $checker" >&2
+  exit 1
+fi
+
+expect_pass() {
+  local name="$1"
+  local base="$2"
+  local revision="$3"
+  if ! "$checker" "$base" "$revision" >/dev/null; then
+    echo "expected compatibility case to pass: $name" >&2
+    exit 1
+  fi
+}
+
+expect_fail() {
+  local name="$1"
+  local base="$2"
+  local revision="$3"
+  local finding="$4"
+  local output status
+  set +e
+  output="$("$checker" "$base" "$revision" 2>&1)"
+  status=$?
+  set -e
+  if [[ $status -eq 0 ]]; then
+    echo "expected breaking case to fail: $name" >&2
+    exit 1
+  fi
+  if ! grep -Fq "[$finding]" <<<"$output"; then
+    echo "breaking case '$name' failed without expected finding [$finding]" >&2
+    echo "$output" >&2
+    exit 1
+  fi
+}
+
+expect_pass "identical contract" "$fixtures/base.yaml" "$fixtures/base.yaml"
+expect_pass "additive response field" "$fixtures/base.yaml" "$fixtures/additive-response.yaml"
+expect_pass "experimental operation removal" "$fixtures/base.yaml" "$fixtures/experimental-removed.yaml"
+
+expect_fail "stable operation removal" "$fixtures/base.yaml" "$fixtures/stable-removed.yaml" "api-path-removed-without-deprecation"
+expect_fail "operationId rename" "$fixtures/base.yaml" "$fixtures/operation-id-renamed.yaml" "api-operation-id-removed"
+expect_fail "new required request field" "$fixtures/base.yaml" "$fixtures/required-request-field.yaml" "new-required-request-property"
+expect_fail "warning-level request removal" "$fixtures/base.yaml" "$fixtures/request-property-removed.yaml" "request-property-removed"
+expect_fail "stable operation marked beta" "$fixtures/base.yaml" "$fixtures/stability-decreased.yaml" "api-stability-decreased"
+expect_fail "bearer mechanism changed" "$fixtures/security-base.yaml" "$fixtures/security-scheme-changed.yaml" "security-schemes-changed"
+
+set +e
+version_output="$(OASDIFF_BIN=/usr/bin/true "$checker" "$fixtures/base.yaml" "$fixtures/base.yaml" 2>&1)"
+version_status=$?
+set -e
+if [[ $version_status -eq 0 ]] || ! grep -Fq "must be github.com/oasdiff/oasdiff v1.23.0" <<<"$version_output"; then
+  echo "unpinned OASDIFF_BIN was not rejected" >&2
+  exit 1
+fi
+
+echo "oasdiff compatibility policy fixtures passed"
