@@ -137,8 +137,8 @@ func scenarioInboundRoundTrip(ctx context.Context, p *Probe) Result {
 // is delivered out the webhook with a valid HMAC. Covers the outbound API +
 // screening + compose + real SES submit + the outbound event → outbox →
 // subscriber worker → webhook delivery → signing path. Correlated by the
-// returned message_id (sync mode emits email.sent inline; async mode's worker
-// emits it after the SES submit — both land at the sink). Requires the probe
+// returned message_id (the outbound worker emits it after the SES submit).
+// Requires the probe
 // webhook to subscribe to email.sent (see cmd/e2a-prober seed).
 func scenarioOutboundSend(ctx context.Context, p *Probe) Result {
 	if p.Sink == nil {
@@ -159,7 +159,7 @@ func scenarioOutboundSend(ctx context.Context, p *Probe) Result {
 	if err != nil {
 		return fail("send: %v", err)
 	}
-	if st != http.StatusOK {
+	if st != http.StatusAccepted {
 		return fail("send: HTTP %d", st)
 	}
 	var out struct {
@@ -168,6 +168,9 @@ func scenarioOutboundSend(ctx context.Context, p *Probe) Result {
 	}
 	if jerr := json.Unmarshal(respBody, &out); jerr != nil || out.MessageID == "" {
 		return fail("send: could not parse message_id from response (status=%q)", out.Status)
+	}
+	if out.Status != "accepted" {
+		return fail("send: status=%q, want accepted", out.Status)
 	}
 
 	d, err := p.Sink.Await(ctx, func(d Delivery) bool {
