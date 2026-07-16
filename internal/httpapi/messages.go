@@ -400,7 +400,7 @@ func (s *Server) registerMessages() {
 		Description: "Move a message to the trash. Trashed messages disappear from lists, threads, and reply targets, but can be restored via POST …/messages/{id}/restore until they are purged ~30 days after deletion. No confirmation is required because the default delete is reversible. Pass permanent=true with confirm=DELETE to permanently delete a message that is ALREADY in the trash (\"delete forever\"). A message held for review (review_status=pending_review) cannot be deleted — resolve it in the review queue first (409 message_held).",
 		Tags:        []string{"messages"},
 		Security:    []map[string][]string{{"bearer": {}}},
-		Extensions:  experimental(),
+		Extensions:  beta(),
 	}, s.handleDeleteMessage)
 
 	huma.Register(s.API, huma.Operation{
@@ -411,7 +411,7 @@ func (s *Server) registerMessages() {
 		Description: "Bring a trashed (soft-deleted) message back to the inbox. Its remaining retention resumes where it left off — time spent in the trash does not count against the message's normal lifetime. Returns the restored message. 409 not_in_trash when the message is not in the trash.",
 		Tags:        []string{"messages"},
 		Security:    []map[string][]string{{"bearer": {}}},
-		Extensions:  experimental(),
+		Extensions:  beta(),
 	}, s.handleRestoreMessage)
 
 	huma.Register(s.API, huma.Operation{

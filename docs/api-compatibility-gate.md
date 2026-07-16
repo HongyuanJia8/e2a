@@ -30,11 +30,14 @@ response objects and value sets are explicitly forward-compatible. Tightening
 requests, removing response fields, changing types or nullability, removing
 success responses, and other incompatible changes remain blocked by oasdiff.
 
-Operations carrying `x-stability: experimental` also emit the additive
-`x-stability-level: beta` lifecycle marker understood by oasdiff. The gate uses
-the `stable` threshold, so experimental operations are excluded even when an
-entire path disappears. Removing both markers promotes an operation into the
-stable gate; adding them to a stable operation is a blocked stability decrease.
+Beta operations carry the canonical `x-stability-level: beta`
+lifecycle marker understood by oasdiff. They also retain
+`x-stability: beta` as a compatibility alias for documentation tools. Historical
+specs that used `x-stability: experimental` are normalized to beta for comparison.
+The gate uses the `stable` threshold, so beta operations are excluded
+even when an entire path disappears. Removing the canonical marker promotes an
+operation into the stable gate; adding it to a stable operation is a blocked
+stability decrease.
 
 ## Running locally
 
@@ -64,5 +67,5 @@ fixture changes. Update those fixtures whenever the policy itself changes.
 Before publishing a release, run the check against the most recent GA tag in
 addition to the normal pull-request comparison. Stable `/v1` findings are not
 silently ignored: an intentional breaking change requires a new major API path.
-Experimental changes should remain marked experimental until they are ready to
+Beta changes should remain marked beta until they are ready to
 join the stable contract.

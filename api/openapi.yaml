@@ -573,7 +573,7 @@ components:
           description: Plain-text body template source (no HTML escaping). Required unless from_starter is set.
           type: string
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     CreateWebhookRequest:
       additionalProperties: false
@@ -748,7 +748,7 @@ components:
         - deleted
         - id
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     DeleteSuppressionResult:
       additionalProperties: true
@@ -776,7 +776,7 @@ components:
         - deleted
         - id
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     DeleteUserDataResult:
       additionalProperties: true
@@ -2281,7 +2281,7 @@ components:
         - items
         - next_cursor
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     PageSuppression:
       additionalProperties: true
@@ -2313,7 +2313,7 @@ components:
         - items
         - next_cursor
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     PageWebhookDeliveryView:
       additionalProperties: true
@@ -2388,7 +2388,7 @@ components:
         - outbound
         - holds
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     ProtectionConfigView:
       additionalProperties: true
@@ -2404,7 +2404,7 @@ components:
         - outbound
         - holds
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     ProtectionDirectionRequest:
       additionalProperties: false
@@ -2417,7 +2417,7 @@ components:
         - gate
         - scan
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     ProtectionDirectionView:
       additionalProperties: true
@@ -2430,7 +2430,7 @@ components:
         - gate
         - scan
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     ProtectionEventExportEntry:
       additionalProperties: true
@@ -2495,7 +2495,7 @@ components:
             - domain
           type: string
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     ProtectionGateView:
       additionalProperties: true
@@ -2523,7 +2523,7 @@ components:
             - domain
           type: string
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     ProtectionHoldsRequest:
       additionalProperties: false
@@ -2542,7 +2542,7 @@ components:
           minimum: 0
           type: integer
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     ProtectionHoldsView:
       additionalProperties: true
@@ -2561,7 +2561,7 @@ components:
           minimum: 0
           type: integer
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     ProtectionScanRequest:
       additionalProperties: false
@@ -2576,7 +2576,7 @@ components:
             - high
           type: string
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     ProtectionScanView:
       additionalProperties: true
@@ -2591,7 +2591,7 @@ components:
             - high
           type: string
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     RateLimitedDetails:
       additionalProperties: true
@@ -2713,7 +2713,7 @@ components:
         - subject
         - text
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     ReplyRequest:
       additionalProperties: false
@@ -2864,18 +2864,18 @@ components:
         template_alias:
           description: "Send using a stored template resolved by its per-user alias. Mutually exclusive with template_id and with literal subject/body/html_body. Beta: templates are unstable — their shape may change before they are declared stable."
           type: string
-          x-stability: experimental
+          x-stability: beta
           x-stability-level: beta
         template_data:
           additionalProperties: {}
           description: "Variables for the referenced template ({{name}}, dot paths into nested objects). Missing variables render as empty strings. Beta: templates are unstable — their shape may change before they are declared stable."
           type: object
-          x-stability: experimental
+          x-stability: beta
           x-stability-level: beta
         template_id:
           description: "Send using a stored template (rendered server-side, before any review hold). Mutually exclusive with template_alias and with literal subject/body/html_body. Beta: templates are unstable — their shape may change before they are declared stable."
           type: string
-          x-stability: experimental
+          x-stability: beta
           x-stability-level: beta
         text:
           description: Literal plain-text body. Required unless a template reference is used (mutually exclusive with template_id/template_alias).
@@ -2949,7 +2949,7 @@ components:
         - subject
         - variables
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     StarterTemplateVariableView:
       additionalProperties: true
@@ -2974,7 +2974,7 @@ components:
         - description
         - example
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     StarterTemplateView:
       additionalProperties: true
@@ -3002,7 +3002,7 @@ components:
         - subject
         - variables
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     Suppression:
       additionalProperties: true
@@ -3052,7 +3052,7 @@ components:
         - part
         - message
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     TemplateSummaryView:
       additionalProperties: true
@@ -3079,7 +3079,7 @@ components:
         - created_at
         - updated_at
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     TemplateView:
       additionalProperties: true
@@ -3119,7 +3119,7 @@ components:
         - created_at
         - updated_at
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     TestWebhookRequest:
       additionalProperties: false
@@ -3219,7 +3219,7 @@ components:
         text:
           type: string
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     UpdateWebhookRequest:
       additionalProperties: false
@@ -3368,7 +3368,7 @@ components:
         text:
           type: string
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     ValidateTemplateResponse:
       additionalProperties: true
@@ -3390,7 +3390,7 @@ components:
         - valid
         - errors
       type: object
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     ValidationErrorDetails:
       additionalProperties: true
@@ -3547,7 +3547,7 @@ info:
 
     The v1 surface is stable and evolves **additively only**: new endpoints, new optional request fields, new response fields, and new values in open string sets (event types, statuses) may appear at any time without a version bump. Clients MUST tolerate unknown response fields and unknown values in open string sets. This is machine-readable in the schemas: response schemas declare `additionalProperties: true`; request schemas stay strict (`additionalProperties: false` — an unknown request field is rejected with 422).
 
-    Operations and schemas marked `x-stability: experimental` are exempt from this freeze and may change or be removed without a major version. A field marked `x-experimental-values` is itself stable, but the listed values (and their event payloads) are experimental. Everything not marked experimental is stable.
+    Operations and schemas marked `x-stability-level: beta` are exempt from this freeze and may change or be removed without a major version. The `x-stability: beta` marker is a compatibility alias for documentation tooling. A field marked `x-experimental-values` is itself stable, but the listed values (and their event payloads) are experimental. Everything not marked beta, or enumerated as experimental, is stable.
 
     Removing or changing stable surface only happens on a new major version path (/v2); deprecations are announced ahead of time via `deprecated: true` in this document and keep working within v1.
   title: e2a API
@@ -4577,7 +4577,7 @@ paths:
       summary: Delete a message (move to trash)
       tags:
         - messages
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     get:
       description: Fetch a single message (inbound or outbound) by id, scoped to an agent the caller owns. A trashed message remains readable by this direct GET and includes deleted_at until it is permanently purged (~30 days after deletion); ordinary lists, conversations, reply targets, and forward targets exclude it. Includes the raw message and inbound auth headers.
@@ -5028,7 +5028,7 @@ paths:
       summary: Restore a message from the trash
       tags:
         - messages
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
   /v1/agents/{email}/protection:
     get:
@@ -5066,7 +5066,7 @@ paths:
       summary: Get an agent's protection config (beta)
       tags:
         - agents
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     put:
       description: "Replace the agent's protection posture wholesale. The three top-level keys (inbound, outbound, holds) are required; leaves default. Account scope only. Beta: the agent protection config is unstable — its shape may change before it is declared stable."
@@ -5109,7 +5109,7 @@ paths:
       summary: Replace an agent's protection config (beta)
       tags:
         - agents
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
   /v1/agents/{email}/restore:
     post:
@@ -5147,7 +5147,7 @@ paths:
       summary: Restore an agent from the trash
       tags:
         - agents
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
   /v1/agents/{email}/test:
     post:
@@ -5867,7 +5867,7 @@ paths:
       summary: List starter templates (beta)
       tags:
         - templates
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
   /v1/starter-templates/{alias}:
     get:
@@ -5905,7 +5905,7 @@ paths:
       summary: Get a starter template (beta)
       tags:
         - templates
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
   /v1/templates:
     get:
@@ -5954,7 +5954,7 @@ paths:
       summary: List templates (beta)
       tags:
         - templates
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     post:
       description: "Create a reusable email template. subject and text (and html when present) must parse: {{variable}} interpolation with dot paths; {{{variable}}} renders raw in the HTML part. Alternatively set from_starter to copy a starter template verbatim. Beta: templates are unstable — their shape may change before they are declared stable."
@@ -5989,7 +5989,7 @@ paths:
       summary: Create a template (beta)
       tags:
         - templates
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
   /v1/templates/validate:
     post:
@@ -6025,7 +6025,7 @@ paths:
       summary: Validate template source (beta)
       tags:
         - templates
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
   /v1/templates/{id}:
     delete:
@@ -6071,7 +6071,7 @@ paths:
       summary: Delete a template (beta)
       tags:
         - templates
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     get:
       description: "Fetch one template by id. Beta: templates are unstable — their shape may change before they are declared stable."
@@ -6106,7 +6106,7 @@ paths:
       summary: Get a template (beta)
       tags:
         - templates
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
     patch:
       description: "Partial update. Changed template parts are re-parsed; set alias or html to \"\" to clear them. Beta: templates are unstable — their shape may change before they are declared stable."
@@ -6147,7 +6147,7 @@ paths:
       summary: Update a template (beta)
       tags:
         - templates
-      x-stability: experimental
+      x-stability: beta
       x-stability-level: beta
   /v1/webhooks:
     get:

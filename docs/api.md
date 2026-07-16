@@ -184,10 +184,11 @@ equals the `X-Request-Id` response header.
 The `/v1` surface is the **stable, generally-available contract** as of e2a 1.0.
 Our commitment, and what you can rely on:
 
-### Experimental operations
+### Beta operations
 
 This is the complete operation-level exception list. These operations carry
-`x-stability: experimental` and may change before they are promoted to stable;
+`x-stability-level: beta` (with `x-stability: beta` as a documentation
+compatibility alias) and may change before they are promoted to stable;
 every `/v1` operation not listed here is covered by the GA freeze.
 
 | operationId | Method and path | Surface |
@@ -220,8 +221,9 @@ every `/v1` operation not listed here is covered by the GA freeze.
   strict (`additionalProperties: false`) — an unknown request field is rejected
   with a 422, which is intentional input validation (it catches typos like
   `body` vs `text`), not a stability concern.
-- **Experimental surfaces are marked `x-stability: experimental`** in the spec
-  and mirrored as `x-stability-level: beta` for automated compatibility tools
+- **Beta surfaces are marked `x-stability-level: beta`** in the spec
+  for automated compatibility tools and mirrored as
+  `x-stability: beta` for documentation-tool compatibility
   (operations, schemas, and individual fields — e.g. the `template_*` fields on
   send) and `(beta)` in prose — today: templates, starter templates, the agent
   protection config, and the agent/message trash operations listed above. They are **exempt from the

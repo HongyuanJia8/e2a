@@ -12,7 +12,7 @@ import (
 	"github.com/tokencanopy/e2a/internal/webhookpub"
 )
 
-var experimentalOperationIDs = []string{
+var betaOperationIDs = []string{
 	"createTemplate",
 	"deleteMessage",
 	"deleteTemplate",
@@ -32,8 +32,8 @@ var experimentalOperationIDs = []string{
 // applyEvolutionStance (GA review #22/#23) so it can't silently regress:
 //   - response schemas open (additionalProperties: true), request schemas
 //     strict (additionalProperties: false), and never both for one schema;
-//   - x-stability: experimental on every beta operation, and derived onto the
-//     schemas only they use;
+//   - canonical x-stability-level: beta on every beta operation, with the
+//     x-stability: beta compatibility alias, derived onto schemas only they use;
 //   - x-experimental-values on the event-type fields whose value set has beta
 //     members.
 
@@ -250,9 +250,10 @@ func TestSpecEvolutionStanceCoversUnreachableComponents(t *testing.T) {
 	}
 }
 
-// x-stability: experimental on exactly the beta surfaces, mirrored to the
-// oasdiff-native x-stability-level: beta; the stable core must NOT carry either.
-func TestSpecExperimentalMarkers(t *testing.T) {
+// x-stability-level: beta on exactly the beta surfaces, mirrored to the
+// GitBook-compatible x-stability: beta alias; the stable core must
+// NOT carry either.
+func TestSpecBetaMarkers(t *testing.T) {
 	doc := renderSpec(t)
 
 	opExt := func(operationID, extension string) any {
@@ -269,12 +270,12 @@ func TestSpecExperimentalMarkers(t *testing.T) {
 		return nil
 	}
 
-	for _, id := range experimentalOperationIDs {
-		if got := opExt(id, "x-stability"); got != "experimental" {
-			t.Errorf("%s must carry x-stability: experimental (beta surface), got %v", id, got)
+	for _, id := range betaOperationIDs {
+		if got := opExt(id, "x-stability"); got != "beta" {
+			t.Errorf("%s must carry x-stability: beta compatibility alias, got %v", id, got)
 		}
 		if got := opExt(id, "x-stability-level"); got != "beta" {
-			t.Errorf("%s must carry x-stability-level: beta for oasdiff, got %v", id, got)
+			t.Errorf("%s must carry canonical x-stability-level: beta, got %v", id, got)
 		}
 	}
 	for _, id := range []string{"sendMessage", "createAgent", "listMessages", "createWebhook", "listEvents"} {
@@ -296,11 +297,11 @@ func TestSpecExperimentalMarkers(t *testing.T) {
 		return sc[extension]
 	}
 	for _, name := range []string{"TemplateView", "CreateTemplateRequest", "StarterTemplateView", "ProtectionConfigView", "ProtectionConfigRequest"} {
-		if got := schemaExt(name, "x-stability"); got != "experimental" {
-			t.Errorf("schema %s must carry x-stability: experimental, got %v", name, got)
+		if got := schemaExt(name, "x-stability"); got != "beta" {
+			t.Errorf("schema %s must carry x-stability: beta compatibility alias, got %v", name, got)
 		}
 		if got := schemaExt(name, "x-stability-level"); got != "beta" {
-			t.Errorf("schema %s must carry x-stability-level: beta for oasdiff, got %v", name, got)
+			t.Errorf("schema %s must carry canonical x-stability-level: beta, got %v", name, got)
 		}
 	}
 	for _, name := range []string{"MessageView", "AgentView", "WebhookView", "SendEmailRequest", "ErrorEnvelope"} {
@@ -316,11 +317,11 @@ func TestSpecExperimentalMarkers(t *testing.T) {
 	props := schemaProps(t, doc, "SendEmailRequest")
 	for _, f := range []string{"template_alias", "template_id", "template_data"} {
 		p, _ := props[f].(map[string]any)
-		if p == nil || p["x-stability"] != "experimental" {
-			t.Errorf("SendEmailRequest.%s must carry x-stability: experimental", f)
+		if p == nil || p["x-stability"] != "beta" {
+			t.Errorf("SendEmailRequest.%s must carry x-stability: beta compatibility alias", f)
 		}
 		if p == nil || p["x-stability-level"] != "beta" {
-			t.Errorf("SendEmailRequest.%s must carry x-stability-level: beta for oasdiff", f)
+			t.Errorf("SendEmailRequest.%s must carry canonical x-stability-level: beta", f)
 		}
 	}
 
@@ -344,7 +345,7 @@ func TestSpecExperimentalMarkers(t *testing.T) {
 	}
 }
 
-func TestDocumentedExperimentalOperationsMatchOpenAPI(t *testing.T) {
+func TestDocumentedBetaOperationsMatchOpenAPI(t *testing.T) {
 	doc := renderSpec(t)
 	var marked []string
 	paths, _ := doc["paths"].(map[string]any)
@@ -352,7 +353,7 @@ func TestDocumentedExperimentalOperationsMatchOpenAPI(t *testing.T) {
 		item, _ := pathItem.(map[string]any)
 		for _, operation := range item {
 			op, ok := operation.(map[string]any)
-			if !ok || op["x-stability"] != "experimental" {
+			if !ok || op["x-stability-level"] != "beta" {
 				continue
 			}
 			if id, ok := op["operationId"].(string); ok {
@@ -361,10 +362,10 @@ func TestDocumentedExperimentalOperationsMatchOpenAPI(t *testing.T) {
 		}
 	}
 	sort.Strings(marked)
-	want := append([]string(nil), experimentalOperationIDs...)
+	want := append([]string(nil), betaOperationIDs...)
 	sort.Strings(want)
 	if !reflect.DeepEqual(marked, want) {
-		t.Errorf("OpenAPI experimental operations = %v, want exact reviewed inventory %v", marked, want)
+		t.Errorf("OpenAPI beta operations = %v, want exact reviewed inventory %v", marked, want)
 	}
 
 	apiDoc, err := os.ReadFile(filepath.Join("..", "..", "docs", "api.md"))
@@ -372,11 +373,11 @@ func TestDocumentedExperimentalOperationsMatchOpenAPI(t *testing.T) {
 		t.Fatalf("read docs/api.md: %v", err)
 	}
 	text := string(apiDoc)
-	start := strings.Index(text, "### Experimental operations")
+	start := strings.Index(text, "### Beta operations")
 	if start < 0 {
-		t.Fatal("docs/api.md is missing the exact Experimental operations inventory")
+		t.Fatal("docs/api.md is missing the exact Beta operations inventory")
 	}
-	section := text[start+len("### Experimental operations"):]
+	section := text[start+len("### Beta operations"):]
 	if end := strings.Index(section, "\n### "); end >= 0 {
 		section = section[:end]
 	}
@@ -397,11 +398,11 @@ func TestDocumentedExperimentalOperationsMatchOpenAPI(t *testing.T) {
 	sortedDocumented := append([]string(nil), documented...)
 	sort.Strings(sortedDocumented)
 	if !reflect.DeepEqual(documented, sortedDocumented) {
-		t.Errorf("docs/api.md experimental operation table must be sorted by operationId: got %v", documented)
+		t.Errorf("docs/api.md beta operation table must be sorted by operationId: got %v", documented)
 	}
 	sort.Strings(documented)
 	if !reflect.DeepEqual(documented, marked) {
-		t.Errorf("docs/api.md experimental operations = %v, OpenAPI marks %v", documented, marked)
+		t.Errorf("docs/api.md beta operations = %v, OpenAPI marks %v", documented, marked)
 	}
 }
 
@@ -411,7 +412,7 @@ func TestSpecStabilityPolicyPresent(t *testing.T) {
 	doc := renderSpec(t)
 	info, _ := doc["info"].(map[string]any)
 	desc, _ := info["description"].(string)
-	for _, needle := range []string{"Stability policy", "additive", "x-stability: experimental", "additionalProperties: true", "additionalProperties: false", "x-experimental-values"} {
+	for _, needle := range []string{"Stability policy", "additive", "x-stability-level: beta", "x-stability: beta", "additionalProperties: true", "additionalProperties: false", "x-experimental-values"} {
 		if !strings.Contains(desc, needle) {
 			t.Errorf("info.description must state the stability policy; missing %q", needle)
 		}

@@ -14,9 +14,10 @@ const (
 	oasdiffExtension      = "x-stability-level"
 )
 
-// NormalizeStability mirrors e2a's historical experimental marker into the
-// lifecycle extension understood by oasdiff. Older release specs can therefore
-// be compared with newer specs without misclassifying beta APIs as stable.
+// NormalizeStability maps e2a's historical experimental marker into the
+// canonical lifecycle extension understood by oasdiff. Older release specs can
+// therefore be compared with newer specs without misclassifying beta APIs as
+// stable.
 func NormalizeStability(r io.Reader, w io.Writer) error {
 	var doc yaml.Node
 	if err := yaml.NewDecoder(r).Decode(&doc); err != nil {

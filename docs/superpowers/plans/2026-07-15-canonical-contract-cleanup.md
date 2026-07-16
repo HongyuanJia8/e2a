@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Freeze the pre-GA REST contract for validation fields, response headers, error codes, trash reads, and experimental operations.
+**Goal:** Freeze the pre-GA REST contract for validation fields, response headers, error codes, trash reads, and beta operations.
 
 **Architecture:** Keep Go handler metadata as the OpenAPI source of truth. Add one post-registration response-header normalizer beside the existing evolution-stance pass, extend existing AST/spec drift tests instead of introducing a second generator, and document runtime behavior without changing endpoint identities or success semantics.
 
@@ -365,7 +365,7 @@ git add internal/httpapi/messages.go internal/httpapi/messages_trash_test.go doc
 git commit -m "docs(api): freeze trashed message reads"
 ```
 
-### Task 5: Publish the experimental operation inventory
+### Task 5: Publish the beta operation inventory
 
 **Files:**
 - Modify: `docs/api.md:157-200`
@@ -373,11 +373,11 @@ git commit -m "docs(api): freeze trashed message reads"
 
 - [ ] **Step 1: Add a failing docs/OpenAPI inventory test**
 
-Parse a fenced table under `### Experimental operations` and compare its
+Parse a fenced table under `### Beta operations` and compare its
 backticked operation IDs with operations carrying
-`x-stability: experimental`. Require exact set equality and sorted output.
+`x-stability-level: beta`. Require exact set equality and sorted output.
 
-Run: `go test ./internal/httpapi -run TestDocumentedExperimentalOperationsMatchOpenAPI -count=1`
+Run: `go test ./internal/httpapi -run TestDocumentedBetaOperationsMatchOpenAPI -count=1`
 
 Expected: FAIL because the exact table does not exist.
 
@@ -398,7 +398,7 @@ replace the stale `email.pending_review` event spelling with
 
 - [ ] **Step 3: Run stability tests**
 
-Run: `go test ./internal/httpapi -run 'Test.*Stability|TestDocumentedExperimentalOperationsMatchOpenAPI|TestOperationID' -count=1`
+Run: `go test ./internal/httpapi -run 'Test.*Stability|TestDocumentedBetaOperationsMatchOpenAPI|TestOperationID' -count=1`
 
 Expected: PASS.
 
@@ -406,7 +406,7 @@ Expected: PASS.
 
 ```bash
 git add internal/httpapi/stability_test.go docs/api.md
-git commit -m "docs(api): publish experimental operation inventory"
+git commit -m "docs(api): publish beta operation inventory"
 ```
 
 ### Task 6: Regenerate OpenAPI and SDK contracts

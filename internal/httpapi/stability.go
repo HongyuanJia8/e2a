@@ -19,9 +19,10 @@ import (
 //   - REQUEST schemas keep `additionalProperties: false`: strict input
 //     validation is intentional (e.g. an unknown field in a send body is a
 //     422, which catches client-side typos like `body` vs `text`).
-//   - Surfaces exempt from the v1 freeze carry `x-stability: experimental`
-//     and its oasdiff-native `x-stability-level: beta` mirror (operations
-//     declare them at registration; their schemas inherit them here).
+//   - Surfaces exempt from the v1 freeze carry the canonical oasdiff-native
+//     `x-stability-level: beta` marker and the GitBook-compatible
+//     `x-stability: beta` alias (operations declare them at
+//     registration; their schemas inherit them here).
 //   - Event-type fields whose VALUE SET contains beta members carry
 //     `x-experimental-values` listing exactly those members
 //     (webhookpub.ExperimentalEventTypes).
@@ -34,18 +35,17 @@ import (
 
 const (
 	extStability          = "x-stability"
-	stabilityExperimental = "experimental"
-	extStabilityLevel     = "x-stability-level"
 	stabilityBeta         = "beta"
+	extStabilityLevel     = "x-stability-level"
 	extExperimentalValues = "x-experimental-values"
 )
 
-// experimental is the operation extension marking a surface as exempt from the
+// beta is the operation extension marking a surface as exempt from the
 // v1 freeze (may change without a major version). Returns a fresh map so no
 // two operations share mutable state.
-func experimental() map[string]any {
+func beta() map[string]any {
 	return map[string]any{
-		extStability:      stabilityExperimental,
+		extStability:      stabilityBeta,
 		extStabilityLevel: stabilityBeta,
 	}
 }
@@ -62,7 +62,7 @@ func (s *Server) applyEvolutionStance() {
 	// Reachability roots, per stance axis.
 	requestRoots := map[string]bool{}  // referenced from a request body
 	responseRoots := map[string]bool{} // referenced from a response body
-	experimentalRoots := map[string]bool{}
+	betaRoots := map[string]bool{}
 	stableRoots := map[string]bool{}
 
 	// Inline (non-$ref) object schemas embedded directly in a response body
@@ -70,7 +70,7 @@ func (s *Server) applyEvolutionStance() {
 	var inlineResponseSchemas []*huma.Schema
 
 	forEachOperation(oapi, func(op *huma.Operation) {
-		isExperimental := op.Extensions[extStability] == stabilityExperimental
+		isBeta := op.Extensions[extStabilityLevel] == stabilityBeta
 		opRoots := map[string]bool{}
 		if op.RequestBody != nil {
 			for _, mt := range op.RequestBody.Content {
@@ -95,8 +95,8 @@ func (s *Server) applyEvolutionStance() {
 			}
 		}
 		dst := stableRoots
-		if isExperimental {
-			dst = experimentalRoots
+		if isBeta {
+			dst = betaRoots
 		}
 		for name := range opRoots {
 			dst[name] = true
@@ -125,13 +125,13 @@ func (s *Server) applyEvolutionStance() {
 		openObjectSchemas(sc)
 	}
 
-	// Schemas used exclusively by experimental operations inherit the marker
+	// Schemas used exclusively by beta operations inherit the marker
 	// automatically, so a new beta resource can't leave invisible holes in the
 	// freeze. Schemas shared with stable operations (error envelopes, pages of
 	// stable views, …) stay unmarked.
-	experimentalSet := refClosure(schemas, experimentalRoots)
+	betaSet := refClosure(schemas, betaRoots)
 	stableSet := refClosure(schemas, stableRoots)
-	for name := range experimentalSet {
+	for name := range betaSet {
 		if stableSet[name] {
 			continue
 		}
@@ -139,7 +139,7 @@ func (s *Server) applyEvolutionStance() {
 		if sc.Extensions == nil {
 			sc.Extensions = map[string]any{}
 		}
-		sc.Extensions[extStability] = stabilityExperimental
+		sc.Extensions[extStability] = stabilityBeta
 		sc.Extensions[extStabilityLevel] = stabilityBeta
 	}
 
@@ -148,7 +148,7 @@ func (s *Server) applyEvolutionStance() {
 	// The template hooks on send are beta (templates are beta) even though
 	// sendMessage itself is stable.
 	for _, prop := range []string{"template_alias", "template_id", "template_data"} {
-		markProperty(schemas, "SendEmailRequest", prop, extStability, stabilityExperimental)
+		markProperty(schemas, "SendEmailRequest", prop, extStability, stabilityBeta)
 		markProperty(schemas, "SendEmailRequest", prop, extStabilityLevel, stabilityBeta)
 	}
 	// The event-type vocabulary is stable EXCEPT the screening + review-hold
