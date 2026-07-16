@@ -29,6 +29,16 @@ func TestCreateWebhookRejectsSSRF(t *testing.T) {
 	}
 }
 
+func TestCreateWebhookRejectsEmptyURL(t *testing.T) {
+	srv := testServer(t)
+	code, body := postJSON(t, srv.URL+"/v1/webhooks", "good", map[string]any{
+		"url": "", "events": []string{"email.sent"},
+	})
+	if code != 400 || errCode(body) != "invalid_webhook_url" {
+		t.Fatalf("want 400 invalid_webhook_url, got %d %v", code, body)
+	}
+}
+
 func TestCreateWebhookNoEvents(t *testing.T) {
 	srv := testServer(t)
 	code, body := postJSON(t, srv.URL+"/v1/webhooks", "good", map[string]any{
