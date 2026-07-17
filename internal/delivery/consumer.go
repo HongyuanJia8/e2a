@@ -45,14 +45,35 @@ type Store interface {
 	AddSuppression(ctx context.Context, userID, address, reason, source, sourceMessageID string) (added bool, err error)
 }
 
-// Firer publishes a delivery/suppression webhook event to the owning user's
-// subscribers. data is the canonical typed payload for the event
-// (eventpayload.EmailDeliveredData / EmailBouncedData / EmailComplainedData /
-// EmailFailedData / DomainSuppressionAddedData). agentID lets subscribers with an agent_ids
-// filter match (empty for account-scoped events like suppression). dedupKey
-// makes redeliveries idempotent (the publisher derives a stable event id from
-// it). Injected as a closure so this package does not depend on webhookpub.
-type Firer func(ctx context.Context, userID, agentID, eventType string, data any, dedupKey string)
+// FiredEvent is the set of fields delivery hands its Firer for one webhook
+// event. Data is the canonical typed payload (eventpayload.EmailDeliveredData /
+// EmailBouncedData / EmailComplainedData / EmailFailedData /
+// DomainSuppressionAddedData).
+//
+// AgentID, ConversationID, and MessageID are the ENVELOPE ROUTING KEYS: they
+// let subscribers' agent_ids/labels filters match AND they populate the
+// webhook_events row's agent_id/conversation_id/message_id columns, which is
+// what makes the persisted event findable via GET /v1/events?message_id= /
+// ?conversation_id= — the reconciliation query an integrator uses to learn a
+// specific message's fate. A message-backed delivery-feedback event must set
+// all three (they mirror the send-worker path's envelope, giving full
+// payload+envelope parity); account-scoped events (suppression) leave them
+// empty. DedupKey makes redeliveries idempotent (the publisher derives a stable
+// event id from it, independent of the routing keys).
+type FiredEvent struct {
+	UserID         string
+	AgentID        string
+	ConversationID string
+	MessageID      string
+	Type           string
+	Data           any
+	DedupKey       string
+}
+
+// Firer publishes one delivery/suppression webhook event to the owning user's
+// subscribers. Injected as a closure so this package does not depend on
+// webhookpub.
+type Firer func(ctx context.Context, e FiredEvent)
 
 // Event push types for delivery outcomes (decision 9 vocabulary).
 const (
@@ -132,9 +153,17 @@ func (c *Consumer) Process(ctx context.Context, ev *Event) error {
 			// it doubles as agent_email. smtp_detail is the SES diagnostic string
 			// (named to disambiguate from email.failed's `reason`). The event TYPE
 			// is the outcome — there is no redundant `status` field (contract
-			// freeze PR-2).
-			c.fire(ctx, m.UserID, m.AgentID, evType, deliveryEventData(evType, m, ev, r),
-				evType+"|"+m.MessageID+"|"+r.Address)
+			// freeze PR-2). MessageID/ConversationID on the envelope keep the
+			// persisted event findable via GET /v1/events?message_id=/?conversation_id=.
+			c.fire(ctx, FiredEvent{
+				UserID:         m.UserID,
+				AgentID:        m.AgentID,
+				ConversationID: m.ConversationID,
+				MessageID:      m.MessageID,
+				Type:           evType,
+				Data:           deliveryEventData(evType, m, ev, r),
+				DedupKey:       evType + "|" + m.MessageID + "|" + r.Address,
+			})
 		}
 		if r.Suppress {
 			c.suppress(ctx, m.UserID, m.MessageID, r)
@@ -152,8 +181,15 @@ func (c *Consumer) Process(ctx context.Context, ev *Event) error {
 	// deliveries AND any cross-path double emission collapse in the durable
 	// outbox via ON CONFLICT (id) DO NOTHING.
 	if ev.Kind == KindReject && recorded > 0 && c.fire != nil {
-		c.fire(ctx, m.UserID, m.AgentID, EventEmailFailed,
-			failedEventData(m, rejectReason(ev)), m.MessageID+"|"+EventEmailFailed)
+		c.fire(ctx, FiredEvent{
+			UserID:         m.UserID,
+			AgentID:        m.AgentID,
+			ConversationID: m.ConversationID,
+			MessageID:      m.MessageID,
+			Type:           EventEmailFailed,
+			Data:           failedEventData(m, rejectReason(ev)),
+			DedupKey:       m.MessageID + "|" + EventEmailFailed,
+		})
 	}
 	return nil
 }
@@ -256,12 +292,21 @@ func (c *Consumer) suppress(ctx context.Context, userID, messageID string, r Rec
 	}
 	if added && c.fire != nil {
 		// Auto-suppression emits an event so the tenant is alerted, not silently
-		// cut off (decision 9). Account-scoped → empty agentID.
-		c.fire(ctx, userID, "", EventSuppressionAdded, eventpayload.DomainSuppressionAddedData{
-			Address:   r.Address,
-			Source:    source,
-			Reason:    r.Detail,
-			MessageID: messageID,
-		}, EventSuppressionAdded+"|"+userID+"|"+r.Address)
+		// cut off (decision 9). It is ACCOUNT-scoped, not tied to one message
+		// thread: no AgentID/ConversationID/MessageID envelope routing keys (the
+		// triggering message rides in the payload's source_message_id instead), so
+		// it is not filtered out of a message/thread-scoped GET /v1/events query it
+		// was never about.
+		c.fire(ctx, FiredEvent{
+			UserID: userID,
+			Type:   EventSuppressionAdded,
+			Data: eventpayload.DomainSuppressionAddedData{
+				Address:   r.Address,
+				Source:    source,
+				Reason:    r.Detail,
+				MessageID: messageID,
+			},
+			DedupKey: EventSuppressionAdded + "|" + userID + "|" + r.Address,
+		})
 	}
 }

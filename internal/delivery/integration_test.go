@@ -211,12 +211,12 @@ func TestDeliveryPipeline_RejectFailsMessageOnceWithoutSuppression(t *testing.T)
 	}
 
 	type fired struct {
-		typ, dedup string
-		data       any
+		typ, dedup, messageID, conversationID string
+		data                                  any
 	}
 	var events []fired
-	consumer := delivery.NewConsumer(store, func(_ context.Context, _, _, eventType string, data any, dedupKey string) {
-		events = append(events, fired{eventType, dedupKey, data})
+	consumer := delivery.NewConsumer(store, func(_ context.Context, e delivery.FiredEvent) {
+		events = append(events, fired{e.Type, e.DedupKey, e.MessageID, e.ConversationID, e.Data})
 	})
 
 	rejectEv := &delivery.Event{
@@ -247,6 +247,10 @@ func TestDeliveryPipeline_RejectFailsMessageOnceWithoutSuppression(t *testing.T)
 	// Exactly ONE message-level email.failed — not one per recipient.
 	if len(events) != 1 || events[0].typ != "email.failed" {
 		t.Fatalf("events=%+v, want exactly one email.failed", events)
+	}
+	// Envelope carries the message routing key (findability via ?message_id=).
+	if events[0].messageID != msgID {
+		t.Fatalf("email.failed envelope messageID=%q, want %q", events[0].messageID, msgID)
 	}
 	data, ok := events[0].data.(eventpayload.EmailFailedData)
 	if !ok {

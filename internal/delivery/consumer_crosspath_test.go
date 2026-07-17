@@ -42,9 +42,9 @@ func TestRejectEmailFailedIDCollapsesAcrossPaths(t *testing.T) {
 		MessageID: msgID, UserID: "u_1", AgentID: "bot@x.com", To: []string{"a@x.com"},
 	}}
 	var keys []string
-	fire := func(_ context.Context, _, _, eventType string, _ any, dedupKey string) {
-		if eventType == delivery.EventEmailFailed {
-			keys = append(keys, dedupKey)
+	fire := func(_ context.Context, e delivery.FiredEvent) {
+		if e.Type == delivery.EventEmailFailed {
+			keys = append(keys, e.DedupKey)
 		}
 	}
 	c := delivery.NewConsumer(store, fire)

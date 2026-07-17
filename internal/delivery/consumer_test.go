@@ -45,15 +45,15 @@ func (f *fakeConsumerStore) AddSuppression(ctx context.Context, userID, address,
 }
 
 type firedEvent struct {
-	userID, agentID, eventType string
-	data                       any
-	dedupKey                   string
+	userID, agentID, conversationID, messageID, eventType string
+	data                                                  any
+	dedupKey                                              string
 }
 
 func recordingFirer() (Firer, *[]firedEvent) {
 	var events []firedEvent
-	f := func(ctx context.Context, userID, agentID, eventType string, data any, dedupKey string) {
-		events = append(events, firedEvent{userID, agentID, eventType, data, dedupKey})
+	f := func(ctx context.Context, e FiredEvent) {
+		events = append(events, firedEvent{e.UserID, e.AgentID, e.ConversationID, e.MessageID, e.Type, e.Data, e.DedupKey})
 	}
 	return f, &events
 }
@@ -96,6 +96,11 @@ func TestConsumerProcess(t *testing.T) {
 		e := (*events)[0]
 		if e.eventType != EventEmailDelivered || e.userID != "u_1" || e.agentID != "bot@x.com" {
 			t.Fatalf("event=%+v", e)
+		}
+		// The delivery-feedback events share the firer; the message-level routing
+		// key must be set so the persisted event is findable by message_id.
+		if e.messageID != "msg_1" {
+			t.Errorf("email.delivered envelope messageID=%q, want msg_1 (findability)", e.messageID)
 		}
 		data, ok := e.data.(eventpayload.EmailDeliveredData)
 		if !ok {
@@ -165,8 +170,14 @@ func TestConsumerProcess(t *testing.T) {
 			Recipients: []RecipientOutcome{{Address: "c@x.com", Status: StatusComplained, Suppress: true}},
 		})
 		for _, e := range *events {
-			if e.eventType == EventSuppressionAdded && e.agentID != "" {
-				t.Errorf("suppression event is account-scoped; agentID should be empty, got %q", e.agentID)
+			if e.eventType == EventSuppressionAdded {
+				// Account-scoped: no agent/message/conversation envelope routing keys
+				// (so it is not filtered out of a message/thread-scoped events query
+				// it was never about; the triggering message is in the payload).
+				if e.agentID != "" || e.messageID != "" || e.conversationID != "" {
+					t.Errorf("suppression event is account-scoped; agentID/messageID/conversationID should be empty, got %q/%q/%q",
+						e.agentID, e.messageID, e.conversationID)
+				}
 			}
 		}
 	})
@@ -222,6 +233,12 @@ func TestConsumerProcess(t *testing.T) {
 		e := (*events)[0]
 		if e.eventType != EventEmailFailed || e.userID != "u_5" || e.agentID != "bot@x.com" {
 			t.Fatalf("event=%+v", e)
+		}
+		// Envelope routing keys must be set so the persisted event is findable
+		// via GET /v1/events?message_id=/?conversation_id= (the reconciliation
+		// query) and matches the send-worker path's envelope.
+		if e.messageID != "msg_5" || e.conversationID != "conv_5" {
+			t.Fatalf("envelope routing keys missing: messageID=%q conversationID=%q", e.messageID, e.conversationID)
 		}
 		if e.dedupKey != "msg_5|"+EventEmailFailed {
 			t.Fatalf("dedupKey=%q, want the worker-path deterministic formula message_id|event_type", e.dedupKey)
