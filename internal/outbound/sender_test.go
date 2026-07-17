@@ -96,6 +96,33 @@ func TestComposeForAccept_MatchesSyncComposeBytes(t *testing.T) {
 	}
 }
 
+// TestApplyCorrelationHeader pins the §3.1 correlation marker: SubmitOnce
+// stamps X-E2A-Message-ID at submit time (post-DKIM, wire-only relative to the
+// stored raw_message) so SES can echo it back in notifications — the marker
+// that makes SMTP-accept↔mark-sent crash-window feedback correlatable.
+func TestApplyCorrelationHeader(t *testing.T) {
+	body := []byte("From: a@x.com\r\n\r\nhello")
+
+	stamped := applyCorrelationHeader(body, "msg_abc123")
+	if !bytes.HasPrefix(stamped, []byte("X-E2A-Message-ID: msg_abc123\r\n")) {
+		t.Errorf("stamped message must start with the correlation header, got %q", stamped[:40])
+	}
+	if !bytes.HasSuffix(stamped, body) {
+		t.Error("stamping must prepend, leaving the (DKIM-signed) body untouched")
+	}
+
+	// Empty id (defensive): no header.
+	if got := applyCorrelationHeader(body, ""); !bytes.Equal(got, body) {
+		t.Error("empty message id must not stamp a header")
+	}
+
+	// Header-injection defense: CR/LF in the id is neutralized.
+	inj := applyCorrelationHeader(body, "msg_a\r\nBcc: leak@evil.com")
+	if bytes.Contains(inj, []byte("\r\nBcc:")) {
+		t.Error("CR/LF in the message id must be stripped, not smuggled as a header")
+	}
+}
+
 func TestNormalizeAddrs(t *testing.T) {
 	got, err := normalizeAddrs([]string{"Alice@Gmail.COM", " bob@test.com ", ""})
 	if err != nil {

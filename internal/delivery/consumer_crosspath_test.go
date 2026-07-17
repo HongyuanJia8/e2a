@@ -16,6 +16,12 @@ type crossPathStore struct{ corr *delivery.CorrelatedMessage }
 func (s *crossPathStore) CorrelateBySESMessageID(ctx context.Context, id string) (*delivery.CorrelatedMessage, bool, error) {
 	return s.corr, s.corr != nil, nil
 }
+func (s *crossPathStore) CorrelateByE2AMessageID(ctx context.Context, id string) (*delivery.CorrelatedMessage, bool, error) {
+	return nil, false, nil
+}
+func (s *crossPathStore) RecordProviderAcceptEvidence(ctx context.Context, messageID, sesMessageID string) error {
+	return nil
+}
 func (s *crossPathStore) RecordDeliveryOutcome(ctx context.Context, messageID, address string, status delivery.Status, detail string) error {
 	return nil
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/tokencanopy/e2a/internal/delivery"
 	"github.com/tokencanopy/e2a/internal/eventpayload"
 	"github.com/tokencanopy/e2a/internal/identity"
 	"github.com/tokencanopy/e2a/internal/outbound"
@@ -64,14 +65,16 @@ func (a *outboundSendStore) ClaimSend(ctx context.Context, messageID string, job
 		return nil, err
 	}
 	return &outboundsend.SendJob{
-		MessageID:    p.ID,
-		UserID:       p.UserID,
-		Status:       p.DeliveryStatus,
-		EnvelopeFrom: p.EnvelopeFrom,
-		Recipients:   p.Recipients,
-		RawMessage:   p.Raw,
-		SentAs:       p.SentAs,
-		AcceptedAt:   p.CreatedAt,
+		MessageID:         p.ID,
+		UserID:            p.UserID,
+		Status:            p.DeliveryStatus,
+		EnvelopeFrom:      p.EnvelopeFrom,
+		Recipients:        p.Recipients,
+		RawMessage:        p.Raw,
+		SentAs:            p.SentAs,
+		AcceptedAt:        p.CreatedAt,
+		ProviderAccepted:  p.ProviderAccepted,
+		ProviderMessageID: p.ProviderMessageID,
 	}, nil
 }
 
@@ -111,35 +114,76 @@ func (a *outboundSendStore) MarkSent(ctx context.Context, messageID, providerMes
 	if info == nil {
 		return nil
 	}
-	// Meter after the send is durable (side-effect only — never block on quota;
-	// the accept-time cap pre-check is the gate). Mirrors the synchronous path,
-	// which meters only once the message row exists. KNOWN best-effort window: a
-	// crash between the 'sent' commit above and this call drops the meter (the
-	// re-drive no-ops on 'sent'), so a durably-sent message can go unmetered. Rare
-	// + customer-favoring; fold into the MarkSent tx if billing accuracy ever
-	// demands it (post-GA, with the terminal-failure guard work).
-	if a.usage != nil {
-		if _, err := a.usage.RecordAndCheck(ctx, info.UserID, info.Message.AgentID, info.Domain, "outbound"); err != nil {
-			log.Printf("[outbound-send] usage recording error for %s: %v", messageID, err)
+	a.meterSent(ctx, info, messageID)
+	return nil
+}
+
+// meterSent meters a durably-sent message after its commit (side-effect only —
+// never block on quota; the accept-time cap pre-check is the gate). Mirrors the
+// synchronous path, which meters only once the message row exists. KNOWN
+// best-effort window: a crash between the 'sent' commit and this call drops the
+// meter (the re-drive no-ops on 'sent'), so a durably-sent message can go
+// unmetered. Rare + customer-favoring; fold into the MarkSent tx if billing
+// accuracy ever demands it.
+func (a *outboundSendStore) meterSent(ctx context.Context, info *identity.OutboundSentInfo, messageID string) {
+	if a.usage == nil {
+		return
+	}
+	if _, err := a.usage.RecordAndCheck(ctx, info.UserID, info.Message.AgentID, info.Domain, "outbound"); err != nil {
+		log.Printf("[outbound-send] usage recording error for %s: %v", messageID, err)
+	}
+}
+
+// MarkFailed is the guarded terminal write (async-send-contract §3.1): inside
+// one transaction it first checks for provider-accept evidence — an SNS
+// notification that proved the provider accepted this message's submission —
+// and, when present, settles the row as SENT (+ email.sent, + metering) instead
+// of declaring a false terminal failure. Only an evidence-free row is marked
+// failed (+ email.failed) with the caller's failure provenance. Both events use
+// deterministic ids, so duplicate finalizations stay idempotent, and
+// MarkOutboundFailedTx's own `provider_accepted_at IS NULL` CAS closes the race
+// where evidence lands between the two statements (the row is then left for the
+// reconciler's next pass to settle as sent).
+func (a *outboundSendStore) MarkFailed(ctx context.Context, messageID string, attempt int, detail string, source delivery.FailureSource) error {
+	var resolved *identity.OutboundSentInfo
+	var resolvedProviderID string
+	if err := a.store.WithTx(ctx, func(tx pgx.Tx) error {
+		info, providerID, err := a.store.ResolveOutboundProviderAcceptedTx(ctx, tx, messageID)
+		if err != nil {
+			return err
 		}
+		if info != nil {
+			resolved, resolvedProviderID = info, providerID
+			e := buildEmailSentEventFromRow(info, providerID)
+			e.ID = webhookpub.DeterministicEventID(messageID, webhookpub.EventEmailSent)
+			a.outbox.PublishBestEffortTx(ctx, tx, e)
+			return nil
+		}
+		finfo, err := a.store.MarkOutboundFailedTx(ctx, tx, messageID, detail, source)
+		if err != nil {
+			return err
+		}
+		if finfo == nil {
+			return nil // row gone, already terminal, or evidence raced in — nothing to record
+		}
+		// Emit with the detail actually stored on the row (a deferred final
+		// attempt's diagnostic is preferred over a generic sweep detail).
+		e := buildEmailFailedEventFromRow(finfo, finfo.Message.DeliveryDetail)
+		e.ID = webhookpub.DeterministicEventID(messageID, webhookpub.EventEmailFailed)
+		a.outbox.PublishBestEffortTx(ctx, tx, e)
+		return nil
+	}); err != nil {
+		return err
+	}
+	if resolved != nil {
+		log.Printf("[outbound-send] %s: terminal-failure guard settled as sent on provider evidence (provider id %q)", messageID, resolvedProviderID)
+		a.meterSent(ctx, resolved, messageID)
 	}
 	return nil
 }
 
-func (a *outboundSendStore) MarkFailed(ctx context.Context, messageID string, attempt int, detail string) error {
-	return a.store.WithTx(ctx, func(tx pgx.Tx) error {
-		info, err := a.store.MarkOutboundFailedTx(ctx, tx, messageID, detail)
-		if err != nil {
-			return err
-		}
-		if info == nil {
-			return nil // row gone — nothing to record
-		}
-		e := buildEmailFailedEventFromRow(info, detail)
-		e.ID = webhookpub.DeterministicEventID(messageID, webhookpub.EventEmailFailed)
-		a.outbox.PublishBestEffortTx(ctx, tx, e)
-		return nil
-	})
+func (a *outboundSendStore) DeferTerminalFailure(ctx context.Context, messageID string, jobID int64, detail string) error {
+	return a.store.DeferOutboundTerminalFailure(ctx, messageID, jobID, detail)
 }
 
 // buildEmailSentEventFromRow reconstructs the email.sent event from a stored row
@@ -219,7 +263,7 @@ func NewOutboundDeliverer(sender *outbound.Sender) outboundsend.Deliverer {
 }
 
 func (d *outboundDeliverer) Deliver(ctx context.Context, j *outboundsend.SendJob) outboundsend.DeliverOutcome {
-	providerID, err := d.sender.SubmitOnce(j.EnvelopeFrom, j.Recipients, j.RawMessage)
+	providerID, err := d.sender.SubmitOnce(j.MessageID, j.EnvelopeFrom, j.Recipients, j.RawMessage)
 	if err != nil {
 		// Classify (design §8): a definitely-permanent 5xx is terminal (JobCancel);
 		// a provider-connection failure (relay unreachable/misconfigured) is an

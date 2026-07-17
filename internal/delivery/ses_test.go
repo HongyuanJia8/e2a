@@ -144,4 +144,64 @@ func TestParseSESNotification(t *testing.T) {
 			t.Fatal("expected error")
 		}
 	})
+
+	t.Run("X-E2A-Message-ID header echo is extracted (case-insensitive)", func(t *testing.T) {
+		ev, err := ParseSESNotification([]byte(`{
+			"eventType":"Send",
+			"mail":{"messageId":"ses-8","headers":[
+				{"name":"From","value":"bot@x.com"},
+				{"name":"x-e2a-message-id","value":"msg_abc123DEF"},
+				{"name":"Subject","value":"hi"}
+			]}
+		}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ev.E2AMessageID != "msg_abc123DEF" {
+			t.Errorf("E2AMessageID = %q, want msg_abc123DEF", ev.E2AMessageID)
+		}
+	})
+
+	t.Run("angle-bracketed header echo is trimmed", func(t *testing.T) {
+		ev, err := ParseSESNotification([]byte(`{
+			"eventType":"Delivery",
+			"mail":{"messageId":"ses-9","destination":["a@x.com"],
+				"headers":[{"name":"X-E2A-Message-ID","value":" <msg_ff00> "}],
+				"headersTruncated":true}
+		}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ev.E2AMessageID != "msg_ff00" {
+			t.Errorf("E2AMessageID = %q, want msg_ff00", ev.E2AMessageID)
+		}
+	})
+
+	t.Run("absent headers (include-original-headers not configured) degrade safely", func(t *testing.T) {
+		ev, err := ParseSESNotification([]byte(`{
+			"eventType":"Delivery",
+			"mail":{"messageId":"ses-10","destination":["a@x.com"]}
+		}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ev.E2AMessageID != "" {
+			t.Errorf("E2AMessageID = %q, want empty when mail.headers is absent", ev.E2AMessageID)
+		}
+	})
+}
+
+func TestValidE2AMessageID(t *testing.T) {
+	valid := []string{"msg_a", "msg_0123456789abcdef0123456789abcdef", "msg_A-b_9"}
+	invalid := []string{"", "msg_", "msg", "user_abc", "msg_a b", "msg_a\r\nX", "msg_a;drop", "msg_" + string(make([]byte, 80))}
+	for _, s := range valid {
+		if !validE2AMessageID(s) {
+			t.Errorf("validE2AMessageID(%q) = false, want true", s)
+		}
+	}
+	for _, s := range invalid {
+		if validE2AMessageID(s) {
+			t.Errorf("validE2AMessageID(%q) = true, want false", s)
+		}
+	}
 }

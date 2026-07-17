@@ -12,6 +12,12 @@ import (
 type fakeConsumerStore struct {
 	// correlation: sesMessageID → correlated message
 	corr map[string]*CorrelatedMessage
+	// header correlation: e2aMessageID → correlated message
+	corrByE2A map[string]*CorrelatedMessage
+	// e2a-id lookups actually attempted (pins the shape-validation gate)
+	e2aLookups []string
+	// evidence: recorded provider-accept evidence {messageID, sesMessageID}
+	evidence [][2]string
 	// recorded outcomes + suppressions
 	outcomes    [][3]string // {messageID, address, status}
 	suppressed  map[string]bool
@@ -21,12 +27,23 @@ type fakeConsumerStore struct {
 }
 
 func newFakeConsumerStore() *fakeConsumerStore {
-	return &fakeConsumerStore{corr: map[string]*CorrelatedMessage{}, suppressed: map[string]bool{}, alreadySupp: map[string]bool{}}
+	return &fakeConsumerStore{corr: map[string]*CorrelatedMessage{}, corrByE2A: map[string]*CorrelatedMessage{}, suppressed: map[string]bool{}, alreadySupp: map[string]bool{}}
 }
 
 func (f *fakeConsumerStore) CorrelateBySESMessageID(ctx context.Context, id string) (*CorrelatedMessage, bool, error) {
 	m, ok := f.corr[id]
 	return m, ok, nil
+}
+
+func (f *fakeConsumerStore) CorrelateByE2AMessageID(ctx context.Context, id string) (*CorrelatedMessage, bool, error) {
+	f.e2aLookups = append(f.e2aLookups, id)
+	m, ok := f.corrByE2A[id]
+	return m, ok, nil
+}
+
+func (f *fakeConsumerStore) RecordProviderAcceptEvidence(ctx context.Context, messageID, sesMessageID string) error {
+	f.evidence = append(f.evidence, [2]string{messageID, sesMessageID})
+	return nil
 }
 func (f *fakeConsumerStore) RecordDeliveryOutcome(ctx context.Context, messageID, address string, st Status, detail string) error {
 	f.outcomes = append(f.outcomes, [3]string{messageID, address, string(st)})
@@ -339,6 +356,107 @@ func TestConsumerProcess(t *testing.T) {
 		}
 		if len(store.outcomes) != 0 || len(*events) != 0 {
 			t.Fatal("nothing should be recorded or fired for an uncorrelated reject")
+		}
+	})
+}
+
+// TestConsumerCorrelationAndEvidence pins the async-send-contract §3.1
+// correlation machinery: the X-E2A-Message-ID header echo is the fallback
+// correlation channel, correlated post-acceptance events record provider-accept
+// evidence, and Reject/uncorrelated events never do.
+func TestConsumerCorrelationAndEvidence(t *testing.T) {
+	t.Run("header echo correlates when the SES id is unknown (crash window)", func(t *testing.T) {
+		store := newFakeConsumerStore()
+		store.corrByE2A["msg_abc123"] = &CorrelatedMessage{MessageID: "msg_abc123", UserID: "u_1", AgentID: "bot@x.com", Subject: "hi"}
+		fire, events := recordingFirer()
+		c := NewConsumer(store, fire)
+		err := c.Process(context.Background(), &Event{
+			Kind: KindDelivery, SESMessageID: "ses-never-captured", E2AMessageID: "msg_abc123",
+			Recipients: []RecipientOutcome{{Address: "a@x.com", Status: StatusDelivered}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(store.outcomes) != 1 || store.outcomes[0] != [3]string{"msg_abc123", "a@x.com", "delivered"} {
+			t.Fatalf("outcomes=%v, want the header-correlated delivery recorded", store.outcomes)
+		}
+		if len(store.evidence) != 1 || store.evidence[0] != [2]string{"msg_abc123", "ses-never-captured"} {
+			t.Fatalf("evidence=%v, want provider-accept evidence with the SES id for repair", store.evidence)
+		}
+		if len(*events) != 1 || (*events)[0].eventType != EventEmailDelivered {
+			t.Fatalf("events=%v, want one email.delivered", *events)
+		}
+	})
+
+	t.Run("SES-id correlation still wins and records evidence", func(t *testing.T) {
+		store := newFakeConsumerStore()
+		store.corr["ses-1"] = &CorrelatedMessage{MessageID: "msg_1", UserID: "u_1", AgentID: "bot@x.com"}
+		c := NewConsumer(store, nil)
+		if err := c.Process(context.Background(), &Event{
+			Kind: KindDelivery, SESMessageID: "ses-1",
+			Recipients: []RecipientOutcome{{Address: "a@x.com", Status: StatusDelivered}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if len(store.e2aLookups) != 0 {
+			t.Errorf("header lookup attempted despite SES-id hit: %v", store.e2aLookups)
+		}
+		if len(store.evidence) != 1 {
+			t.Errorf("evidence=%v, want one provider-accept record", store.evidence)
+		}
+	})
+
+	t.Run("Send event with no recipients still records evidence", func(t *testing.T) {
+		store := newFakeConsumerStore()
+		store.corrByE2A["msg_send1"] = &CorrelatedMessage{MessageID: "msg_send1", UserID: "u_1", AgentID: "bot@x.com"}
+		c := NewConsumer(store, nil)
+		if err := c.Process(context.Background(), &Event{
+			Kind: KindSend, SESMessageID: "ses-s1", E2AMessageID: "msg_send1",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if len(store.evidence) != 1 || store.evidence[0][0] != "msg_send1" {
+			t.Fatalf("evidence=%v, want the Send acceptance recorded", store.evidence)
+		}
+		if len(store.outcomes) != 0 {
+			t.Errorf("a Send has no recipient outcomes, got %v", store.outcomes)
+		}
+	})
+
+	t.Run("Reject never records provider-accept evidence", func(t *testing.T) {
+		store := newFakeConsumerStore()
+		store.corr["ses-rej"] = &CorrelatedMessage{MessageID: "msg_rej", UserID: "u_1", AgentID: "bot@x.com"}
+		c := NewConsumer(store, nil)
+		if err := c.Process(context.Background(), &Event{
+			Kind: KindReject, SESMessageID: "ses-rej",
+			Recipients: []RecipientOutcome{{Address: "a@x.com", Status: StatusFailed}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if len(store.evidence) != 0 {
+			t.Fatalf("Reject recorded accept evidence: %v", store.evidence)
+		}
+		if len(store.outcomes) != 1 || store.outcomes[0][2] != "failed" {
+			t.Fatalf("outcomes=%v, want the per-recipient failed recorded", store.outcomes)
+		}
+	})
+
+	t.Run("uncorrelated event with a garbage header marker stays a no-op", func(t *testing.T) {
+		store := newFakeConsumerStore()
+		c := NewConsumer(store, nil)
+		for _, bad := range []string{"", "msg_", "not_an_id", "msg_../../etc", "msg_a b"} {
+			if err := c.Process(context.Background(), &Event{
+				Kind: KindDelivery, SESMessageID: "unknown", E2AMessageID: bad,
+				Recipients: []RecipientOutcome{{Address: "a@x.com", Status: StatusDelivered}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if len(store.e2aLookups) != 0 {
+			t.Errorf("invalid marker shapes must not reach the store: %v", store.e2aLookups)
+		}
+		if len(store.outcomes) != 0 || len(store.evidence) != 0 {
+			t.Error("uncorrelated feedback must record nothing")
 		}
 	})
 }

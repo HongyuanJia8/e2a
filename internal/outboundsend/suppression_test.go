@@ -72,7 +72,7 @@ func TestSendWorker_SuppressionCheckErrorFailsClosed(t *testing.T) {
 
 func TestSendWorker_UnsuppressedRecipientStillSends(t *testing.T) {
 	st := &fakeStore{job: acceptedJob("msg_1")} // no suppressions
-	dl := fakeDeliverer{out: outboundsend.DeliverOutcome{ProviderMessageID: "ses-ok", SentAs: "relay"}}
+	dl := &fakeDeliverer{out: outboundsend.DeliverOutcome{ProviderMessageID: "ses-ok", SentAs: "relay"}}
 	w := outboundsend.NewSendWorker(st, dl)
 	if err := w.Work(context.Background(), job("msg_1", 1)); err != nil {
 		t.Fatalf("Work: %v", err)

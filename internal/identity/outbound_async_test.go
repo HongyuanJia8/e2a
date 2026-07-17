@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/tokencanopy/e2a/internal/delivery"
 	"github.com/tokencanopy/e2a/internal/identity"
 	"github.com/tokencanopy/e2a/internal/testutil"
 )
@@ -228,16 +229,16 @@ func TestMarkOutboundFailedTx(t *testing.T) {
 	}
 
 	if err := store.WithTx(ctx, func(tx pgx.Tx) error {
-		_, err := store.MarkOutboundFailedTx(ctx, tx, msgID, "550 mailbox unavailable")
+		_, err := store.MarkOutboundFailedTx(ctx, tx, msgID, "550 mailbox unavailable", delivery.FailureSourceProvider)
 		return err
 	}); err != nil {
 		t.Fatalf("MarkOutboundFailedTx: %v", err)
 	}
 
-	var deliveryStatus, detail string
+	var deliveryStatus, detail, failureSource string
 	if err := pool.QueryRow(ctx,
-		`SELECT delivery_status, COALESCE(delivery_detail,'') FROM messages WHERE id=$1`, msgID,
-	).Scan(&deliveryStatus, &detail); err != nil {
+		`SELECT delivery_status, COALESCE(delivery_detail,''), COALESCE(delivery_failure_source,'') FROM messages WHERE id=$1`, msgID,
+	).Scan(&deliveryStatus, &detail, &failureSource); err != nil {
 		t.Fatalf("read row: %v", err)
 	}
 	if deliveryStatus != "failed" {
@@ -245,6 +246,9 @@ func TestMarkOutboundFailedTx(t *testing.T) {
 	}
 	if detail != "550 mailbox unavailable" {
 		t.Errorf("delivery_detail = %q, want the failure detail", detail)
+	}
+	if failureSource != "provider" {
+		t.Errorf("delivery_failure_source = %q, want the provenance recorded", failureSource)
 	}
 
 	var sentMsgID string
@@ -266,7 +270,7 @@ func TestMarkOutboundFailedTx(t *testing.T) {
 	}
 
 	if err := store.WithTx(ctx, func(tx pgx.Tx) error {
-		info, err := store.MarkOutboundFailedTx(ctx, tx, sentMsgID, "late terminal job")
+		info, err := store.MarkOutboundFailedTx(ctx, tx, sentMsgID, "late terminal job", delivery.FailureSourceLocal)
 		if info != nil {
 			t.Errorf("MarkOutboundFailedTx(sent) info = %+v, want nil", info)
 		}
@@ -396,7 +400,7 @@ func TestMarkOutboundFailedTxSkipsTrashRace(t *testing.T) {
 		}
 		var info *identity.OutboundSentInfo
 		if err := store.WithTx(ctx, func(tx pgx.Tx) error {
-			i, err := store.MarkOutboundFailedTx(ctx, tx, msg.ID, "550 after trash")
+			i, err := store.MarkOutboundFailedTx(ctx, tx, msg.ID, "550 after trash", delivery.FailureSourceProvider)
 			info = i
 			return err
 		}); err != nil {
@@ -425,7 +429,7 @@ func TestMarkOutboundFailedTxSkipsTrashRace(t *testing.T) {
 		}
 		var info *identity.OutboundSentInfo
 		if err := store.WithTx(ctx, func(tx pgx.Tx) error {
-			i, err := store.MarkOutboundFailedTx(ctx, tx, msg.ID, "550 after agent trash")
+			i, err := store.MarkOutboundFailedTx(ctx, tx, msg.ID, "550 after agent trash", delivery.FailureSourceProvider)
 			info = i
 			return err
 		}); err != nil {

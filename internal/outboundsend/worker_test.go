@@ -9,6 +9,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 
+	"github.com/tokencanopy/e2a/internal/delivery"
 	"github.com/tokencanopy/e2a/internal/outboundsend"
 )
 
@@ -23,6 +24,7 @@ type fakeStore struct {
 
 	sent     []sentCall
 	failed   []failedCall
+	deferred []failedCall
 	released []string
 	// suppressionUserID records the tenant the guard was scoped to.
 	suppressionUserID string
@@ -33,6 +35,7 @@ type failedCall struct {
 	id      string
 	attempt int
 	detail  string
+	source  delivery.FailureSource
 }
 
 func (f *fakeStore) ClaimSend(_ context.Context, _ string, _ int64) (*outboundsend.SendJob, error) {
@@ -42,8 +45,12 @@ func (f *fakeStore) MarkSent(_ context.Context, id, provider, sentAs string) err
 	f.sent = append(f.sent, sentCall{id, provider, sentAs})
 	return f.markSentErr
 }
-func (f *fakeStore) MarkFailed(_ context.Context, id string, attempt int, detail string) error {
-	f.failed = append(f.failed, failedCall{id, attempt, detail})
+func (f *fakeStore) MarkFailed(_ context.Context, id string, attempt int, detail string, source delivery.FailureSource) error {
+	f.failed = append(f.failed, failedCall{id, attempt, detail, source})
+	return nil
+}
+func (f *fakeStore) DeferTerminalFailure(_ context.Context, id string, _ int64, detail string) error {
+	f.deferred = append(f.deferred, failedCall{id: id, detail: detail})
 	return nil
 }
 func (f *fakeStore) ReleaseSend(_ context.Context, id string, _ int64) error {
@@ -55,9 +62,13 @@ func (f *fakeStore) SuppressedRecipients(_ context.Context, userID string, _ []s
 	return f.suppressed, f.suppressedErr
 }
 
-type fakeDeliverer struct{ out outboundsend.DeliverOutcome }
+type fakeDeliverer struct {
+	out   outboundsend.DeliverOutcome
+	calls int
+}
 
-func (f fakeDeliverer) Deliver(_ context.Context, _ *outboundsend.SendJob) outboundsend.DeliverOutcome {
+func (f *fakeDeliverer) Deliver(_ context.Context, _ *outboundsend.SendJob) outboundsend.DeliverOutcome {
+	f.calls++
 	return f.out
 }
 
@@ -74,7 +85,7 @@ func acceptedJob(id string) *outboundsend.SendJob {
 
 func TestSendWorker_Success(t *testing.T) {
 	st := &fakeStore{job: acceptedJob("msg_1")}
-	dl := fakeDeliverer{out: outboundsend.DeliverOutcome{ProviderMessageID: "ses-1", SentAs: "relay"}}
+	dl := &fakeDeliverer{out: outboundsend.DeliverOutcome{ProviderMessageID: "ses-1", SentAs: "relay"}}
 	w := outboundsend.NewSendWorker(st, dl)
 	if err := w.Work(context.Background(), job("msg_1", 1)); err != nil {
 		t.Fatalf("Work: %v", err)
@@ -89,7 +100,7 @@ func TestSendWorker_Success(t *testing.T) {
 
 func TestSendWorker_AlreadyTerminalIsNoOp(t *testing.T) {
 	st := &fakeStore{job: &outboundsend.SendJob{MessageID: "msg_1", Status: "sent"}}
-	dl := fakeDeliverer{out: outboundsend.DeliverOutcome{ProviderMessageID: "should-not-send"}}
+	dl := &fakeDeliverer{out: outboundsend.DeliverOutcome{ProviderMessageID: "should-not-send"}}
 	w := outboundsend.NewSendWorker(st, dl)
 	if err := w.Work(context.Background(), job("msg_1", 1)); err != nil {
 		t.Fatalf("Work: %v", err)
@@ -101,7 +112,7 @@ func TestSendWorker_AlreadyTerminalIsNoOp(t *testing.T) {
 
 func TestSendWorker_MessageGoneIsNoOp(t *testing.T) {
 	st := &fakeStore{job: nil} // LoadForSend returns (nil, nil) → gone
-	w := outboundsend.NewSendWorker(st, fakeDeliverer{})
+	w := outboundsend.NewSendWorker(st, &fakeDeliverer{})
 	if err := w.Work(context.Background(), job("msg_gone", 1)); err != nil {
 		t.Fatalf("Work: %v", err)
 	}
@@ -112,7 +123,7 @@ func TestSendWorker_MessageGoneIsNoOp(t *testing.T) {
 
 func TestSendWorker_PermanentFailureCancels(t *testing.T) {
 	st := &fakeStore{job: acceptedJob("msg_1")}
-	dl := fakeDeliverer{out: outboundsend.DeliverOutcome{Err: errors.New("recipient rejected 550"), Permanent: true}}
+	dl := &fakeDeliverer{out: outboundsend.DeliverOutcome{Err: errors.New("recipient rejected 550"), Permanent: true}}
 	w := outboundsend.NewSendWorker(st, dl)
 	err := w.Work(context.Background(), job("msg_1", 1))
 	if err == nil {
@@ -121,23 +132,61 @@ func TestSendWorker_PermanentFailureCancels(t *testing.T) {
 	if len(st.failed) != 1 {
 		t.Errorf("permanent failure must MarkFailed once, got %+v", st.failed)
 	}
+	if st.failed[0].source != delivery.FailureSourceProvider {
+		t.Errorf("permanent 5xx failure source = %q, want provider (never correctable)", st.failed[0].source)
+	}
 }
 
-func TestSendWorker_LastAttemptFails(t *testing.T) {
+// TestSendWorker_LastAttemptDefersTerminalOutcome pins the §3.1 grace behavior:
+// a final attempt that fails (possibly ambiguously — the connection may have
+// died AFTER SES accepted the DATA) must NOT declare failed inline. It records
+// the diagnostic + releases the claim via DeferTerminalFailure and returns an
+// error so River discards; the terminal reconciler declares the outcome after
+// the provider-evidence grace window.
+func TestSendWorker_LastAttemptDefersTerminalOutcome(t *testing.T) {
 	st := &fakeStore{job: acceptedJob("msg_1")}
-	dl := fakeDeliverer{out: outboundsend.DeliverOutcome{Err: errors.New("boom 421")}}
+	dl := &fakeDeliverer{out: outboundsend.DeliverOutcome{Err: errors.New("boom 421")}}
 	w := outboundsend.NewSendWorker(st, dl)
 	if err := w.Work(context.Background(), job("msg_1", outboundsend.MaxSendAttempts)); err == nil {
 		t.Fatal("final attempt failure should return an error so River discards")
 	}
-	if len(st.failed) != 1 {
-		t.Errorf("final attempt must MarkFailed, got %+v", st.failed)
+	if len(st.failed) != 0 {
+		t.Errorf("final attempt must NOT MarkFailed inline (provider evidence may still arrive), got %+v", st.failed)
+	}
+	if len(st.deferred) != 1 || st.deferred[0].id != "msg_1" || st.deferred[0].detail != "boom 421" {
+		t.Errorf("final attempt must defer the terminal outcome with its diagnostic, got %+v", st.deferred)
+	}
+}
+
+// TestSendWorker_ProviderEvidenceSettlesWithoutResubmit pins the duplicate
+// guard for the SMTP-accept↔mark-sent crash window: when the claim reports
+// recorded provider-accept evidence, the worker settles the message as sent
+// with the evidence-repaired provider id and performs NO provider I/O.
+func TestSendWorker_ProviderEvidenceSettlesWithoutResubmit(t *testing.T) {
+	j := acceptedJob("msg_1")
+	j.SentAs = "relay"
+	j.ProviderAccepted = true
+	j.ProviderMessageID = "ses-evidence-1"
+	st := &fakeStore{job: j}
+	dl := &fakeDeliverer{out: outboundsend.DeliverOutcome{ProviderMessageID: "must-not-be-used"}}
+	w := outboundsend.NewSendWorker(st, dl)
+	if err := w.Work(context.Background(), job("msg_1", 2)); err != nil {
+		t.Fatalf("Work: %v", err)
+	}
+	if dl.calls != 0 {
+		t.Errorf("Deliver called %d times, want 0 — evidence means the provider already has the message", dl.calls)
+	}
+	if len(st.sent) != 1 || st.sent[0].provider != "ses-evidence-1" || st.sent[0].sentAs != "relay" {
+		t.Errorf("MarkSent = %+v, want one call with the evidence provider id", st.sent)
+	}
+	if len(st.failed) != 0 || len(st.deferred) != 0 {
+		t.Errorf("evidence settle must not fail/defer, got failed=%+v deferred=%+v", st.failed, st.deferred)
 	}
 }
 
 func TestSendWorker_RetryableFailureDoesNotMarkFailed(t *testing.T) {
 	st := &fakeStore{job: acceptedJob("msg_1")}
-	dl := fakeDeliverer{out: outboundsend.DeliverOutcome{Err: errors.New("transient 421")}}
+	dl := &fakeDeliverer{out: outboundsend.DeliverOutcome{Err: errors.New("transient 421")}}
 	w := outboundsend.NewSendWorker(st, dl)
 	err := w.Work(context.Background(), job("msg_1", 1))
 	if err == nil {
@@ -156,7 +205,7 @@ func TestSendWorker_RetryableFailureDoesNotMarkFailed(t *testing.T) {
 
 func TestSendWorker_RetryableFailureReleaseErrorRetries(t *testing.T) {
 	st := &fakeStore{job: acceptedJob("msg_1"), releaseErr: errors.New("db unavailable")}
-	dl := fakeDeliverer{out: outboundsend.DeliverOutcome{Err: errors.New("transient 421")}}
+	dl := &fakeDeliverer{out: outboundsend.DeliverOutcome{Err: errors.New("transient 421")}}
 	w := outboundsend.NewSendWorker(st, dl)
 	if err := w.Work(context.Background(), job("msg_1", 1)); err == nil || !errors.Is(err, st.releaseErr) {
 		t.Fatalf("Work error = %v, want release error", err)
@@ -170,7 +219,7 @@ func TestSendWorker_OutageSnoozesWithoutBurningAttempt(t *testing.T) {
 	j := acceptedJob("msg_1")
 	j.AcceptedAt = time.Now() // fresh accept — within the retry horizon
 	st := &fakeStore{job: j}
-	dl := fakeDeliverer{out: outboundsend.DeliverOutcome{Err: errors.New("dial tcp 1.2.3.4:587: i/o timeout"), Outage: true}}
+	dl := &fakeDeliverer{out: outboundsend.DeliverOutcome{Err: errors.New("dial tcp 1.2.3.4:587: i/o timeout"), Outage: true}}
 	w := outboundsend.NewSendWorker(st, dl)
 	// Even at a high attempt number, an outage must snooze (not terminal-fail):
 	// JobSnooze doesn't count the attempt, so MaxSendAttempts is never reached.
@@ -193,13 +242,16 @@ func TestSendWorker_OutagePastHorizonFailsTerminally(t *testing.T) {
 	j := acceptedJob("msg_1")
 	j.AcceptedAt = time.Now().Add(-73 * time.Hour) // past the 72h horizon
 	st := &fakeStore{job: j}
-	dl := fakeDeliverer{out: outboundsend.DeliverOutcome{Err: errors.New("connection refused"), Outage: true}}
+	dl := &fakeDeliverer{out: outboundsend.DeliverOutcome{Err: errors.New("connection refused"), Outage: true}}
 	w := outboundsend.NewSendWorker(st, dl)
 	if err := w.Work(context.Background(), job("msg_1", 2)); err == nil {
 		t.Fatal("an outage past the retry horizon should fail terminally")
 	}
 	if len(st.failed) != 1 {
 		t.Errorf("an outage past the horizon must MarkFailed, got %+v", st.failed)
+	}
+	if st.failed[0].source != delivery.FailureSourceLocal {
+		t.Errorf("outage-horizon failure source = %q, want local (correctable — the provider never confirmed a rejection)", st.failed[0].source)
 	}
 }
 

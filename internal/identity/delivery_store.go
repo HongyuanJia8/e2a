@@ -65,11 +65,70 @@ func (s *Store) CorrelateBySESMessageID(ctx context.Context, sesMessageID string
 	return m, true, nil
 }
 
+// CorrelateByE2AMessageID finds the outbound message + owning user/agent by
+// the e2a message id SES echoed back from the X-E2A-Message-ID wire header
+// (delivery.MessageIDHeader) — the §3.1 correlation fallback for the
+// SMTP-accept↔mark-sent crash window, where the provider id from the SMTP 250
+// was never captured so CorrelateBySESMessageID cannot match. Same return
+// shape as CorrelateBySESMessageID. The id is shape-validated by the caller
+// (internal/delivery) before it reaches this lookup.
+func (s *Store) CorrelateByE2AMessageID(ctx context.Context, e2aMessageID string) (*delivery.CorrelatedMessage, bool, error) {
+	if e2aMessageID == "" {
+		return nil, false, nil
+	}
+	m := &delivery.CorrelatedMessage{}
+	err := s.pool.QueryRow(ctx,
+		`SELECT m.id, a.user_id, m.agent_id, COALESCE(m.subject, ''),
+		        COALESCE(m.conversation_id, ''), COALESCE(m.method, ''),
+		        COALESCE(m.message_type, ''), COALESCE(m.sender, ''),
+		        m.to_recipients, m.cc, m.bcc
+		   FROM messages m
+		   JOIN agent_identities a ON a.id = m.agent_id
+		  WHERE m.id = $1 AND m.direction = 'outbound'`,
+		e2aMessageID,
+	).Scan(&m.MessageID, &m.UserID, &m.AgentID, &m.Subject,
+		&m.ConversationID, &m.Method, &m.MessageType, &m.From,
+		&m.To, &m.CC, &m.BCC)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return m, true, nil
+}
+
+// RecordProviderAcceptEvidence durably notes that SES reported having accepted
+// this message's submission (the SNS consumer calls it for every correlated
+// post-acceptance notification) and repairs a provider_message_id lost to the
+// SMTP-accept↔mark-sent crash window. Idempotent: the first-seen timestamp and
+// a previously captured provider id are never overwritten. The terminal-failure
+// guards (send worker, terminal reconciler, MarkOutboundFailedTx's CAS) read
+// this evidence before declaring an accepted/sending row failed.
+func (s *Store) RecordProviderAcceptEvidence(ctx context.Context, messageID, sesMessageID string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE messages
+		    SET provider_accepted_at = COALESCE(provider_accepted_at, now()),
+		        provider_message_id = CASE WHEN COALESCE(provider_message_id, '') = ''
+		                                   THEN $2 ELSE provider_message_id END
+		  WHERE id = $1 AND direction = 'outbound'`,
+		messageID, sesMessageID)
+	return err
+}
+
 // RecordDeliveryOutcome upserts one recipient's status monotonically (by the
 // delivery precedence) and recomputes the message's rollup delivery_status as
 // the worst status across its recipients. Runs in a tx with FOR UPDATE so
 // concurrent SNS events can't race the merge. Idempotent: a duplicate or older
 // event is a no-op for the status (detail still refreshes on an equal/higher).
+//
+// Correction rule (async-send-contract §3.1): when the message-level status is
+// a locally inferred `failed` (delivery_failure_source 'local' or legacy NULL),
+// a recomputed rollup that proves provider acceptance CORRECTS the row — the
+// falsely-declared terminal failure from a final-attempt crash. A
+// provider-confirmed `failed` is never revived, and feedback for an address
+// outside the message's own envelope is ignored on a failed row so unrelated
+// feedback can never resurrect a genuine failure.
 func (s *Store) RecordDeliveryOutcome(ctx context.Context, messageID, address string, status delivery.Status, detail string) error {
 	addr := NormalizeEmail(address)
 	tx, err := s.pool.Begin(ctx)
@@ -83,21 +142,40 @@ func (s *Store) RecordDeliveryOutcome(ctx context.Context, messageID, address st
 	// concurrently; without this, two events for different recipients (or two
 	// first-events for an un-pre-populated recipient) race the rollup write and
 	// the insert ON CONFLICT path, dropping a terminal status. The lock makes
-	// the read-merge-write below strictly monotonic per message.
-	var lockedID string
-	err = tx.QueryRow(ctx, `SELECT id FROM messages WHERE id = $1 FOR UPDATE`, messageID).Scan(&lockedID)
+	// the read-merge-write below strictly monotonic per message, and serializes
+	// the §3.1 correction against the terminal writers (MarkOutboundFailedTx /
+	// ResolveOutboundProviderAcceptedTx lock the same row).
+	var (
+		curStatus, curSource string
+		envTo, envCC, envBCC []string
+	)
+	err = tx.QueryRow(ctx,
+		`SELECT COALESCE(delivery_status, ''), COALESCE(delivery_failure_source, ''),
+		        COALESCE(to_recipients, '{}'), COALESCE(cc, '{}'), COALESCE(bcc, '{}')
+		   FROM messages WHERE id = $1 FOR UPDATE`,
+		messageID,
+	).Scan(&curStatus, &curSource, &envTo, &envCC, &envBCC)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil // message deleted between correlation and now
 	}
 	if err != nil {
 		return err
 	}
+	cur := delivery.Status(curStatus)
 
-	var cur string
+	// Envelope-membership guard on failed rows: only feedback for this
+	// message's own recipients may touch a failed message — an address the
+	// send never targeted must not create the recipient row whose rollup
+	// would revive the failure.
+	if cur == delivery.StatusFailed && !addressInEnvelope(addr, envTo, envCC, envBCC) {
+		return nil
+	}
+
+	var curRecipient string
 	err = tx.QueryRow(ctx,
 		`SELECT status FROM message_recipients WHERE message_id = $1 AND address = $2`,
 		messageID, addr,
-	).Scan(&cur)
+	).Scan(&curRecipient)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		// Recipient row not pre-populated (e.g. SES reports an address the send
@@ -113,12 +191,12 @@ func (s *Store) RecordDeliveryOutcome(ctx context.Context, messageID, address st
 	case err != nil:
 		return err
 	default:
-		merged := delivery.Merge(delivery.Status(cur), status)
+		merged := delivery.Merge(delivery.Status(curRecipient), status)
 		// Only write when the status actually advances — a duplicate/lower-rank
 		// event must not regress the status NOR clobber the diagnostic detail
 		// (a late `delivered` carrying a detail must not overwrite the bounce
 		// reason).
-		if merged != delivery.Status(cur) {
+		if merged != delivery.Status(curRecipient) {
 			if _, err := tx.Exec(ctx,
 				`UPDATE message_recipients SET status = $3, detail = COALESCE($4, detail), updated_at = now()
 				  WHERE message_id = $1 AND address = $2`,
@@ -147,13 +225,57 @@ func (s *Store) RecordDeliveryOutcome(ctx context.Context, messageID, address st
 	}
 	rows.Close()
 	if rollup != "" {
-		if _, err := tx.Exec(ctx,
-			`UPDATE messages SET delivery_status = $2 WHERE id = $1`, messageID, string(rollup),
-		); err != nil {
-			return err
+		next := delivery.ResolveMessageRollup(cur, delivery.FailureSource(curSource), rollup)
+		switch {
+		case next == cur:
+			// No transition (includes a provider-confirmed failed holding
+			// against a delivered rollup) — idempotent no-op.
+		case next == delivery.StatusFailed:
+			// Reject-driven rollup: the failure came from correlated provider
+			// feedback, so it is provider-confirmed — record the provenance so
+			// the §3.1 correction can never revive it.
+			if _, err := tx.Exec(ctx,
+				`UPDATE messages
+				    SET delivery_status = 'failed',
+				        delivery_failure_source = COALESCE(delivery_failure_source, 'provider')
+				  WHERE id = $1`, messageID,
+			); err != nil {
+				return err
+			}
+		case cur == delivery.StatusFailed:
+			// §3.1 correction: authoritatively correlated provider evidence
+			// overrides the locally inferred failure. Clear the failure
+			// provenance + the stale failure detail (the per-recipient rows
+			// carry the provider diagnostics).
+			if _, err := tx.Exec(ctx,
+				`UPDATE messages
+				    SET delivery_status = $2, delivery_failure_source = NULL, delivery_detail = NULL
+				  WHERE id = $1`, messageID, string(next),
+			); err != nil {
+				return err
+			}
+		default:
+			if _, err := tx.Exec(ctx,
+				`UPDATE messages SET delivery_status = $2 WHERE id = $1`, messageID, string(next),
+			); err != nil {
+				return err
+			}
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+// addressInEnvelope reports whether addr (already normalized) is one of the
+// message's own to/cc/bcc recipients.
+func addressInEnvelope(addr string, lists ...[]string) bool {
+	for _, list := range lists {
+		for _, a := range list {
+			if NormalizeEmail(a) == addr {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // MarkMessageSent records that an outbound message was accepted by the relay:
@@ -218,6 +340,13 @@ type OutboundSendPayload struct {
 	Recipients     []string
 	Raw            []byte
 	CreatedAt      time.Time // accept time — the outage-tail retry-horizon clock
+	// ProviderAccepted is true when the SNS consumer recorded provider-accept
+	// evidence for this message (provider_accepted_at): the provider already
+	// has it, so the worker must settle it as sent instead of re-submitting
+	// (the SMTP-accept↔mark-sent crash window's duplicate residual).
+	ProviderAccepted bool
+	// ProviderMessageID is the evidence-repaired provider id ('' when none).
+	ProviderMessageID string
 }
 
 // OutboundSentInfo carries the fields the async worker's MarkSent/MarkFailed
@@ -338,15 +467,17 @@ func (s *Store) ClaimOutboundForSend(ctx context.Context, messageID string, jobI
 	}
 
 	var (
-		deliveryStatus string
-		envelopeFrom   string
-		sentAs         string
-		to, cc, bcc    []string
-		raw            []byte
-		createdAt      time.Time
-		deletedAt      *time.Time
-		agentDeletedAt *time.Time
-		stampedJobID   *int64
+		deliveryStatus     string
+		envelopeFrom       string
+		sentAs             string
+		to, cc, bcc        []string
+		raw                []byte
+		createdAt          time.Time
+		deletedAt          *time.Time
+		agentDeletedAt     *time.Time
+		stampedJobID       *int64
+		providerAcceptedAt *time.Time
+		providerMessageID  string
 	)
 	var userID string
 	// Lock agent first to match permanent agent deletion's lock order, then
@@ -367,13 +498,13 @@ func (s *Store) ClaimOutboundForSend(ctx context.Context, messageID string, jobI
 	err = tx.QueryRow(ctx,
 		`SELECT COALESCE(m.delivery_status,''), COALESCE(m.envelope_from,''), COALESCE(m.sent_as,''),
 		        m.to_recipients, m.cc, m.bcc, m.raw_message, m.created_at,
-		        m.deleted_at, m.send_job_id
+		        m.deleted_at, m.send_job_id, m.provider_accepted_at, COALESCE(m.provider_message_id,'')
 		   FROM messages m
 		  WHERE m.id = $1 AND m.agent_id = $2 AND m.direction = 'outbound'
 		  FOR UPDATE OF m`,
 		messageID, agentID,
 	).Scan(&deliveryStatus, &envelopeFrom, &sentAs, &to, &cc, &bcc, &raw, &createdAt,
-		&deletedAt, &stampedJobID)
+		&deletedAt, &stampedJobID, &providerAcceptedAt, &providerMessageID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if err := tx.Commit(ctx); err != nil {
 			return nil, err
@@ -393,10 +524,14 @@ func (s *Store) ClaimOutboundForSend(ctx context.Context, messageID string, jobI
 	if deletedAt != nil || agentDeletedAt != nil {
 		// The locked snapshot says trash won before the claim. Cancel the queued
 		// send without a webhook event; no provider attempt occurred in this run.
+		// Provenance 'local' (a deliberate local cancel): if provider evidence
+		// later proves an earlier crashed attempt DID reach SES, the §3.1
+		// correction may still record the truthful outcome on the hidden row.
 		if _, err := tx.Exec(ctx,
 			`UPDATE messages
 			    SET delivery_status = 'failed',
 			        delivery_detail = 'send canceled because the message or agent is in trash',
+			        delivery_failure_source = 'local',
 			        send_claimed_at = NULL
 			  WHERE id = $1`,
 			messageID,
@@ -420,14 +555,16 @@ func (s *Store) ClaimOutboundForSend(ctx context.Context, messageID string, jobI
 	recipients = append(recipients, cc...)
 	recipients = append(recipients, bcc...)
 	p := &OutboundSendPayload{
-		ID:             messageID,
-		UserID:         userID,
-		DeliveryStatus: deliveryStatus,
-		EnvelopeFrom:   envelopeFrom,
-		SentAs:         sentAs,
-		Recipients:     recipients,
-		Raw:            raw,
-		CreatedAt:      createdAt,
+		ID:                messageID,
+		UserID:            userID,
+		DeliveryStatus:    deliveryStatus,
+		EnvelopeFrom:      envelopeFrom,
+		SentAs:            sentAs,
+		Recipients:        recipients,
+		Raw:               raw,
+		CreatedAt:         createdAt,
+		ProviderAccepted:  providerAcceptedAt != nil,
+		ProviderMessageID: providerMessageID,
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
@@ -443,6 +580,25 @@ func (s *Store) ReleaseOutboundSendClaim(ctx context.Context, messageID string, 
 		    SET delivery_status = 'accepted', send_claimed_at = NULL
 		  WHERE id = $1 AND send_job_id = $2 AND delivery_status = 'sending'`,
 		messageID, jobID,
+	)
+	return err
+}
+
+// DeferOutboundTerminalFailure records a final attempt's diagnostic and
+// releases the I/O claim WITHOUT declaring the message failed. The worker
+// calls it when its last attempt errored ambiguously (the provider may have
+// accepted the submission before the failure — the SMTP-accept↔mark-sent
+// crash window): the terminal reconciler then declares the outcome after the
+// provider-evidence grace window, preferring this stored detail over its
+// generic sweep message, or settles the row as sent if evidence arrives.
+// Job-scoped so a stale worker can't scribble on a re-enqueued message.
+func (s *Store) DeferOutboundTerminalFailure(ctx context.Context, messageID string, jobID int64, detail string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE messages
+		    SET delivery_detail = $3, send_claimed_at = NULL
+		  WHERE id = $1 AND direction = 'outbound' AND send_job_id = $2
+		    AND delivery_status IN ('accepted', 'sending')`,
+		messageID, jobID, nullIfEmpty(detail),
 	)
 	return err
 }
@@ -472,6 +628,56 @@ func (s *Store) MarkOutboundSentTx(ctx context.Context, tx pgx.Tx, messageID, pr
 	if err != nil {
 		return nil, err
 	}
+	if err := addSentRecipientRowsTx(ctx, tx, messageID, m.ToRecipients, m.CC, m.BCC); err != nil {
+		return nil, err
+	}
+	return outboundSentInfoTx(ctx, tx, m)
+}
+
+// ResolveOutboundProviderAcceptedTx settles, within the caller's transaction,
+// a pre-terminal outbound row for which authoritative provider-accept evidence
+// has been recorded (provider_accepted_at, written by the SNS consumer):
+// delivery_status='sent' with the evidence-repaired provider id + the standard
+// per-recipient 'sent' rows. This is the terminal-failure guard's positive
+// branch (async-send-contract §3.1 / pipeline §7): a final attempt or the
+// terminal reconciler about to declare `failed` first settles the row as sent
+// when the provider demonstrably has the message. Returns (nil, "", nil) when
+// the row is gone, already sent/terminal, or carries no evidence — the caller
+// proceeds to the failure write, whose own CAS re-checks the evidence.
+func (s *Store) ResolveOutboundProviderAcceptedTx(ctx context.Context, tx pgx.Tx, messageID string) (*OutboundSentInfo, string, error) {
+	var providerMessageID string
+	m := &Message{ID: messageID, Direction: "outbound", DeliveryStatus: "sent"}
+	err := tx.QueryRow(ctx,
+		`UPDATE messages m
+		    SET delivery_status = 'sent', send_claimed_at = NULL, delivery_failure_source = NULL
+		   FROM agent_identities a
+		  WHERE m.id = $1 AND m.direction = 'outbound'
+		    AND m.agent_id = a.id
+		    AND m.delivery_status IN ('accepted', 'sending')
+		    AND m.provider_accepted_at IS NOT NULL
+		 RETURNING m.agent_id, m.subject, m.message_type, m.method, m.conversation_id, m.sender,
+		           m.to_recipients, m.cc, m.bcc, COALESCE(m.provider_message_id, '')`,
+		messageID,
+	).Scan(&m.AgentID, &m.Subject, &m.Type, &m.Method, &m.ConversationID, &m.Sender,
+		&m.ToRecipients, &m.CC, &m.BCC, &providerMessageID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, "", nil
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	m.ProviderMessageID = providerMessageID
+	if err := addSentRecipientRowsTx(ctx, tx, messageID, m.ToRecipients, m.CC, m.BCC); err != nil {
+		return nil, "", err
+	}
+	info, err := outboundSentInfoTx(ctx, tx, m)
+	return info, providerMessageID, err
+}
+
+// addSentRecipientRowsTx inserts the per-recipient 'sent' rows for a message
+// just settled as sent (idempotent on re-drive). Shared by MarkOutboundSentTx
+// and ResolveOutboundProviderAcceptedTx.
+func addSentRecipientRowsTx(ctx context.Context, tx pgx.Tx, messageID string, to, cc, bcc []string) error {
 	add := func(addrs []string, kind string) error {
 		for _, a := range addrs {
 			addr := NormalizeEmail(a)
@@ -489,15 +695,18 @@ func (s *Store) MarkOutboundSentTx(ctx context.Context, tx pgx.Tx, messageID, pr
 		}
 		return nil
 	}
-	if err := add(m.ToRecipients, "to"); err != nil {
-		return nil, err
+	if err := add(to, "to"); err != nil {
+		return err
 	}
-	if err := add(m.CC, "cc"); err != nil {
-		return nil, err
+	if err := add(cc, "cc"); err != nil {
+		return err
 	}
-	if err := add(m.BCC, "bcc"); err != nil {
-		return nil, err
-	}
+	return add(bcc, "bcc")
+}
+
+// outboundSentInfoTx resolves the owning user/domain for a terminal outbound
+// bookkeeping write's event emission + metering.
+func outboundSentInfoTx(ctx context.Context, tx pgx.Tx, m *Message) (*OutboundSentInfo, error) {
 	info := &OutboundSentInfo{Message: m}
 	if err := tx.QueryRow(ctx,
 		`SELECT user_id, domain FROM agent_identities WHERE id = $1`, m.AgentID,
@@ -508,36 +717,43 @@ func (s *Store) MarkOutboundSentTx(ctx context.Context, tx pgx.Tx, messageID, pr
 }
 
 // MarkOutboundFailedTx records, within the caller's transaction, a terminal
-// outbound send failure: delivery_status='failed' + delivery_detail. Returns the
-// row + owning user for the caller to emit email.failed, or nil if the row is gone
-// or already left accepted/sending. The compare-and-set prevents a late worker or
-// reconciler from overwriting a successful or otherwise terminal delivery state.
-// A post-accept trash does not suppress terminal bookkeeping on the hidden row.
-func (s *Store) MarkOutboundFailedTx(ctx context.Context, tx pgx.Tx, messageID, detail string) (*OutboundSentInfo, error) {
+// outbound send failure: delivery_status='failed' + delivery_detail + the
+// failure provenance (delivery_failure_source — 'provider' for an explicit
+// provider rejection, 'local' for an inferred failure; §3.1 correction only
+// ever applies to 'local'). Returns the row + owning user for the caller to
+// emit email.failed, or nil if the row is gone, already left accepted/sending,
+// or carries provider-accept evidence — the CAS's `provider_accepted_at IS
+// NULL` arm is the terminal-failure guard's last line: a row the provider
+// demonstrably accepted can never be declared failed, no matter which caller
+// races in (the caller settles it via ResolveOutboundProviderAcceptedTx
+// instead). A stored delivery_detail (a deferred final attempt's diagnostic)
+// is preferred over the caller's generic detail. A post-accept trash does not
+// suppress terminal bookkeeping on the hidden row.
+func (s *Store) MarkOutboundFailedTx(ctx context.Context, tx pgx.Tx, messageID, detail string, source delivery.FailureSource) (*OutboundSentInfo, error) {
 	m := &Message{ID: messageID, Direction: "outbound", DeliveryStatus: "failed", DeliveryDetail: detail}
 	err := tx.QueryRow(ctx,
 		`UPDATE messages m
-		    SET delivery_status = 'failed', delivery_detail = $2, send_claimed_at = NULL
+		    SET delivery_status = 'failed',
+		        delivery_detail = COALESCE(NULLIF(m.delivery_detail, ''), $2),
+		        delivery_failure_source = $3,
+		        send_claimed_at = NULL
 		   FROM agent_identities a
 		  WHERE m.id = $1 AND m.direction = 'outbound'
 		    AND m.agent_id = a.id
 		    AND m.delivery_status IN ('accepted', 'sending')
-		 RETURNING m.agent_id, m.subject, m.message_type, m.method, m.conversation_id, m.sender, m.to_recipients, m.cc, m.bcc`,
-		messageID, nullIfEmpty(detail),
-	).Scan(&m.AgentID, &m.Subject, &m.Type, &m.Method, &m.ConversationID, &m.Sender, &m.ToRecipients, &m.CC, &m.BCC)
+		    AND m.provider_accepted_at IS NULL
+		 RETURNING m.agent_id, m.subject, m.message_type, m.method, m.conversation_id, m.sender, m.to_recipients, m.cc, m.bcc,
+		           COALESCE(m.delivery_detail, '')`,
+		messageID, nullIfEmpty(detail), string(source),
+	).Scan(&m.AgentID, &m.Subject, &m.Type, &m.Method, &m.ConversationID, &m.Sender, &m.ToRecipients, &m.CC, &m.BCC,
+		&m.DeliveryDetail)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	info := &OutboundSentInfo{Message: m}
-	if err := tx.QueryRow(ctx,
-		`SELECT user_id, domain FROM agent_identities WHERE id = $1`, m.AgentID,
-	).Scan(&info.UserID, &info.Domain); err != nil {
-		return nil, err
-	}
-	return info, nil
+	return outboundSentInfoTx(ctx, tx, m)
 }
 
 // --- Suppression list ---
