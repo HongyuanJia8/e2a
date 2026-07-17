@@ -13,6 +13,24 @@ This separation matters: freshness prevents the implementation and committed
 spec from drifting together, while semantic comparison prevents both from
 changing incompatibly together.
 
+## Freeze baseline
+
+The cumulative pre-release `/v1` freeze anchor is commit
+`5f58956b9b9030ca726e5c60c74b32fb16998c3e`, which introduced this compatibility
+gate. Until the first explicitly announced API GA release tag exists, release
+audits compare the candidate against that commit as well as the normal pull
+request base:
+
+```sh
+make openapi-compat-check \
+  OPENAPI_BASE=5f58956b9b9030ca726e5c60c74b32fb16998c3e:api/openapi.yaml
+```
+
+Existing `v1.0.x` tags are application/cherry-pick releases that predate the
+API contract freeze; they are not `/v1` compatibility baselines. The first
+official API GA tag supersedes the commit anchor, and every later release must
+compare against the most recent GA tag.
+
 ## Policy
 
 The default oasdiff breaking-change rules apply with the overrides in
@@ -90,8 +108,8 @@ fixture changes. Update those fixtures whenever the policy itself changes.
 
 ## Releases and exceptions
 
-Before publishing a release, run the check against the most recent GA tag in
-addition to the normal pull-request comparison. Stable `/v1` findings are not
-silently ignored: an intentional breaking change requires a new major API path.
-Beta changes should remain marked beta until they are ready to
-join the stable contract.
+Before the first GA release, run the check against the freeze anchor above. From
+GA onward, run it against the most recent GA tag in addition to the normal
+pull-request comparison. Stable `/v1` findings are not silently ignored: an
+intentional breaking change requires a new major API path. Beta changes should
+remain marked beta until they are ready to join the stable contract.
