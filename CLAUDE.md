@@ -22,6 +22,15 @@ make migrate            # apply SQL migrations to local DB
 
 Go tests that need the database use `E2A_TEST_DATABASE_URL="postgres://e2a:e2a@localhost:5433/e2a_test?sslmode=disable"`.
 
+**Concurrent sessions/agents must NOT share a test database.** The test harness (`internal/testutil/db.go`) truncates tables between tests, so two concurrent DB-backed test runs against the same database wipe each other's rows and produce false failures (contention/pollution — a known local flake source). If more than one session, agent, or worktree may run DB-backed tests at the same time, give each its own database and point `E2A_TEST_DATABASE_URL` at it:
+
+```bash
+psql "postgres://e2a:e2a@localhost:5433/e2a" -c 'CREATE DATABASE e2a_test_<name>'
+export E2A_TEST_DATABASE_URL="postgres://e2a:e2a@localhost:5433/e2a_test_<name>?sslmode=disable"
+```
+
+A fresh database needs no manual setup — the harness applies all `migrations/*.sql` on connect. Also run DB-backed packages with `-p 1`; even within one database, parallel packages contend.
+
 **Outbound mail in dev (Mailpit catch-all).** `make docker-up` also starts [Mailpit](https://github.com/axllent/mailpit) — a single-binary SMTP server that captures every outbound message and exposes them at http://localhost:8025. The dockerized `e2a` service points at it automatically. For `make run` (host Go binary), uncomment the Mailpit block in `config.example.yaml`'s `outbound_smtp` section before copying to `config.yaml`, or set `E2A_OUTBOUND_SMTP_HOST=localhost`, `E2A_OUTBOUND_SMTP_PORT=1025`, `E2A_OUTBOUND_SMTP_FROM_DOMAIN=e2a.localhost`. Use this to exercise HITL approval notifications and the `/v1/agents/{email}/test` button locally without real SMTP creds.
 
 ### TypeScript SDK & CLI (npm workspaces)
