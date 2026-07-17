@@ -3,6 +3,7 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,8 +113,11 @@ func TestDeliverOutbound_AcceptTransactionRollsBackAsAUnit(t *testing.T) {
 
 	res, oerr := api.DeliverOutbound(ctx, user, ag, outbound.SendRequest{
 		To: []string{"alice@external.test"}, Subject: "rollback boundary", Body: "never accepted",
-	}, "send", "", nil, func(_ context.Context, _ pgx.Tx, _ string) error {
+	}, "send", "", nil, func(_ context.Context, _ pgx.Tx, result *agent.OutboundResult) error {
 		callbackCalled = true
+		if result.Status != "accepted" || !strings.HasPrefix(result.MessageID, "msg_") {
+			t.Fatalf("accept idempotency result=%+v want accepted msg_ resource", result)
+		}
 		return errors.New("idempotency completion failed")
 	})
 	if !callbackCalled {

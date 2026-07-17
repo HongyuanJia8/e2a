@@ -127,15 +127,15 @@ func (m *memIdem) Claim(ctx context.Context, userID, key, path, bodyHash string)
 func (m *memIdem) Complete(ctx context.Context, userID, key string, resp idempotency.CachedResponse) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if row, ok := m.rows[userID+"\x00"+key]; ok {
+	if row, ok := m.rows[userID+"\x00"+key]; ok && !row.done {
 		row.done, row.resp = true, resp
 	}
 	return nil
 }
 
-// CompleteTx mirrors Complete for the in-memory fake (tx is irrelevant here); the
-// in_progress→completed transition is the same, so a later post-hoc Complete with
-// the same body is a harmless idempotent overwrite.
+// CompleteTx mirrors Complete for the in-memory fake (tx is irrelevant here).
+// Like the real store, completion is in_progress→completed only: a later
+// post-hoc Complete cannot overwrite the response committed in the business tx.
 func (m *memIdem) CompleteTx(ctx context.Context, tx pgx.Tx, userID, key string, resp idempotency.CachedResponse) error {
 	return m.Complete(ctx, userID, key, resp)
 }
@@ -264,5 +264,55 @@ func TestSendAccepted202AndIdempotentReplay(t *testing.T) {
 	}
 	if deliveries != 1 {
 		t.Fatalf("DeliverOutbound ran %d times, want exactly 1 (retry must replay, not re-enqueue)", deliveries)
+	}
+}
+
+// A loopback send reaches its terminal local state in the request transaction.
+// Its in-transaction idempotency completion must cache that exact 200/sent
+// resource response, not the external queue's 202/accepted shape.
+func TestSelfSendIdempotentReplayPreservesSentResult(t *testing.T) {
+	deliveries := 0
+	srv := httptest.NewServer(New(Deps{
+		Authenticator: func(r *http.Request) (*identity.User, error) { return &identity.User{ID: "u_1"}, nil },
+		GetAgent: func(ctx context.Context, address string) (*identity.AgentIdentity, error) {
+			return &identity.AgentIdentity{ID: address, Email: address, UserID: "u_1", DomainVerified: true}, nil
+		},
+		Idempotency: newMemIdem(),
+		DeliverOutbound: func(ctx context.Context, u *identity.User, ag *identity.AgentIdentity, req outbound.SendRequest, mt, rt string, ref *identity.Message, ic agent.AcceptIdemCompleter) (*agent.OutboundResult, *agent.OutboundError) {
+			deliveries++
+			if err := ic(ctx, nil, &agent.OutboundResult{
+				MessageID: "msg_local", Method: "loopback", SentAs: "own_address",
+			}); err != nil {
+				t.Fatalf("complete loopback idempotency: %v", err)
+			}
+			return &agent.OutboundResult{MessageID: "msg_local", Method: "loopback", SentAs: "own_address"}, nil
+		},
+	}))
+	t.Cleanup(srv.Close)
+
+	rawBody := []byte(`{"to":["a@acme.com"],"subject":"Note","text":"hello"}`)
+	send := func() (int, map[string]any) {
+		req, _ := http.NewRequest("POST", srv.URL+"/v1/agents/a%40acme.com/messages", bytes.NewReader(rawBody))
+		req.Header.Set("Authorization", "Bearer good")
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", "local-key-1")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var body map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		return resp.StatusCode, body
+	}
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		code, body := send()
+		if code != http.StatusOK || body["status"] != "sent" || body["message_id"] != "msg_local" || body["method"] != "loopback" {
+			t.Fatalf("attempt %d: want replayed 200 sent msg_local loopback, got %d %v", attempt, code, body)
+		}
+	}
+	if deliveries != 1 {
+		t.Fatalf("DeliverOutbound ran %d times, want exactly 1", deliveries)
 	}
 }

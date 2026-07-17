@@ -143,9 +143,13 @@ func approveResult(sent *identity.Message) (int, SendResultView) {
 		statusCode = http.StatusAccepted
 		status = "accepted"
 	}
+	providerMessageID := sent.ProviderMessageID
+	if sent.Method == "loopback" {
+		providerMessageID = ""
+	}
 	edited := sent.Edited
 	return statusCode, SendResultView{
-		Status: status, MessageID: sent.ID, ProviderMessageID: sent.ProviderMessageID,
+		Status: status, MessageID: sent.ID, ProviderMessageID: providerMessageID,
 		SentAs: sent.SentAs, Method: sent.Method, Edited: &edited,
 	}
 }

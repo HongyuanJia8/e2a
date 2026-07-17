@@ -1219,7 +1219,7 @@ components:
           description: "Send kind. Open set; tolerate unknown values. Known values: send, reply, forward."
           type: string
         method:
-          description: "Transport used for the send. Open set; tolerate unknown values. Known values: smtp."
+          description: "Transport used for the send. Open set; tolerate unknown values. Known values: smtp, loopback."
           type: string
         provider_message_id:
           type: string
@@ -1233,7 +1233,6 @@ components:
         - message_id
         - agent_email
         - direction
-        - provider_message_id
         - method
         - from
         - to

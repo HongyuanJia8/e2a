@@ -34,8 +34,8 @@ class EmailSentData(BaseModel):
     from_: StrictStr = Field(alias="from")
     message_id: StrictStr
     message_type: StrictStr = Field(description="Send kind. Open set; tolerate unknown values. Known values: send, reply, forward.")
-    method: StrictStr = Field(description="Transport used for the send. Open set; tolerate unknown values. Known values: smtp.")
-    provider_message_id: StrictStr
+    method: StrictStr = Field(description="Transport used for the send. Open set; tolerate unknown values. Known values: smtp, loopback.")
+    provider_message_id: Optional[StrictStr] = None
     subject: StrictStr
     to: List[StrictStr]
     additional_properties: Dict[str, Any] = {}

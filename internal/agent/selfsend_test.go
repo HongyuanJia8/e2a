@@ -2,9 +2,13 @@ package agent_test
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tokencanopy/e2a/internal/agent"
 	"github.com/tokencanopy/e2a/internal/config"
@@ -12,7 +16,17 @@ import (
 	"github.com/tokencanopy/e2a/internal/outbound"
 	"github.com/tokencanopy/e2a/internal/testutil"
 	"github.com/tokencanopy/e2a/internal/usage"
+	"github.com/tokencanopy/e2a/internal/webhookpub"
+	wsnotify "github.com/tokencanopy/e2a/internal/ws"
 )
+
+type captureHub struct{ payload []byte }
+
+func (h *captureHub) IsConnected(string) bool { return true }
+func (h *captureHub) Send(_ string, payload []byte) bool {
+	h.payload = append([]byte(nil), payload...)
+	return true
+}
 
 // TestSelfSend_DetectionEdgeCases: case-insensitive, whitespace-
 // trimmed, single-address requirement. Mixed/external recipients must
@@ -62,6 +76,7 @@ func setupCoreAPI(t *testing.T) (*agent.API, *identity.Store, *pgxpool.Pool) {
 	sender := outbound.NewSender(smtpRelay, "test.e2a.dev")
 	api := agent.NewAPI(store, sender, smtpRelay, nil, usage.NewNoopUsageTracker(),
 		"e2a.dev", "test.e2a.dev", "agents.e2a.dev", "", false)
+	api.SetOutbox(webhookpub.NewOutbox(pool, webhookpub.StaticFlag(true)))
 	return api, store, pool
 }
 
@@ -98,9 +113,13 @@ func TestSelfSend_HappyPath(t *testing.T) {
 	api, store, pool := setupCoreAPI(t)
 	ctx := context.Background()
 	user, ag := selfAgent(t, store, "owner")
+	hub := &captureHub{}
+	api.SetWebSocketHub(hub)
+	const replyTo = "Support <support@example.com>"
 
 	res, oerr := api.DeliverOutbound(ctx, user, ag, outbound.SendRequest{
-		To: []string{ag.EmailAddress()}, Subject: "note to self", Body: "remember to refill coffee",
+		To: []string{ag.EmailAddress()}, Subject: "note to self", Body: "remember to refill coffee", ReplyTo: replyTo,
+		Attachments: []outbound.Attachment{{Filename: "note.txt", ContentType: "text/plain", Data: "aGVsbG8="}},
 	}, "send", "", nil, nil)
 	if oerr != nil {
 		t.Fatalf("DeliverOutbound: status=%d code=%s msg=%s", oerr.Status, oerr.Code, oerr.Msg)
@@ -108,8 +127,11 @@ func TestSelfSend_HappyPath(t *testing.T) {
 	if res.Method != "loopback" {
 		t.Errorf("method=%q want loopback", res.Method)
 	}
-	if !strings.HasPrefix(res.MessageID, "<") || !strings.Contains(res.MessageID, "loopback.") {
-		t.Errorf("message_id=%q should look like an RFC 5322 Message-ID with loopback host", res.MessageID)
+	if !strings.HasPrefix(res.MessageID, "msg_") {
+		t.Errorf("message_id=%q should be the GET-able outbound resource id", res.MessageID)
+	}
+	if res.ProviderMessageID != "" {
+		t.Errorf("provider_message_id=%q want empty for providerless loopback delivery", res.ProviderMessageID)
 	}
 
 	var outboundCount, inboundCount int
@@ -126,20 +148,163 @@ func TestSelfSend_HappyPath(t *testing.T) {
 		t.Errorf("inbound rows=%d want 1", inboundCount)
 	}
 
-	var sender, recipient string
+	var inboundID, sender, recipient string
 	pool.QueryRow(ctx,
-		`SELECT sender, recipient FROM messages WHERE agent_id=$1 AND direction='inbound' AND subject='note to self'`,
-		ag.ID).Scan(&sender, &recipient)
-	if sender != ag.EmailAddress() || recipient != ag.EmailAddress() {
-		t.Errorf("self-note row sender=%q recipient=%q; both must be the agent's own address", sender, recipient)
+		`SELECT id, sender, recipient FROM messages WHERE agent_id=$1 AND direction='inbound' AND subject='note to self'`,
+		ag.ID).Scan(&inboundID, &sender, &recipient)
+	if sender != "support@example.com" || recipient != ag.EmailAddress() {
+		t.Errorf("self-note row sender=%q recipient=%q; want Reply-To and agent address", sender, recipient)
 	}
 
-	var method string
+	var method, deliveryStatus, providerID string
+	var outboundRaw []byte
 	pool.QueryRow(ctx,
-		`SELECT method FROM messages WHERE agent_id=$1 AND direction='outbound' AND subject='note to self'`,
-		ag.ID).Scan(&method)
+		`SELECT method, COALESCE(delivery_status,''), provider_message_id, raw_message
+		   FROM messages WHERE id=$1`, res.MessageID).Scan(&method, &deliveryStatus, &providerID, &outboundRaw)
 	if method != "loopback" {
 		t.Errorf("outbound method=%q want loopback", method)
+	}
+	if deliveryStatus != "sent" {
+		t.Errorf("outbound delivery_status=%q want sent", deliveryStatus)
+	}
+	if len(outboundRaw) == 0 || !strings.Contains(string(outboundRaw), "remember to refill coffee") {
+		t.Errorf("outbound sent copy must retain readable MIME; raw=%q", outboundRaw)
+	}
+
+	var inboundProviderID string
+	if err := pool.QueryRow(ctx,
+		`SELECT email_message_id FROM messages
+		  WHERE agent_id=$1 AND direction='inbound' AND subject='note to self'`, ag.ID,
+	).Scan(&inboundProviderID); err != nil {
+		t.Fatalf("fetch inbound Message-ID: %v", err)
+	}
+	if providerID == "" || inboundProviderID != providerID {
+		t.Errorf("loopback Message-ID mismatch: outbound=%q inbound=%q", providerID, inboundProviderID)
+	}
+	if !strings.Contains(string(outboundRaw), "Message-ID: "+providerID) {
+		t.Errorf("loopback MIME missing its synthetic Message-ID header: %q", outboundRaw)
+	}
+
+	rows, err := pool.Query(ctx,
+		`SELECT type, message_id FROM webhook_events
+		  WHERE message_id IN (
+		    SELECT id FROM messages WHERE agent_id=$1 AND subject='note to self'
+		  ) ORDER BY type`, ag.ID)
+	if err != nil {
+		t.Fatalf("list loopback events: %v", err)
+	}
+	defer rows.Close()
+	var eventTypes []string
+	for rows.Next() {
+		var eventType, messageID string
+		if err := rows.Scan(&eventType, &messageID); err != nil {
+			t.Fatalf("scan loopback event: %v", err)
+		}
+		eventTypes = append(eventTypes, eventType)
+	}
+	if got, want := strings.Join(eventTypes, ","), "email.received,email.sent"; got != want {
+		t.Errorf("loopback events=%q want %q", got, want)
+	}
+	var sentEventHasProviderID bool
+	if err := pool.QueryRow(ctx,
+		`SELECT envelope->'data' ? 'provider_message_id'
+		   FROM webhook_events WHERE message_id=$1 AND type='email.sent'`, res.MessageID,
+	).Scan(&sentEventHasProviderID); err != nil {
+		t.Fatalf("read loopback email.sent payload: %v", err)
+	}
+	if sentEventHasProviderID {
+		t.Error("providerless loopback email.sent must omit provider_message_id")
+	}
+	var durableEnvelope []byte
+	if err := pool.QueryRow(ctx,
+		`SELECT envelope FROM webhook_events WHERE message_id=$1 AND type='email.received'`, inboundID,
+	).Scan(&durableEnvelope); err != nil {
+		t.Fatalf("read durable received envelope: %v", err)
+	}
+	var durable, live map[string]any
+	if err := json.Unmarshal(durableEnvelope, &durable); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(hub.payload, &live); err != nil {
+		t.Fatalf("live WebSocket payload: %v (%q)", err, hub.payload)
+	}
+	if !reflect.DeepEqual(live, durable) {
+		t.Errorf("live WebSocket envelope drifted from durable webhook event\nlive=%v\ndurable=%v", live, durable)
+	}
+	listed, err := store.GetMessagesByAgent(ctx, identity.MessageListFilter{
+		AgentID: ag.ID, Status: "all", Direction: "inbound", Limit: 10,
+	})
+	if err != nil || len(listed) != 1 {
+		t.Fatalf("list reconnect message: len=%d err=%v", len(listed), err)
+	}
+	if listed[0].Method != "loopback" {
+		t.Fatalf("reconnect row method = %q, want durable loopback marker", listed[0].Method)
+	}
+	var reconnect map[string]any
+	if err := json.Unmarshal(wsnotify.NotificationForMessage(ctx, store, &listed[0]), &reconnect); err != nil {
+		t.Fatal(err)
+	}
+	reconnectData := reconnect["data"].(map[string]any)
+	if !reflect.DeepEqual(reconnect, durable) {
+		t.Errorf("reconnect envelope drifted from durable event\nreconnect=%v\ndurable=%v", reconnect, durable)
+	}
+	if reconnect["id"] != live["id"] || reconnectData["from"] != "support@example.com" || reconnectData["authenticated_from"] != ag.EmailAddress() {
+		t.Errorf("reconnect identity drift: %v", reconnect)
+	}
+	data := live["data"].(map[string]any)
+	if data["from"] != "support@example.com" || data["authenticated_from"] != ag.EmailAddress() {
+		t.Errorf("received identities = from:%v authenticated_from:%v", data["from"], data["authenticated_from"])
+	}
+	if attachments, ok := data["attachments"].([]any); !ok || len(attachments) != 1 {
+		t.Errorf("live/durable/reconnect envelope lost attachment metadata: %v", data["attachments"])
+	}
+}
+
+// The idempotency completion hook must share the same transaction as both
+// loopback message rows and their lifecycle events. A completion failure is a
+// failure to commit the local delivery, not a partial Sent/Inbox pair.
+func TestSelfSend_IdempotencyCompletionFailureRollsBackDelivery(t *testing.T) {
+	api, store, pool := setupCoreAPI(t)
+	ctx := context.Background()
+	user, ag := selfAgent(t, store, "idemrollback")
+
+	_, oerr := api.DeliverOutbound(ctx, user, ag, outbound.SendRequest{
+		To: []string{ag.EmailAddress()}, Subject: "atomic rollback", Body: "must not persist",
+	}, "send", "", nil, func(_ context.Context, tx pgx.Tx, result *agent.OutboundResult) error {
+		if !strings.HasPrefix(result.MessageID, "msg_") {
+			t.Errorf("idempotency completion message_id=%q want msg_ resource id", result.MessageID)
+		}
+		if result.Method != "loopback" || result.Status != "" {
+			t.Errorf("idempotency completion result=%+v want terminal loopback", result)
+		}
+		var count int
+		if err := tx.QueryRow(ctx,
+			`SELECT count(*) FROM messages WHERE agent_id=$1 AND subject='atomic rollback'`, ag.ID,
+		).Scan(&count); err != nil {
+			t.Fatalf("count transaction-local loopback rows: %v", err)
+		}
+		if count != 2 {
+			t.Errorf("transaction-local loopback rows=%d want 2", count)
+		}
+		return errors.New("inject idempotency completion failure")
+	})
+	if oerr == nil || oerr.Code != "internal_error" {
+		t.Fatalf("DeliverOutbound error=%v want internal_error", oerr)
+	}
+
+	var messages, events int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM messages WHERE agent_id=$1 AND subject='atomic rollback'`, ag.ID,
+	).Scan(&messages); err != nil {
+		t.Fatalf("count rolled-back messages: %v", err)
+	}
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM webhook_events WHERE agent_id=$1 AND envelope->'data'->>'subject'='atomic rollback'`, ag.ID,
+	).Scan(&events); err != nil {
+		t.Fatalf("count rolled-back events: %v", err)
+	}
+	if messages != 0 || events != 0 {
+		t.Fatalf("partial loopback commit: messages=%d events=%d; want both zero", messages, events)
 	}
 }
 

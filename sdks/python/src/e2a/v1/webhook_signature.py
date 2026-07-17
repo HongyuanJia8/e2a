@@ -176,10 +176,9 @@ EmailSentData = TypedDict(
         "agent_email": str,
         "direction": str,  # always "outbound"
         "conversation_id": NotRequired[str],
-        # Provider-assigned (SES) id — the correlation key for the async
-        # delivered/bounced/complained feedback events.
-        "provider_message_id": str,
-        "method": str,  # open set; known values: smtp
+        # Provider-assigned (SES) id — absent for providerless local loopback.
+        "provider_message_id": NotRequired[str],
+        "method": str,  # open set; known values: smtp, loopback
         "from": str,
         "to": List[str],
         "cc": NotRequired[List[str]],
@@ -189,8 +188,8 @@ EmailSentData = TypedDict(
     },
 )
 EmailSentData.__doc__ = (
-    "``data`` of an ``email.sent`` event — the provider accepted an outbound "
-    "send. Identical from the sync and async send paths."
+    "``data`` of an ``email.sent`` event — an outbound send reached its sent "
+    "state through provider acceptance or atomic local loopback delivery."
 )
 
 EmailFailedData = TypedDict(

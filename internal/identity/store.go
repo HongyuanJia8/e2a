@@ -2342,9 +2342,13 @@ type SendResult struct {
 	To                []string
 	CC                []string
 	BCC               []string
+	// Sender is the inbound-facing From value for providerless local delivery.
+	// It prefers an explicit Reply-To while authenticated identity remains the
+	// owning agent address in the event envelope.
+	Sender string
 	// Raw is the composed MIME that was sent, retained as the message's
-	// "Sent folder" copy (raw_message). Empty for loopback self-sends (the body
-	// lives on the inbound twin) and on already-sent replay.
+	// "Sent folder" copy (raw_message). Local loopback retains the same bytes on
+	// both Sent and Inbox rows; it is empty only on already-sent replay.
 	Raw []byte
 }
 
@@ -3219,7 +3223,7 @@ func (s *Store) GetMessagesByAgent(ctx context.Context, f MessageListFilter) ([]
 	var query string
 	var args []interface{}
 
-	baseSelect := `SELECT m.id, m.agent_id, m.direction, m.sender, m.recipient, m.to_recipients, m.cc, m.reply_to, m.subject, m.email_message_id, m.conversation_id, COALESCE(m.inbox_status, ''), COALESCE(m.status, ''), COALESCE(wd.status, ''), COALESCE(wd.last_error, ''), COALESCE(octet_length(m.raw_message), 0), m.created_at, m.deleted_at, m.labels, COALESCE(m.delivery_status, ''), COALESCE(m.delivery_detail, ''), COALESCE(m.sent_as, ''), m.auth_verdict, COALESCE(m.flagged, false), COALESCE(m.flag_reason, ''), m.auth_headers
+	baseSelect := `SELECT m.id, m.agent_id, m.direction, m.sender, m.recipient, m.to_recipients, m.cc, m.reply_to, m.subject, m.email_message_id, COALESCE(m.method, ''), m.conversation_id, COALESCE(m.inbox_status, ''), COALESCE(m.status, ''), COALESCE(wd.status, ''), COALESCE(wd.last_error, ''), COALESCE(octet_length(m.raw_message), 0), m.created_at, m.deleted_at, m.labels, COALESCE(m.delivery_status, ''), COALESCE(m.delivery_detail, ''), COALESCE(m.sent_as, ''), m.auth_verdict, COALESCE(m.flagged, false), COALESCE(m.flag_reason, ''), m.auth_headers
 		 FROM messages m
 		 LEFT JOIN webhook_deliveries wd ON wd.message_id = m.id
 		 WHERE m.agent_id = $1`
@@ -3347,7 +3351,7 @@ func (s *Store) GetMessagesByAgent(ctx context.Context, f MessageListFilter) ([]
 		var authHeadersJSON []byte
 		if err := rows.Scan(
 			&m.ID, &m.AgentID, &m.Direction, &m.Sender, &m.Recipient, &m.ToRecipients, &m.CC, &m.ReplyTo,
-			&m.Subject, &m.EmailMessageID, &m.ConversationID,
+			&m.Subject, &m.EmailMessageID, &m.Method, &m.ConversationID,
 			&m.InboxStatus, &m.Status, &m.WebhookStatus, &m.WebhookError, &m.SizeBytes,
 			&m.CreatedAt, &m.DeletedAt, &m.Labels,
 			&outboundDeliveryStatus, &m.DeliveryDetail, &m.SentAs, &authVerdict, &m.Flagged, &m.FlagReason,

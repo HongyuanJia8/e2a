@@ -192,6 +192,7 @@ func TestServer(t *testing.T, pool *pgxpool.Pool, opts ...TestServerOption) *E2A
 
 	// WebSocket live-tail transport — wired as a /v1 route via WSHandle below.
 	wsHub := ws.NewHub()
+	api.SetWebSocketHub(wsHub)
 	wsHandler := ws.NewHandler(wsHub, store)
 
 	// Wrap the legacy mux with the typed /v1 surface (the same apiserver

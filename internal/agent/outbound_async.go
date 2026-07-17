@@ -22,12 +22,11 @@ import (
 // agent package (not outboundsend) because agent already owns the store, outbox,
 // usage tracker, and sender — and agent may import outboundsend, never the reverse.
 
-// AcceptIdemCompleter completes the idempotency key inside the accept-tx, given
-// the freshly minted message id. The httpapi layer supplies it (it owns the key +
-// the wire response shape); DeliverOutbound invokes it inside the accept-tx so the
-// key commits atomically with the message + send job. nil when the request carries
-// no Idempotency-Key (or no idempotency store is wired).
-type AcceptIdemCompleter func(ctx context.Context, tx pgx.Tx, messageID string) error
+// AcceptIdemCompleter completes the idempotency key inside the delivery tx with
+// the exact result the wire will render. External sends cache 202/accepted;
+// terminal local loopback caches 200/sent. nil when the request carries no
+// Idempotency-Key (or no idempotency store is wired).
+type AcceptIdemCompleter func(ctx context.Context, tx pgx.Tx, result *OutboundResult) error
 
 // ApproveIdemCompleter completes an approval's idempotency key inside the
 // async approve-and-enqueue transaction. It receives the resolved message so

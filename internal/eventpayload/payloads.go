@@ -91,8 +91,8 @@ type EmailReceivedData struct {
 }
 
 // EmailSentData is the `data` payload of an email.sent event — an outbound
-// send was accepted by the provider. Emitted by BOTH the synchronous send
-// path and the async send worker with the identical shape.
+// send reached its terminal sent state, either by provider acceptance or by
+// atomic local loopback delivery.
 type EmailSentData struct {
 	MessageID      string `json:"message_id"`
 	AgentEmail     string `json:"agent_email"`
@@ -100,9 +100,10 @@ type EmailSentData struct {
 	ConversationID string `json:"conversation_id,omitempty"`
 	// ProviderMessageID is the provider-assigned (SES) message id — distinct
 	// from the e2a message_id, and the correlation key for the async
-	// delivered/bounced/complained feedback events.
-	ProviderMessageID string   `json:"provider_message_id"`
-	Method            string   `json:"method" doc:"Transport used for the send. Open set; tolerate unknown values. Known values: smtp."`
+	// delivered/bounced/complained feedback events. Omitted for providerless
+	// local loopback delivery.
+	ProviderMessageID string   `json:"provider_message_id,omitempty"`
+	Method            string   `json:"method" doc:"Transport used for the send. Open set; tolerate unknown values. Known values: smtp, loopback."`
 	From              string   `json:"from"`
 	To                []string `json:"to" nullable:"false"`
 	CC                []string `json:"cc,omitempty" nullable:"false"`

@@ -11,9 +11,11 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/mail"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/tokencanopy/e2a/internal/eventpayload"
 	"github.com/tokencanopy/e2a/internal/identity"
 	"github.com/tokencanopy/e2a/internal/loopback"
 	"github.com/tokencanopy/e2a/internal/outbound"
@@ -28,6 +30,11 @@ import (
 // instead of blocking on Sender.Send. Self-sends never use it (they loopback).
 type OutboundEnqueuer interface {
 	EnqueueSendTx(ctx context.Context, tx pgx.Tx, messageID string) (int64, error)
+}
+
+type WebSocketHub interface {
+	IsConnected(agentID string) bool
+	Send(agentID string, msg []byte) bool
 }
 
 // DefaultBatchSize caps how many rows one sweep will try to finalize. The
@@ -49,20 +56,30 @@ type Worker struct {
 	// from internal/agent). Optional — nil leaves the sweep silent (legacy
 	// behavior). Wired via SetPublisher.
 	publisher webhookpub.Publisher
+	// outbox writes the terminal loopback email.sent/email.received pair in the
+	// same transaction as the expired hold's Sent/Inbox persistence.
+	outbox webhookpub.Outbox
 	// outboundEnq routes an approved external send onto QueueOutbound. Main always
 	// wires it; a nil value fails closed and leaves the hold pending. Self-sends use
 	// the local loopback path.
 	outboundEnq OutboundEnqueuer
+	wsHub       WebSocketHub
 }
 
 // SetPublisher wires the webhook publisher used to emit review-resolution events
 // on TTL auto-resolution. Without it the sweep transitions rows silently.
 func (w *Worker) SetPublisher(p webhookpub.Publisher) { w.publisher = p }
 
+// SetOutbox wires the transactional outcome-event writer for providerless
+// local delivery. Production uses the same unconditional outbox as all other
+// message triggers.
+func (w *Worker) SetOutbox(o webhookpub.Outbox) { w.outbox = o }
+
 // SetOutboundEnqueuer wires the mandatory outbound send enqueuer. Two-phase
 // wiring: pass the *outboundsend.Jobs pointer; its shared River client is injected
 // later via the jobs client's SetEnqueuer.
 func (w *Worker) SetOutboundEnqueuer(e OutboundEnqueuer) { w.outboundEnq = e }
+func (w *Worker) SetWebSocketHub(h WebSocketHub)         { w.wsHub = h }
 
 // New constructs a Worker. fromDomain is the deployment's outbound
 // from-domain (cfg.OutboundSMTP.FromDomain) — used by the self-send
@@ -253,9 +270,12 @@ func (w *Worker) autoApproveAsync(ctx context.Context, agent *identity.AgentIden
 }
 
 func (w *Worker) autoApproveLoopback(ctx context.Context, agent *identity.AgentIdentity, c identity.ExpirationCandidate) {
-	sent, err := w.store.ExpireApproveAndSend(ctx, c.MessageID,
+	var req outbound.SendRequest
+	var receivedEvent webhookpub.Event
+	sent, err := w.store.ExpireAndDeliverLocal(ctx, c.MessageID,
 		func(msg *identity.Message) (identity.SendResult, error) {
-			req, err := sendRequestFromStoredMessage(msg)
+			var err error
+			req, err = sendRequestFromStoredMessage(msg)
 			if err != nil {
 				return identity.SendResult{}, err
 			}
@@ -273,7 +293,26 @@ func (w *Worker) autoApproveLoopback(ctx context.Context, agent *identity.AgentI
 			if !loopback.IsSelfSend(req, agent.EmailAddress()) {
 				return identity.SendResult{}, errors.New("external outbound approval must be queued")
 			}
-			return loopback.DeliverInbound(ctx, w.store, agent, req, w.fromDomain)
+			providerID := loopback.ProviderID(w.fromDomain)
+			raw, err := loopback.ComposeMIME(agent, req, providerID, w.fromDomain)
+			if err != nil {
+				return identity.SendResult{}, err
+			}
+			return identity.SendResult{
+				ProviderMessageID: providerID,
+				Method:            "loopback",
+				To:                []string{agent.EmailAddress()},
+				Sender:            loopbackDisplayFrom(req, agent.EmailAddress()),
+				Raw:               raw,
+			}, nil
+		},
+		func(ctx context.Context, tx pgx.Tx, outboundMsg, inboundMsg *identity.Message, result identity.SendResult) error {
+			if w.outbox == nil {
+				return nil
+			}
+			var eventErr error
+			receivedEvent, eventErr = w.publishLoopbackOutcomeEventsTx(ctx, tx, agent, outboundMsg, inboundMsg, req, result)
+			return eventErr
 		})
 	if err != nil {
 		// ErrNotPendingApproval means another worker (or a human) handled
@@ -296,10 +335,14 @@ func (w *Worker) autoApproveLoopback(ctx context.Context, agent *identity.AgentI
 		w.autoReject(ctx, c.MessageID, fmt.Sprintf("auto-approve send failed: %v", err))
 		return
 	}
+	w.pushLoopbackReceived(agent.ID, receivedEvent)
 	// External sends are metered by the outbound worker after provider success.
-	// Loopback is terminal here, so preserve the same post-delivery accounting.
-	if _, err := w.usage.RecordAndCheck(ctx, agent.UserID, agent.ID, agent.Domain, "outbound"); err != nil {
-		log.Printf("[hitl-worker] usage recording error: %v", err)
+	// Loopback is terminal here and persisted both a Sent and an Inbox copy, so
+	// account for both directions after the transaction commits.
+	for _, direction := range []string{"outbound", "inbound"} {
+		if _, err := w.usage.RecordAndCheck(ctx, agent.UserID, agent.ID, agent.Domain, direction); err != nil {
+			log.Printf("[hitl-worker] %s usage recording error: %v", direction, err)
+		}
 	}
 
 	log.Printf("[mail:%s] dir=outbound type=%s status=%s agent=%s to=%v auto_sent=true",
@@ -307,6 +350,87 @@ func (w *Worker) autoApproveLoopback(ctx context.Context, agent *identity.AgentI
 	// Mirror the user-driven approve: fire email.review_approved (the send
 	// already happened; this is the post-side-effect notification).
 	w.emitOutboundApproved(agent, sent)
+}
+
+func (w *Worker) publishLoopbackOutcomeEventsTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	agent *identity.AgentIdentity,
+	outboundMsg, inboundMsg *identity.Message,
+	req outbound.SendRequest,
+	result identity.SendResult,
+) (webhookpub.Event, error) {
+	sentData := eventpayload.EmailSentData{
+		MessageID:      outboundMsg.ID,
+		AgentEmail:     agent.EmailAddress(),
+		Direction:      "outbound",
+		ConversationID: outboundMsg.ConversationID,
+		Method:         "loopback",
+		From:           agent.EmailAddress(),
+		To:             []string{agent.EmailAddress()},
+		CC:             []string{},
+		BCC:            []string{},
+		Subject:        outboundMsg.Subject,
+		MessageType:    outboundMsg.Type,
+	}
+	sentEvent := webhookpub.NewEvent(webhookpub.EventEmailSent, agent.UserID, sentData)
+	sentEvent.ID = webhookpub.DeterministicEventID(outboundMsg.ID, webhookpub.EventEmailSent)
+	sentEvent.AgentID = agent.ID
+	sentEvent.ConversationID = outboundMsg.ConversationID
+	sentEvent.MessageID = outboundMsg.ID
+	if err := w.outbox.PublishTx(ctx, tx, sentEvent); err != nil {
+		return webhookpub.Event{}, fmt.Errorf("self-send email.sent event: %w", err)
+	}
+
+	replyTo := []string{}
+	if req.ReplyTo != "" {
+		replyTo = []string{req.ReplyTo}
+	}
+	receivedData := eventpayload.EmailReceivedData{
+		MessageID:         inboundMsg.ID,
+		AgentEmail:        agent.EmailAddress(),
+		Direction:         "inbound",
+		ConversationID:    inboundMsg.ConversationID,
+		From:              loopbackDisplayFrom(req, agent.EmailAddress()),
+		AuthenticatedFrom: agent.EmailAddress(),
+		To:                []string{agent.EmailAddress()},
+		CC:                []string{},
+		ReplyTo:           replyTo,
+		DeliveredTo:       agent.EmailAddress(),
+		Subject:           inboundMsg.Subject,
+		AuthHeaders:       map[string]string{},
+		ReceivedAt:        inboundMsg.CreatedAt.UTC(),
+		Attachments:       eventpayload.AttachmentMetadata(result.Raw),
+	}
+	receivedEvent := webhookpub.NewEvent(webhookpub.EventEmailReceived, agent.UserID, receivedData)
+	receivedEvent.ID = webhookpub.DeterministicEventID(inboundMsg.ID, webhookpub.EventEmailReceived)
+	receivedEvent.AgentID = agent.ID
+	receivedEvent.ConversationID = inboundMsg.ConversationID
+	receivedEvent.MessageID = inboundMsg.ID
+	if err := w.outbox.PublishTx(ctx, tx, receivedEvent); err != nil {
+		return webhookpub.Event{}, fmt.Errorf("self-send email.received event: %w", err)
+	}
+	return receivedEvent, nil
+}
+
+func loopbackDisplayFrom(req outbound.SendRequest, agentEmail string) string {
+	if req.ReplyTo != "" {
+		if address, err := mail.ParseAddress(req.ReplyTo); err == nil {
+			return address.Address
+		}
+		return req.ReplyTo
+	}
+	return agentEmail
+}
+
+func (w *Worker) pushLoopbackReceived(agentID string, event webhookpub.Event) {
+	if w.wsHub == nil || event.ID == "" || !w.wsHub.IsConnected(agentID) {
+		return
+	}
+	payload, err := json.Marshal(event.AsEnvelope())
+	if err == nil {
+		w.wsHub.Send(agentID, payload)
+	}
 }
 
 func (w *Worker) autoReject(ctx context.Context, messageID, reason string) {

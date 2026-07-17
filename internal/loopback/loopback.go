@@ -4,22 +4,9 @@
 // roundtrip through SES + MX + the local SMTP receiver is wasted work
 // when the destination is local anyway.
 //
-// Two callers, two entry points:
-//
-//   - internal/agent reaches us via DeliverInbound from the HITL
-//     approval finalizer (selfSendApprovalDelivery) and from its own
-//     fast path (performSelfSend). The fast path writes the outbound
-//     row itself; the approval path lets ApproveAndSend update the
-//     pre-existing held outbound row.
-//   - internal/hitlworker reaches us via DeliverInbound from the TTL
-//     auto-approve callback. Same shape as the user-driven approval
-//     path — the held outbound row already exists; we only write the
-//     inbound counterpart.
-//
-// Living here (rather than in internal/agent) lets the worker import us
-// without dragging the entire agent package's surface in. Mirrors the
-// existing duplication strategy for sendRequestFromStoredMessage but
-// avoids it for the larger MIME-composition body.
+// The package owns self-recipient detection and byte-identical MIME
+// composition. Persistence lives in the identity store so Sent/Inbox rows,
+// idempotency, and outcome events can share one database transaction.
 package loopback
 
 import (
@@ -28,8 +15,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"context"
 
 	"github.com/tokencanopy/e2a/internal/identity"
 	"github.com/tokencanopy/e2a/internal/outbound"
@@ -182,76 +167,6 @@ func ComposeMIME(agent *identity.AgentIdentity, req outbound.SendRequest, provid
 		email,
 		time.Now().UTC().Format(time.RFC1123Z),
 	)
-	return append([]byte(received), msg...), nil
-}
-
-// InboundWriter is the subset of *identity.Store DeliverInbound uses.
-// Lets tests swap in fakes; production code passes the real store.
-type InboundWriter interface {
-	CreateInboundMessage(ctx context.Context, id, agentID, senderEmail, recipient, emailMessageID, subject, conversationID, deliveryStatus string, rawMessage []byte, authHeaders map[string]string, authVerdict []byte, flagged bool, flagReason string, toRecipients, cc, replyTo []string, screening identity.InboundScreening) (*identity.Message, error)
-}
-
-// DeliverInbound writes the recipient-side row for a loopback self-send
-// and returns an identity.SendResult shaped for the ApproveAndSend send
-// callback (or the worker's ExpireApproveAndSend send callback).
-//
-// Does NOT write the outbound row — the caller is one of:
-//   - HITL approval: the held outbound row already exists;
-//     ApproveAndSend's UPDATE flips it to status=sent + method=loopback
-//     using the result's columns.
-//   - hitlworker TTL auto-approve: same shape via ExpireApproveAndSend.
-//
-// The non-HITL fast path in internal/agent (performSelfSend) calls
-// CreateOutboundMessage itself before calling DeliverInbound; that
-// path has no held row to update.
-//
-// Notable choices documented because they diverge from a pure-SMTP
-// send:
-//   - Webhook + WebSocket delivery are intentionally NOT fired on the
-//     inbound row. Cloud-mode agents whose webhook handler triggered
-//     the send would otherwise re-enter their own code and loop.
-//     Local-mode agents pick up the row via the next list_messages
-//     poll, which IS the intended UX.
-//   - auth_headers stays NULL: no DKIM/SPF was actually evaluated
-//     because nothing arrived over the wire. The operator-facing signal
-//     "this row didn't come from external mail" is preserved by that
-//     null column.
-//   - Domain verification + rate limit are enforced upstream by the
-//     caller. Loopback isn't a backdoor for those gates.
-func DeliverInbound(ctx context.Context, store InboundWriter, agent *identity.AgentIdentity, req outbound.SendRequest, fromDomain string) (identity.SendResult, error) {
-	providerID := ProviderID(fromDomain)
-	email := agent.EmailAddress()
-
-	rawMessage, err := ComposeMIME(agent, req, providerID, fromDomain)
-	if err != nil {
-		return identity.SendResult{}, fmt.Errorf("loopback compose: %w", err)
-	}
-	if _, err := store.CreateInboundMessage(
-		ctx,
-		"", // generate fresh id; mirrors the SMTP path which never reuses outbound ids
-		agent.ID,
-		email, // sender
-		email, // recipient (per-delivery target)
-		providerID,
-		req.Subject,
-		req.ConversationID,
-		"unread",
-		rawMessage,
-		nil,   // no DKIM/SPF auth headers on a synthetic loopback
-		nil,   // no auth verdict on a synthetic loopback
-		false, // not flagged: loopback self-send bypasses the inbound policy gate
-		"",    // no flag reason
-		[]string{email},
-		nil,                         // cc
-		nil,                         // reply_to
-		identity.InboundScreening{}, // loopback self-send: not externally screened
-	); err != nil {
-		return identity.SendResult{}, fmt.Errorf("loopback inbound row: %w", err)
-	}
-
-	return identity.SendResult{
-		ProviderMessageID: providerID,
-		Method:            "loopback",
-		To:                []string{email},
-	}, nil
+	messageID := fmt.Sprintf("Message-ID: %s\r\n", providerID)
+	return append([]byte(received+messageID), msg...), nil
 }

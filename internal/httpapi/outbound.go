@@ -689,13 +689,14 @@ func (s *Server) deliver(ctx context.Context, user *identity.User, ag *identity.
 	if idemKey != "" && s.deps.Idempotency != nil {
 		nsKey := idemUserNS + idemKey
 		uid := user.ID
-		idemCompleteTx = func(ctx context.Context, tx pgx.Tx, messageID string) error {
-			raw, mErr := json.Marshal(acceptedView(messageID))
+		idemCompleteTx = func(ctx context.Context, tx pgx.Tx, result *agent.OutboundResult) error {
+			status, view := outboundResultView(result)
+			raw, mErr := json.Marshal(view)
 			if mErr != nil {
 				raw = []byte("{}")
 			}
 			return s.deps.Idempotency.CompleteTx(ctx, tx, uid, nsKey, idempotency.CachedResponse{
-				StatusCode: http.StatusAccepted, ContentType: "application/json", Body: raw,
+				StatusCode: status, ContentType: "application/json", Body: raw,
 			})
 		}
 	}
@@ -728,20 +729,8 @@ func (s *Server) deliver(ctx context.Context, user *identity.User, ag *identity.
 		if derr != nil {
 			return 0, SendResultView{}, envelopeFromOutboundError(derr)
 		}
-		if res.Held {
-			return http.StatusAccepted, SendResultView{Status: "pending_review", MessageID: res.PendingMessageID, ApprovalExpiresAt: res.ApprovalExpiresAt}, nil
-		}
-		// Async accept (slice C): 202 Accepted with status=accepted — the message
-		// is durably persisted and queued for async submission; the terminal
-		// outcome (sent/failed) arrives later via GET / webhooks, not this
-		// response. The body MUST match acceptedView (the idempotency cache is
-		// keyed to it) — no provider id / sent_as yet (the send hasn't happened).
-		// The cached StatusCode (idemCompleteTx, above) is likewise 202 so a
-		// replayed idempotent request returns the same 202, never a stale 200.
-		if res.Status == "accepted" {
-			return http.StatusAccepted, acceptedView(res.MessageID), nil
-		}
-		return http.StatusOK, SendResultView{Status: "sent", MessageID: res.MessageID, ProviderMessageID: res.ProviderMessageID, SentAs: res.SentAs, Method: res.Method}, nil
+		status, view := outboundResultView(res)
+		return status, view, nil
 	})
 	if err != nil {
 		return nil, err
@@ -792,6 +781,27 @@ func (s *Server) waitForSent(ctx context.Context, acceptedStatus int, accepted S
 // later via GET /v1/messages/{id} and the email.sent / email.failed webhooks.
 func acceptedView(messageID string) SendResultView {
 	return SendResultView{Status: "accepted", MessageID: messageID, Method: "smtp"}
+}
+
+// outboundResultView is shared by the live response and the same-transaction
+// idempotency completion. That keeps queue acceptance (202/accepted) distinct
+// from terminal providerless loopback delivery (200/sent) on every replay.
+func outboundResultView(res *agent.OutboundResult) (int, SendResultView) {
+	if res.Held {
+		return http.StatusAccepted, SendResultView{
+			Status: "pending_review", MessageID: res.PendingMessageID,
+			ApprovalExpiresAt: res.ApprovalExpiresAt,
+		}
+	}
+	if res.Status == "accepted" {
+		return http.StatusAccepted, acceptedView(res.MessageID)
+	}
+	return http.StatusOK, SendResultView{
+		Status: "sent", MessageID: res.MessageID,
+		ProviderMessageID: res.ProviderMessageID,
+		SentAs:            res.SentAs,
+		Method:            res.Method,
+	}
 }
 
 // literalRequest wraps an already-built SendRequest as a deliver prepare

@@ -94,15 +94,51 @@ func TestApprovePendingCore_AsyncSelfSendStaysSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sent, oerr := api.ApprovePendingCore(ctx, user.ID, msg.ID, ag.Email, agent.ApproveOverrides{}, nil)
+	idemCompleted := false
+	complete := func(ctx context.Context, tx pgx.Tx, approved *identity.Message) error {
+		var deliveryStatus string
+		var raw []byte
+		if err := tx.QueryRow(ctx,
+			`SELECT COALESCE(delivery_status,''), raw_message FROM messages WHERE id=$1`, approved.ID,
+		).Scan(&deliveryStatus, &raw); err != nil {
+			return err
+		}
+		var inboundRows, outcomeEvents int
+		if err := tx.QueryRow(ctx,
+			`SELECT count(*) FROM messages WHERE agent_id=$1 AND direction='inbound' AND subject='To self'`, ag.ID,
+		).Scan(&inboundRows); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx,
+			`SELECT count(*) FROM webhook_events
+			  WHERE message_id IN (
+			    SELECT id FROM messages WHERE agent_id=$1 AND subject='To self'
+			  ) AND type IN ('email.sent','email.received')`, ag.ID,
+		).Scan(&outcomeEvents); err != nil {
+			return err
+		}
+		if deliveryStatus != "sent" || len(raw) == 0 || inboundRows != 1 || outcomeEvents != 2 {
+			t.Fatalf("self-send approval not atomic in completion tx: delivery_status=%q raw=%d inbound=%d events=%d",
+				deliveryStatus, len(raw), inboundRows, outcomeEvents)
+		}
+		idemCompleted = true
+		return nil
+	}
+	sent, oerr := api.ApprovePendingCore(ctx, user.ID, msg.ID, ag.Email, agent.ApproveOverrides{}, complete)
 	if oerr != nil {
 		t.Fatalf("ApprovePendingCore: status=%d code=%s msg=%s", oerr.Status, oerr.Code, oerr.Msg)
 	}
 	if sent.Status != identity.MessageStatusSent {
 		t.Errorf("status = %q, want %q", sent.Status, identity.MessageStatusSent)
 	}
-	if sent.DeliveryStatus == "accepted" {
-		t.Errorf("self-send must NOT be async-accepted (sync loopback), got DeliveryStatus=%q", sent.DeliveryStatus)
+	if sent.DeliveryStatus != "sent" {
+		t.Errorf("self-send delivery_status=%q want sent", sent.DeliveryStatus)
+	}
+	if len(sent.RawMessage) == 0 {
+		t.Error("self-send approved Sent copy must retain composed MIME")
+	}
+	if !idemCompleted {
+		t.Error("self-send approval did not complete idempotency in the local-delivery transaction")
 	}
 
 	var sendJobID *int64
@@ -113,5 +149,17 @@ func TestApprovePendingCore_AsyncSelfSendStaysSync(t *testing.T) {
 	}
 	if sendJobID != nil {
 		t.Errorf("self-send must NOT be enqueued onto QueueOutbound, send_job_id = %v", *sendJobID)
+	}
+
+	var inboundRows int
+	if err := store.WithTx(ctx, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx,
+			`SELECT count(*) FROM messages WHERE agent_id=$1 AND direction='inbound' AND subject='To self'`, ag.ID,
+		).Scan(&inboundRows)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if inboundRows != 1 {
+		t.Errorf("self-send approval inbound rows=%d want 1", inboundRows)
 	}
 }

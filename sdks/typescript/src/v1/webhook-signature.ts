@@ -139,8 +139,8 @@ export interface EmailReceivedData {
   attachments?: AttachmentMeta[];
 }
 
-/** Typed payload of an `email.sent` event — an outbound send was accepted by
- *  the provider. Identical from the sync and async send paths. */
+/** Typed payload of an `email.sent` event — an outbound send reached its sent
+ *  state through provider acceptance or atomic local loopback delivery. */
 export interface EmailSentData {
   message_id: string;
   agent_email: string;
@@ -148,9 +148,10 @@ export interface EmailSentData {
   direction: string;
   conversation_id?: string;
   /** Provider-assigned (SES) id — the correlation key for the async
-   *  delivered/bounced/complained feedback events. */
-  provider_message_id: string;
-  /** Open set; tolerate unknown values. Known values: smtp. */
+   *  delivered/bounced/complained feedback events. Absent for providerless
+   *  local loopback delivery. */
+  provider_message_id?: string;
+  /** Open set; tolerate unknown values. Known values: smtp, loopback. */
   method: string;
   from: string;
   to: string[];
