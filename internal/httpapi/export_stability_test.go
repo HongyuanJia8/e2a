@@ -200,17 +200,18 @@ func TestExportEnvelopeStableInteriorVersioned(t *testing.T) {
 	// endpoint starts returning identity.Message) is caught consciously.
 	sort.Strings(interiorBeta)
 	sort.Strings(interiorShared)
-	mustBeBeta := []string{"APIKeyExportEntry", "AgentIdentity", "Domain", "Message", "OAuthConnectionEntry", "ProtectionEventExportEntry", "Result", "SuppressionExportEntry", "UsageEventEntry", "UserExportUser"}
+	mustBeBeta := []string{"APIKeyExportEntry", "AgentIdentity", "Domain", "Message", "OAuthConnectionEntry", "ProtectionEventExportEntry", "SuppressionExportEntry", "UsageEventEntry", "UserExportUser"}
 	for _, name := range mustBeBeta {
 		if !contains(interiorBeta, name) {
 			t.Errorf("expected %s among the beta-marked export interior schemas; got %v", name, interiorBeta)
 		}
 	}
-	// CheckResult is reachable via the stable message endpoints (AuthVerdict);
-	// AttachmentMeta via the stable email.received event payload
-	// (EmailReceivedData). Both stay stable everywhere, including inside the
-	// export.
-	for _, name := range []string{"CheckResult", "AttachmentMeta"} {
+	// CheckResult is reachable via the stable message endpoints (inside
+	// AuthVerdict); AttachmentMetaView via the stable email.received event
+	// payload (EmailReceivedData); AuthVerdict itself is shared by the
+	// stable message endpoints and the export. All stay stable everywhere,
+	// including inside the export.
+	for _, name := range []string{"CheckResult", "AttachmentMetaView", "AuthVerdict"} {
 		if !exportSet[name] {
 			t.Errorf("expected %s inside the export closure — if the export stopped using it, revisit this test's shared-schema assumptions", name)
 			continue
