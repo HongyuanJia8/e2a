@@ -58,7 +58,7 @@ for e in client.events.list(type="email.received", limit=20):
 | `email.received` | Inbound SMTP message accepted | **At-least-once** end-to-end |
 | `email.flagged` | Inbound message accepted but did not match the agent's `inbound_policy` (delivered + flagged, never dropped) | **At-least-once** end-to-end |
 | `email.sent` | Outbound `/send` accepted by SES | Best-effort |
-| `email.failed` | Outbound send terminally failed (retries exhausted / permanent reject) — carries `reason` | **At-least-once** |
+| `email.failed` | Outbound send terminally failed — retries exhausted / permanent reject at send time, or the provider rejected the already-accepted message (SES `Reject` delivery feedback, e.g. content scan) — carries `reason` | **At-least-once** from the send path; best-effort when emitted via delivery feedback |
 | `email.review_requested` | Message held for human review (outbound HITL or inbound screening) — carries `direction` | **At-least-once** |
 | `email.review_approved` | Review approved (outbound: sent; inbound: released to the inbox) | Best-effort |
 | `email.review_rejected` | Review rejected (outbound: discarded; inbound: dropped) | **At-least-once** |
@@ -120,6 +120,7 @@ beta event types must still parse. The stable mapping is:
 Notes:
 
 - The delivery-outcome events (`email.delivered`/`bounced`/`complained`) carry **no `status` field** — the event type IS the outcome.
+- `email.failed` is **message-level** (its `to`/`cc`/`bcc` lists carry the recipients — never one event per recipient) and fires **at most once per message** across both emission paths: the send worker and the SES `Reject` delivery-feedback path derive the same deterministic event id, so duplicate SNS deliveries and cross-path double emission collapse in the outbox.
 - `delivered_to` is always a **scalar**: on `email.received` it's the one per-agent copy (the relay emits one event per delivery); on the delivery-outcome events it's the one recipient the outcome is about. The peer `to`/`cc` lists are the message's parsed headers.
 - These shapes are locked by committed golden fixtures (`internal/eventpayload/testdata/`) that the server builders AND both SDKs test against — a payload change is a conscious, reviewed fixture regeneration.
 - Every full and minimal stable-event fixture validates twice: once against the

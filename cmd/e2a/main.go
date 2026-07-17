@@ -56,14 +56,16 @@ import (
 // derived deterministically from dedupKey so duplicate SNS notifications
 // produce the same id — receivers dedup on it (at-least-once delivery).
 func deliveryEventFirer(pub webhookpub.Publisher) delivery.Firer {
-	return func(ctx context.Context, userID, agentID, eventType string, data any, dedupKey string) {
+	return func(ctx context.Context, e delivery.FiredEvent) {
 		pub.Publish(ctx, webhookpub.Event{
-			ID:        webhookpub.DeterministicEventID(dedupKey),
-			Type:      eventType,
-			CreatedAt: time.Now().UTC(),
-			UserID:    userID,
-			AgentID:   agentID,
-			Data:      data,
+			ID:             webhookpub.DeterministicEventID(e.DedupKey),
+			Type:           e.Type,
+			CreatedAt:      time.Now().UTC(),
+			UserID:         e.UserID,
+			AgentID:        e.AgentID,
+			ConversationID: e.ConversationID,
+			MessageID:      e.MessageID,
+			Data:           e.Data,
 		})
 	}
 }

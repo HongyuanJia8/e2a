@@ -76,6 +76,9 @@ type sesNotification struct {
 			DiagnosticCode string `json:"diagnosticCode"`
 		} `json:"delayedRecipients"`
 	} `json:"deliveryDelay"`
+	Reject *struct {
+		Reason string `json:"reason"` // e.g. "Bad content"
+	} `json:"reject"`
 }
 
 // ParseSESNotification parses the SES event JSON (the decoded SNS Message
@@ -144,9 +147,19 @@ func ParseSESNotification(messageBody []byte) (*Event, error) {
 	case "Send":
 		ev.Kind = KindSend
 	case "Reject":
+		// SES rejected the ALREADY-ACCEPTED message itself (e.g. a virus was
+		// detected in the content) — a message-level verdict, so every envelope
+		// recipient terminally fails; reject.reason carries the classification
+		// ("Bad content"). NEVER suppresses: a Reject is about this message's
+		// content, not the recipient addresses (decision 9 suppresses only on
+		// hard bounce or complaint).
 		ev.Kind = KindReject
+		var reason string
+		if n.Reject != nil {
+			reason = n.Reject.Reason
+		}
 		for _, a := range n.Mail.Destination {
-			ev.Recipients = append(ev.Recipients, RecipientOutcome{Address: norm(a), Status: StatusFailed})
+			ev.Recipients = append(ev.Recipients, RecipientOutcome{Address: norm(a), Status: StatusFailed, Detail: reason})
 		}
 	default:
 		ev.Kind = KindOther
