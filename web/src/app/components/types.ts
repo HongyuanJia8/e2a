@@ -56,6 +56,18 @@ export type PendingAttachment = {
   data: string; // base64
 };
 
+// Metadata for one attachment of a received/sent message — never the bytes.
+// `index` is the stable 0-based fetch key for the attachment-bytes endpoint;
+// `content_id` (when present) is the Content-ID an HTML body's `cid:` URL
+// resolves against, marking the part as an inline image embedded in the body.
+export type AttachmentMeta = {
+  index: number;
+  filename?: string;
+  content_type?: string;
+  size_bytes: number;
+  content_id?: string;
+};
+
 export type PendingMessageDetail = PendingMessageSummary & {
   email_message_id?: string;
   body_text?: string;
@@ -154,6 +166,10 @@ export type InboundMessageDetail = {
   parsed?: { text?: string; html?: string };
   // Held-draft body shape (outbound). Inbound rows carry `parsed` instead.
   body?: { text?: string; html?: string };
+  // Per-attachment metadata (never bytes). Inline images (those with a
+  // content_id referenced by a `cid:` in `parsed.html`) render in the body;
+  // the rest surface as download chips. Bytes are fetched on demand.
+  attachments?: AttachmentMeta[];
   // Raw RFC-5322 bytes, base64-encoded by the JSON layer. Decoded only as a
   // last-resort fallback when neither `parsed.html` nor `parsed.text` is present.
   raw_message: string;

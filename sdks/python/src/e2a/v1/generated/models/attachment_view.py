@@ -27,6 +27,7 @@ class AttachmentView(BaseModel):
     """
     AttachmentView
     """ # noqa: E501
+    content_id: Optional[StrictStr] = Field(default=None, description="Content-ID (angle brackets stripped) for an inline part referenced by a body 'cid:' URL, e.g. an embedded image. Omitted for non-inline attachments.")
     content_type: Optional[StrictStr] = None
     data: Optional[StrictStr] = None
     download_url: StrictStr
@@ -35,7 +36,7 @@ class AttachmentView(BaseModel):
     index: StrictInt
     size_bytes: StrictInt = Field(description="DECODED attachment payload size in bytes (Content-Transfer-Encoding undone) — exactly what download_url serves and what the 256 KB inline cap is checked against; not the encoded size inside the raw MIME.")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["content_type", "data", "download_url", "expires_at", "filename", "index", "size_bytes"]
+    __properties: ClassVar[List[str]] = ["content_id", "content_type", "data", "download_url", "expires_at", "filename", "index", "size_bytes"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -95,6 +96,7 @@ class AttachmentView(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
+            "content_id": obj.get("content_id"),
             "content_type": obj.get("content_type"),
             "data": obj.get("data"),
             "download_url": obj.get("download_url"),

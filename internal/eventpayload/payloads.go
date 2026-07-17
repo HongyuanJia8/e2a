@@ -48,6 +48,14 @@ type AttachmentMetaView struct {
 	// size_bytes (which is the raw MIME length of the whole message).
 	SizeBytes int `json:"size_bytes" doc:"DECODED attachment payload size in bytes (Content-Transfer-Encoding undone) — the size of the file a download yields, not its encoded size inside the raw MIME."`
 	Index     int `json:"index" doc:"Stable 0-based attachment index (document order) — the fetch key for the attachment-bytes endpoint."`
+	// ContentID is the attachment's Content-ID with angle brackets stripped
+	// (e.g. "ii_abc@mail.gmail.com"), present only for parts that carry one —
+	// typically inline images embedded by a mail client. It is the key an HTML
+	// body's `cid:` reference resolves against: a renderer maps
+	// `<img src="cid:ii_abc@mail.gmail.com">` to the attachment whose
+	// content_id matches, then fetches the bytes via the attachment endpoint.
+	// Omitted (empty) for ordinary, non-inline attachments.
+	ContentID string `json:"content_id,omitempty" doc:"Content-ID (angle brackets stripped) for an inline part referenced by a body 'cid:' URL, e.g. an embedded image; the key a cid: reference resolves against. Omitted for non-inline attachments."`
 }
 
 // EmailReceivedData is the `data` payload of an email.received event. The
@@ -247,6 +255,7 @@ func AttachmentMetadata(raw []byte) []AttachmentMetaView {
 			ContentType: a.ContentType,
 			SizeBytes:   len(a.Data),
 			Index:       i,
+			ContentID:   a.ContentID,
 		})
 	}
 	return out

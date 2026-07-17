@@ -15,7 +15,13 @@ import (
 type Attachment struct {
 	Filename    string // decoded filename (RFC 2047/2231), "" if the part has none
 	ContentType string // media type only (e.g. "application/pdf"), params stripped
-	Data        []byte // decoded bytes (Content-Transfer-Encoding applied)
+	// ContentID is the part's Content-ID with the surrounding angle brackets
+	// stripped (e.g. "ii_abc@mail.gmail.com"), or "" if the part carries none.
+	// This is the key an HTML body's `cid:` reference resolves against, so a
+	// renderer can map `<img src="cid:ii_abc@mail.gmail.com">` to this
+	// attachment. Present mainly on inline images embedded by mail clients.
+	ContentID string
+	Data      []byte // decoded bytes (Content-Transfer-Encoding applied)
 }
 
 // Attachments walks the MIME tree of a raw RFC 5322 message and returns its
@@ -41,6 +47,7 @@ func Attachments(raw []byte) []Attachment {
 		msg.Header.Get("Content-Type"),
 		msg.Header.Get("Content-Transfer-Encoding"),
 		msg.Header.Get("Content-Disposition"),
+		msg.Header.Get("Content-ID"),
 		"", // top-level has no part filename
 		msg.Body,
 		0,
@@ -61,7 +68,7 @@ func AttachmentAt(raw []byte, index int) (Attachment, bool) {
 }
 
 // collectAttachments appends attachment leaves found under this part to *out.
-func collectAttachments(contentType, cte, disposition, partFilename string, body io.Reader, depth int, out *[]Attachment) {
+func collectAttachments(contentType, cte, disposition, contentID, partFilename string, body io.Reader, depth int, out *[]Attachment) {
 	mediaType, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
 		mediaType = "text/plain" // missing/invalid Content-Type → body text, not an attachment
@@ -85,6 +92,7 @@ func collectAttachments(contentType, cte, disposition, partFilename string, body
 				part.Header.Get("Content-Type"),
 				part.Header.Get("Content-Transfer-Encoding"),
 				part.Header.Get("Content-Disposition"),
+				part.Header.Get("Content-ID"),
 				part.FileName(), // decoded by mime/multipart
 				part,
 				depth+1,
@@ -107,15 +115,36 @@ func collectAttachments(contentType, cte, disposition, partFilename string, body
 		}
 	}
 	isAttachmentDisp := strings.HasPrefix(strings.ToLower(strings.TrimSpace(disposition)), "attachment")
-	if filename == "" && !isAttachmentDisp {
+	cid := trimContentID(contentID)
+	// A part with a Content-ID but no filename is still a fetchable inline
+	// resource an HTML `cid:` reference resolves to (some clients embed images
+	// this way) — include it so the renderer can resolve it. Guard against the
+	// message's own body parts: a text/plain or text/html part can carry a
+	// Content-ID (a multipart/related root) and must stay a body, never an
+	// attachment.
+	isTextBody := mediaType == "text/plain" || mediaType == "text/html"
+	isNamedInline := cid != "" && !isTextBody
+	if filename == "" && !isAttachmentDisp && !isNamedInline {
 		return // body text / unnamed inline part — not a fetchable attachment
 	}
 
 	*out = append(*out, Attachment{
 		Filename:    filename,
 		ContentType: mediaType,
+		ContentID:   cid,
 		Data:        decodeBytes(body, cte),
 	})
+}
+
+// trimContentID normalizes a raw Content-ID header value to the token an HTML
+// `cid:` URL references: surrounding angle brackets and whitespace stripped
+// (e.g. "<ii_abc@mail.gmail.com>" → "ii_abc@mail.gmail.com"). Returns "" for an
+// empty/blank header.
+func trimContentID(raw string) string {
+	s := strings.TrimSpace(raw)
+	s = strings.TrimPrefix(s, "<")
+	s = strings.TrimSuffix(s, ">")
+	return strings.TrimSpace(s)
 }
 
 // decodeBytes reads a body applying its Content-Transfer-Encoding, returning raw

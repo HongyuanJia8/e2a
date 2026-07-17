@@ -13,6 +13,10 @@
 import { HttpFile } from '../http/http.js';
 
 export class AttachmentMetaView {
+    /**
+    * Content-ID (angle brackets stripped) for an inline part referenced by a body \'cid:\' URL, e.g. an embedded image; the key a cid: reference resolves against. Omitted for non-inline attachments.
+    */
+    'contentId'?: string;
     'contentType'?: string;
     'filename'?: string;
     /**
@@ -29,6 +33,12 @@ export class AttachmentMetaView {
     static readonly mapping: {[index: string]: string} | undefined = undefined;
 
     static readonly attributeTypeMap: Array<{name: string, baseName: string, type: string, format: string}> = [
+        {
+            "name": "contentId",
+            "baseName": "content_id",
+            "type": "string",
+            "format": ""
+        },
         {
             "name": "contentType",
             "baseName": "content_type",

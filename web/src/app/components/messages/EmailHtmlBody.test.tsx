@@ -3,8 +3,14 @@
 // blocking — plus the "Load images" opt-in, since a silent regression in any of
 // them reintroduces XSS or tracking-pixel leakage.
 
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { EmailHtmlBody } from "./EmailHtmlBody";
+import type { AttachmentMeta } from "../types";
+
+jest.mock("../onboarding/api", () => ({
+  loadInlineAttachmentUrl: jest.fn(),
+}));
+import { loadInlineAttachmentUrl } from "../onboarding/api";
 
 function srcdocOf(): string {
   const frame = screen.getByTitle("Email body") as HTMLIFrameElement;
@@ -85,5 +91,65 @@ describe("EmailHtmlBody", () => {
   it("shows no banner when there is nothing remote to block", () => {
     render(<EmailHtmlBody html="<p>just <b>text</b></p>" />);
     expect(screen.queryByText(/Remote images blocked/i)).not.toBeInTheDocument();
+  });
+
+  describe("inline (cid:) images", () => {
+    const inlineAtt: AttachmentMeta = {
+      index: 0,
+      filename: "image.png",
+      content_type: "image/png",
+      size_bytes: 1000,
+      content_id: "ii_a@mail.gmail.com",
+    };
+
+    beforeEach(() => jest.clearAllMocks());
+
+    it("resolves a cid: image to its fetched bytes and renders it inline", async () => {
+      (loadInlineAttachmentUrl as jest.Mock).mockResolvedValue({
+        url: "data:image/png;base64,AAAA",
+      });
+      render(
+        <EmailHtmlBody
+          html={'<p>see</p><img src="cid:ii_a@mail.gmail.com">'}
+          attachments={[inlineAtt]}
+          email="a@x.dev"
+          messageId="msg_1"
+        />,
+      );
+      await waitFor(() => expect(srcdocOf()).toContain("data:image/png;base64,AAAA"));
+      const doc = srcdocOf();
+      expect(doc).not.toContain("cid:"); // the cid reference was rewritten away
+      // Inline images render by DEFAULT (no "Load images" opt-in) and CSP allows
+      // them even while remote images are blocked.
+      expect(screen.queryByText(/Remote images blocked/i)).not.toBeInTheDocument();
+      expect(doc).toMatch(/img-src[^;"]*data:/);
+    });
+
+    it("does not treat a resolved inline image as a remote tracker", async () => {
+      // A large inline image resolves to a client-encoded data: URL.
+      (loadInlineAttachmentUrl as jest.Mock).mockResolvedValue({
+        url: "data:image/png;base64,BBBB",
+      });
+      render(
+        <EmailHtmlBody
+          html={'<img src="cid:ii_a@mail.gmail.com">'}
+          attachments={[inlineAtt]}
+          email="a@x.dev"
+          messageId="msg_1"
+        />,
+      );
+      await waitFor(() => expect(srcdocOf()).toContain("data:image/png;base64,BBBB"));
+      expect(screen.queryByText(/Remote images blocked/i)).not.toBeInTheDocument();
+    });
+
+    it("does not fetch bytes when message coordinates are absent", () => {
+      render(
+        <EmailHtmlBody
+          html={'<img src="cid:ii_a@mail.gmail.com">'}
+          attachments={[inlineAtt]}
+        />,
+      );
+      expect(loadInlineAttachmentUrl).not.toHaveBeenCalled();
+    });
   });
 });

@@ -12,13 +12,14 @@ import useSWR from "swr";
 import { Chip, Dot } from "@e2a/ui";
 import { CounterpartyAvatar } from "./CounterpartyAvatar";
 import { EmailHtmlBody } from "./EmailHtmlBody";
+import { AttachmentChips, downloadableAttachments } from "./AttachmentChips";
 import { getMessageDetail, deleteMessage } from "../onboarding/api";
 import {
   invalidateAgentMessages,
   invalidateAgentTrash,
   invalidateAgentUnread,
 } from "../../../lib/swrKeys";
-import type { MessageSummary } from "../types";
+import type { AttachmentMeta, MessageSummary } from "../types";
 import type { Counterparty } from "./threading";
 
 // Absolute, human time for the message header (e.g. "Jun 21, 8:07 PM").
@@ -122,6 +123,7 @@ export function ThreadBubble({
   // backend-parsed bodies (QP/base64 decoded); the raw decode is last resort.
   let textBody = "";
   let htmlBody = "";
+  let attachments: AttachmentMeta[] = [];
   if (detail) {
     if (detail.direction === "outbound") {
       textBody = detail.data.body_text ?? "";
@@ -133,9 +135,13 @@ export function ThreadBubble({
         detail.data.body?.text ||
         decodeRawBody(detail.data.raw_message) ||
         "";
+      attachments = detail.data.attachments ?? [];
     }
   }
   const showBody = htmlBody.trim() !== "" || textBody.trim() !== "";
+  // Attachments not embedded inline in the body (PDFs, docs, non-inline images)
+  // surface as download chips beneath it.
+  const chipAttachments = downloadableAttachments(attachments, htmlBody);
 
   const senderName = isInbound ? counterparty.name : "Inbox";
   const senderEmail = isInbound ? counterparty.email : agentEmail;
@@ -316,9 +322,21 @@ export function ThreadBubble({
               </span>
             )
           ) : htmlBody.trim() !== "" ? (
-            <EmailHtmlBody html={htmlBody} />
+            <EmailHtmlBody
+              html={htmlBody}
+              attachments={attachments}
+              email={agentEmail}
+              messageId={message.id}
+            />
           ) : (
             <div style={{ whiteSpace: "pre-wrap" }}>{textBody}</div>
+          )}
+          {chipAttachments.length > 0 && (
+            <AttachmentChips
+              email={agentEmail}
+              messageId={message.id}
+              attachments={chipAttachments}
+            />
           )}
         </div>
       </div>

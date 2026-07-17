@@ -149,6 +149,7 @@ type AttachmentView struct {
 	Index       int       `json:"index"`
 	Filename    string    `json:"filename,omitempty"`
 	ContentType string    `json:"content_type,omitempty"`
+	ContentID   string    `json:"content_id,omitempty" doc:"Content-ID (angle brackets stripped) for an inline part referenced by a body 'cid:' URL, e.g. an embedded image. Omitted for non-inline attachments."`
 	SizeBytes   int       `json:"size_bytes" doc:"DECODED attachment payload size in bytes (Content-Transfer-Encoding undone) — exactly what download_url serves and what the 256 KB inline cap is checked against; not the encoded size inside the raw MIME."`
 	DownloadURL string    `json:"download_url"`
 	ExpiresAt   time.Time `json:"expires_at" format:"date-time"`
@@ -202,6 +203,7 @@ func (s *Server) handleGetAttachment(ctx context.Context, in *attachmentParam) (
 		Index:       in.Index,
 		Filename:    att.Filename,
 		ContentType: att.ContentType,
+		ContentID:   att.ContentID,
 		SizeBytes:   len(att.Data),
 		DownloadURL: dl,
 		ExpiresAt:   exp.UTC(),
