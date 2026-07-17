@@ -502,7 +502,9 @@ func testServer(t *testing.T, opts ...func(*Deps)) *httptest.Server {
 			return nil
 		},
 		SendTest: func(ctx context.Context, ag *identity.AgentIdentity) (*agent.OutboundResult, *agent.OutboundError) {
-			return &agent.OutboundResult{MessageID: "msg_test_1", Method: "smtp"}, nil
+			// Queue-first platform test: durably accepted, provider id unknown
+			// until the SendWorker submits (mirrors SendTestCore).
+			return &agent.OutboundResult{MessageID: "msg_test_1", Status: "accepted", Method: "smtp"}, nil
 		},
 		ApprovePending: func(ctx context.Context, userID, messageID, expectedAgentEmail string, ovr agent.ApproveOverrides, _ agent.ApproveIdemCompleter) (*identity.Message, *agent.OutboundError) {
 			switch messageID {

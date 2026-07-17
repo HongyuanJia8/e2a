@@ -693,7 +693,7 @@ export class ObservableAgentsApi {
     }
 
     /**
-     * Send a platform test email to the agent\'s own address to confirm inbound delivery. 202 when held for HITL.
+     * Send a platform-originated test email (From: the platform noreply identity) to the agent\'s own address over the real external SMTP route, to confirm inbound delivery end to end. Returns 202: status=accepted (the message is durably persisted and queued; message_id is the GET-able e2a message id, and the terminal outcome arrives via GET /v1/messages/{id} or the email.sent / email.failed webhook events — provider_message_id appears only after provider submission) or status=pending_review when held for review. Always branch on body.status.
      * Send a test email to the agent\'s own address
      * @param email The agent\&#39;s full email address, e.g. support@acme.com.
      */
@@ -718,7 +718,7 @@ export class ObservableAgentsApi {
     }
 
     /**
-     * Send a platform test email to the agent\'s own address to confirm inbound delivery. 202 when held for HITL.
+     * Send a platform-originated test email (From: the platform noreply identity) to the agent\'s own address over the real external SMTP route, to confirm inbound delivery end to end. Returns 202: status=accepted (the message is durably persisted and queued; message_id is the GET-able e2a message id, and the terminal outcome arrives via GET /v1/messages/{id} or the email.sent / email.failed webhook events — provider_message_id appears only after provider submission) or status=pending_review when held for review. Always branch on body.status.
      * Send a test email to the agent\'s own address
      * @param email The agent\&#39;s full email address, e.g. support@acme.com.
      */

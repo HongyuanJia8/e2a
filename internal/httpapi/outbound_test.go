@@ -2,8 +2,10 @@ package httpapi
 
 import (
 	"encoding/base64"
+	"strings"
 	"testing"
 
+	"github.com/tokencanopy/e2a/internal/agent"
 	"github.com/tokencanopy/e2a/internal/outbound"
 )
 
@@ -422,11 +424,46 @@ func TestForwardMessageNotFound(t *testing.T) {
 	}
 }
 
-func TestTestSendSent(t *testing.T) {
+// TestTestSendAccepted: the test send is queue-first — the immediate response
+// is 202 status=accepted carrying the durable e2a msg_ id and NO provider id
+// (that arrives later via GET /v1/messages/{id} and email.sent/email.failed).
+func TestTestSendAccepted(t *testing.T) {
 	srv := testServer(t)
 	code, body := postJSON(t, srv.URL+"/v1/agents/support%40acme.com/test", "good", nil)
-	if code != 200 || body["status"] != "sent" || body["message_id"] != "msg_test_1" {
-		t.Fatalf("want 200 sent, got %d %v", code, body)
+	if code != 202 || body["status"] != "accepted" || body["message_id"] != "msg_test_1" {
+		t.Fatalf("want 202 accepted msg_test_1, got %d %v", code, body)
+	}
+	if _, ok := body["provider_message_id"]; ok {
+		t.Fatalf("provider_message_id must be absent before worker submission, got %v", body)
+	}
+}
+
+// TestSendResultViewMessageIDContract pins the SendResultView promise on every
+// outbound outcome shape: message_id is ALWAYS the GET-able e2a msg_ resource
+// id and never the upstream provider id (which belongs exclusively in
+// provider_message_id).
+func TestSendResultViewMessageIDContract(t *testing.T) {
+	providerID := "<0100019-abc-def@email.amazonses.com>"
+	cases := []struct {
+		name string
+		res  *agent.OutboundResult
+	}{
+		{"accepted", &agent.OutboundResult{MessageID: "msg_a1", Status: "accepted", Method: "smtp"}},
+		{"sent", &agent.OutboundResult{MessageID: "msg_a2", ProviderMessageID: providerID, SentAs: "relay", Method: "smtp"}},
+		{"held", &agent.OutboundResult{Held: true, PendingMessageID: "msg_a3"}},
+		{"loopback", &agent.OutboundResult{MessageID: "msg_a4", SentAs: "own_address", Method: "loopback"}},
+	}
+	for _, tc := range cases {
+		_, view := outboundResultView(tc.res)
+		if !strings.HasPrefix(view.MessageID, "msg_") {
+			t.Errorf("%s: message_id = %q, want an e2a msg_ id", tc.name, view.MessageID)
+		}
+		if view.MessageID == providerID || strings.HasPrefix(view.MessageID, "<") {
+			t.Errorf("%s: message_id = %q leaks a provider id", tc.name, view.MessageID)
+		}
+		if view.ProviderMessageID != "" && !strings.HasPrefix(view.MessageID, "msg_") {
+			t.Errorf("%s: provider id present but message_id %q is not a msg_ resource", tc.name, view.MessageID)
+		}
 	}
 }
 
