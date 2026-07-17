@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log"
 	"net/mail"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -233,6 +234,29 @@ func (w *Worker) autoApproveAsync(ctx context.Context, agent *identity.AgentIden
 	req, err := sendRequestFromStoredMessage(msg)
 	if err != nil {
 		w.autoReject(ctx, c.MessageID, fmt.Sprintf("auto-approve failed: rebuild request: %v", err))
+		return true
+	}
+	// Suppression enforcement on TTL auto-approval: never submit to an address
+	// on the OWNING account's suppression list (the store normalizes both
+	// sides, so case differences still match). The check runs on the final
+	// stored To/CC/BCC set, before the self-send branch, mirroring the
+	// accept-time and human-approve checks. A match resolves the expired hold
+	// through the existing rejected/expired lifecycle (review_expired_rejected
+	// + review-resolution event) with an explicit suppression reason; a store
+	// error is treated as transient — leave the row pending_review for the
+	// next sweep rather than sending unchecked or terminally rejecting on a
+	// DB blip.
+	recipients := make([]string, 0, len(req.To)+len(req.CC)+len(req.BCC))
+	recipients = append(recipients, req.To...)
+	recipients = append(recipients, req.CC...)
+	recipients = append(recipients, req.BCC...)
+	suppressed, err := w.store.SuppressedAddresses(ctx, agent.UserID, recipients)
+	if err != nil {
+		log.Printf("[hitl-worker] auto-approve %s: suppression check: %v (leaving pending for next sweep)", c.MessageID, err)
+		return true
+	}
+	if len(suppressed) > 0 {
+		w.autoReject(ctx, c.MessageID, "auto-approve blocked: recipient(s) on the suppression list: "+strings.Join(suppressed, ", "))
 		return true
 	}
 	w.attachReferencesChain(ctx, agent.ID, &req)

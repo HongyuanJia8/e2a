@@ -65,6 +65,7 @@ func (a *outboundSendStore) ClaimSend(ctx context.Context, messageID string, job
 	}
 	return &outboundsend.SendJob{
 		MessageID:    p.ID,
+		UserID:       p.UserID,
 		Status:       p.DeliveryStatus,
 		EnvelopeFrom: p.EnvelopeFrom,
 		Recipients:   p.Recipients,
@@ -72,6 +73,13 @@ func (a *outboundSendStore) ClaimSend(ctx context.Context, messageID string, job
 		SentAs:       p.SentAs,
 		AcceptedAt:   p.CreatedAt,
 	}, nil
+}
+
+// SuppressedRecipients backs the SendWorker's pre-provider suppression guard:
+// the subset of recipients on the owning account's suppression list (the
+// store normalizes both sides).
+func (a *outboundSendStore) SuppressedRecipients(ctx context.Context, userID string, recipients []string) ([]string, error) {
+	return a.store.SuppressedAddresses(ctx, userID, recipients)
 }
 
 func (a *outboundSendStore) ReleaseSend(ctx context.Context, messageID string, jobID int64) error {

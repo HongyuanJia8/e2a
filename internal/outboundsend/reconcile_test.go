@@ -329,6 +329,9 @@ func (s failingTerminalStore) MarkSent(context.Context, string, string, string) 
 func (s failingTerminalStore) MarkFailed(context.Context, string, int, string) error {
 	return s.err
 }
+func (s failingTerminalStore) SuppressedRecipients(context.Context, string, []string) ([]string, error) {
+	return nil, nil
+}
 
 func TestTerminalReconcileWorker_PropagatesStoreFailure(t *testing.T) {
 	sentinel := errors.New("mark failed unavailable")

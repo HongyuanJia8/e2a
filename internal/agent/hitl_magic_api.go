@@ -195,6 +195,17 @@ func (a *API) magicApprove(w http.ResponseWriter, r *http.Request, messageID, us
 		writeMagicMessage(w, http.StatusNotFound, "Message not found", "This message no longer exists.")
 		return
 	}
+	// Suppression enforcement — same owner-scoped, fail-closed check as the
+	// dashboard approve (ApprovePendingCore). The magic-link path takes no
+	// reviewer edits, so the stored To/CC/BCC set is the final one. On
+	// refusal the hold stays pending_review (nothing has run yet) and the
+	// reviewer sees why; clearing the suppression makes the same link work.
+	if supErr := a.checkSuppressionStrict(r.Context(), userID, outbound.SendRequest{
+		To: draft.ToRecipients, CC: draft.CC, BCC: draft.BCC,
+	}); supErr != nil {
+		writeMagicMessage(w, supErr.Status, "Cannot send", html.EscapeString(supErr.Msg))
+		return
+	}
 	sent, handled, aerr := a.approveOutboundAsync(r.Context(), agent, messageID, userID, draft, identity.PendingApprovalEdit{}, nil)
 	if aerr != nil {
 		writeMagicApproveError(w, messageID, aerr)

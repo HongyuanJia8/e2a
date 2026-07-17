@@ -1061,12 +1061,28 @@ type OutboundError struct {
 
 func (e *OutboundError) Error() string { return e.Msg }
 
-// checkSuppression rejects a send when any recipient (To/CC/BCC) is on the
-// tenant's suppression list (decision 9). Returns a structured
-// recipient_suppressed 422. Fails OPEN on a store error — a suppression-DB
-// hiccup must not block legitimate mail; the list is protective, not a hard
-// gate, and the storage trigger / SES account-level list backstop it.
-func (a *API) checkSuppression(ctx context.Context, userID string, req outbound.SendRequest) *OutboundError {
+// suppressionLister is the narrow store surface the suppression checks read —
+// an interface so the check core is unit-testable without Postgres.
+type suppressionLister interface {
+	SuppressedAddresses(ctx context.Context, userID string, addrs []string) ([]string, error)
+}
+
+// checkSuppressionCore rejects a send when any recipient of the request's
+// FULL To/CC/BCC set is on the owning account's suppression list (decision 9;
+// the store normalizes both sides, so case/whitespace differences still
+// match). Returns a structured recipient_suppressed 422.
+//
+// failClosed selects the store-error posture:
+//   - false (accept-time direct send): fail OPEN — a suppression-DB hiccup
+//     must not block legitimate mail at intake; the async pipeline's
+//     pre-provider guard (internal/outboundsend) re-checks before any SES
+//     I/O and backstops the published refusal promise.
+//   - true (approval paths): fail CLOSED with a retryable internal_error —
+//     approving is a human-driven, freely retryable action, and silently
+//     sending on a store error would break the public "addresses e2a will
+//     refuse to send to" contract (GET /v1/account/suppressions). The hold
+//     stays pending_review.
+func checkSuppressionCore(ctx context.Context, store suppressionLister, userID string, req outbound.SendRequest, failClosed bool) *OutboundError {
 	addrs := make([]string, 0, len(req.To)+len(req.CC)+len(req.BCC))
 	addrs = append(addrs, req.To...)
 	addrs = append(addrs, req.CC...)
@@ -1074,8 +1090,12 @@ func (a *API) checkSuppression(ctx context.Context, userID string, req outbound.
 	if len(addrs) == 0 {
 		return nil
 	}
-	suppressed, err := a.store.SuppressedAddresses(ctx, userID, addrs)
+	suppressed, err := store.SuppressedAddresses(ctx, userID, addrs)
 	if err != nil {
+		if failClosed {
+			log.Printf("[api] suppression check failed (refusing approval): %v", err)
+			return &OutboundError{Status: http.StatusInternalServerError, Code: "internal_error", Msg: "suppression check unavailable — the message was left pending; retry"}
+		}
 		log.Printf("[api] suppression check failed (allowing send): %v", err)
 		return nil
 	}
@@ -1084,6 +1104,18 @@ func (a *API) checkSuppression(ctx context.Context, userID string, req outbound.
 			" — remove via DELETE /v1/account/suppressions/{address}"}
 	}
 	return nil
+}
+
+// checkSuppression is the accept-time (direct send) check: fail-open on a
+// store error (see checkSuppressionCore for the rationale + backstop).
+func (a *API) checkSuppression(ctx context.Context, userID string, req outbound.SendRequest) *OutboundError {
+	return checkSuppressionCore(ctx, a.store, userID, req, false)
+}
+
+// checkSuppressionStrict is the approval-time check (human approve + magic
+// link): fail-closed on a store error, leaving the hold pending_review.
+func (a *API) checkSuppressionStrict(ctx context.Context, userID string, req outbound.SendRequest) *OutboundError {
+	return checkSuppressionCore(ctx, a.store, userID, req, true)
 }
 
 // DeliverOutbound is the shared send/reply/forward delivery tail, HTTP-free:

@@ -201,7 +201,10 @@ func (s *Store) MarkMessageSent(ctx context.Context, messageID, sentAs string, t
 // (the LoadOutboundForSend result). Recipients is the SMTP envelope (to+cc+bcc);
 // Raw is the persisted Sent-folder bytes the worker submits via Sender.SubmitOnce.
 type OutboundSendPayload struct {
-	ID             string
+	ID string
+	// UserID is the owning account (agent_identities.user_id) — the tenant
+	// scope for the worker's pre-provider suppression guard.
+	UserID         string
 	DeliveryStatus string
 	EnvelopeFrom   string
 	SentAs         string
@@ -260,19 +263,20 @@ func (s *Store) LoadOutboundForSend(ctx context.Context, messageID string) (*Out
 		deliveryStatus string
 		envelopeFrom   string
 		sentAs         string
+		userID         string
 		to, cc, bcc    []string
 		raw            []byte
 		createdAt      time.Time
 	)
 	err := s.pool.QueryRow(ctx,
-		`SELECT COALESCE(m.delivery_status,''), COALESCE(m.envelope_from,''), COALESCE(m.sent_as,''),
+		`SELECT COALESCE(m.delivery_status,''), COALESCE(m.envelope_from,''), COALESCE(m.sent_as,''), a.user_id,
 		        m.to_recipients, m.cc, m.bcc, m.raw_message, m.created_at
 		   FROM messages m
 		   JOIN agent_identities a ON a.id = m.agent_id
 		  WHERE m.id = $1 AND m.direction = 'outbound'
 		    AND m.deleted_at IS NULL AND a.deleted_at IS NULL`,
 		messageID,
-	).Scan(&deliveryStatus, &envelopeFrom, &sentAs, &to, &cc, &bcc, &raw, &createdAt)
+	).Scan(&deliveryStatus, &envelopeFrom, &sentAs, &userID, &to, &cc, &bcc, &raw, &createdAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -285,6 +289,7 @@ func (s *Store) LoadOutboundForSend(ctx context.Context, messageID string) (*Out
 	recipients = append(recipients, bcc...)
 	return &OutboundSendPayload{
 		ID:             messageID,
+		UserID:         userID,
 		DeliveryStatus: deliveryStatus,
 		EnvelopeFrom:   envelopeFrom,
 		SentAs:         sentAs,
@@ -336,12 +341,13 @@ func (s *Store) ClaimOutboundForSend(ctx context.Context, messageID string, jobI
 		agentDeletedAt *time.Time
 		stampedJobID   *int64
 	)
+	var userID string
 	// Lock agent first to match permanent agent deletion's lock order, then
 	// lock the message. Message-only trash operations never need the agent lock.
 	err = tx.QueryRow(ctx,
-		`SELECT deleted_at FROM agent_identities WHERE id = $1 FOR UPDATE`,
+		`SELECT deleted_at, user_id FROM agent_identities WHERE id = $1 FOR UPDATE`,
 		agentID,
-	).Scan(&agentDeletedAt)
+	).Scan(&agentDeletedAt, &userID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if err := tx.Commit(ctx); err != nil {
 			return nil, err
@@ -408,6 +414,7 @@ func (s *Store) ClaimOutboundForSend(ctx context.Context, messageID string, jobI
 	recipients = append(recipients, bcc...)
 	p := &OutboundSendPayload{
 		ID:             messageID,
+		UserID:         userID,
 		DeliveryStatus: deliveryStatus,
 		EnvelopeFrom:   envelopeFrom,
 		SentAs:         sentAs,

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/riverqueue/river"
@@ -62,7 +63,10 @@ func (OutboundSendArgs) Kind() string { return "outbound_send" }
 
 // SendJob is the send payload the worker loads from the messages row (Store.LoadForSend).
 type SendJob struct {
-	MessageID    string
+	MessageID string
+	// UserID is the owning account — the tenant scope for the pre-provider
+	// suppression guard (suppressions are per-account).
+	UserID       string
 	Status       string // messages.delivery_status
 	EnvelopeFrom string
 	Recipients   []string
@@ -129,6 +133,9 @@ type Store interface {
 	// MarkFailed sets delivery_status='failed' + detail and emits email.failed, in
 	// one transaction.
 	MarkFailed(ctx context.Context, messageID string, attempt int, detail string) error
+	// SuppressedRecipients returns the subset of recipients on the owning
+	// account's suppression list — the last-line guard before provider I/O.
+	SuppressedRecipients(ctx context.Context, userID string, recipients []string) ([]string, error)
 }
 
 // SendWorker submits an accepted message and records the terminal outcome. Mirrors
@@ -165,6 +172,28 @@ func (w *SendWorker) Work(ctx context.Context, job *river.Job[OutboundSendArgs])
 	}
 	if j.alreadyDone() {
 		return nil // already submitted (sent+) — idempotent re-drive
+	}
+
+	// Final suppression guard before provider I/O: a suppression added AFTER
+	// approval/acceptance (bounce, complaint, or manual add while the job sat
+	// on the queue) must still prevent delivery. A match is terminal like the
+	// Permanent branch below — record delivery_status='failed' + email.failed
+	// in one tx (MarkFailed) WITHOUT calling the provider. A store error fails
+	// CLOSED: release the side-effect-free claim and let River retry, because
+	// silently sending would break the published "addresses e2a will refuse to
+	// send to" contract (GET /v1/account/suppressions). The check is scoped to
+	// the message's owning account (SendJob.UserID).
+	suppressed, serr := w.store.SuppressedRecipients(ctx, j.UserID, j.Recipients)
+	if serr != nil {
+		if rerr := w.store.ReleaseSend(ctx, j.MessageID, job.ID); rerr != nil {
+			return fmt.Errorf("release outbound send claim after suppression-check failure: %w", rerr)
+		}
+		return fmt.Errorf("suppression check before outbound send: %w", serr)
+	}
+	if len(suppressed) > 0 {
+		supErr := fmt.Errorf("recipient_suppressed: %s — remove via DELETE /v1/account/suppressions/{address}", strings.Join(suppressed, ", "))
+		w.markFailed(ctx, j.MessageID, job.Attempt, supErr.Error())
+		return river.JobCancel(supErr)
 	}
 
 	out := w.deliverer.Deliver(ctx, j)
