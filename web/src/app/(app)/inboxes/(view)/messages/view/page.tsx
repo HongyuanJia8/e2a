@@ -29,6 +29,10 @@ import type {
 import { Chip, Dot, Eyebrow, InkConsole, type InkLine } from "@e2a/ui";
 import { Collapsible } from "../../../../../components/messages/Collapsible";
 import { EmailHtmlBody } from "../../../../../components/messages/EmailHtmlBody";
+import {
+  AttachmentChips,
+  downloadableAttachments,
+} from "../../../../../components/messages/AttachmentChips";
 import { MessageDirectionIcon } from "../../../../../components/messages/MessageDirectionIcon";
 import {
   MessageLifecycleTimeline,
@@ -585,6 +589,12 @@ function BodyCard({
   }, [msg]);
 
   const isOutbound = msg.direction === "outbound";
+  // Inbound attachments: inline images (cid-referenced) render in the body; the
+  // rest surface as download chips. The owning agent is the delivered-to
+  // recipient — the email the attachment endpoint is keyed by.
+  const attachments = msg.direction === "inbound" ? msg.data.attachments ?? [] : [];
+  const agentEmail = msg.direction === "inbound" ? msg.data.recipient : "";
+  const chipAttachments = downloadableAttachments(attachments, bodyHtml);
   // A non-pending outbound row with no body_text is a sent/scrubbed
   // draft — its body is no longer available. Keyed off the threaded
   // pending flag rather than the (delivery-rollup) detail `status`.
@@ -635,13 +645,25 @@ function BodyCard({
               Body no longer available (scrubbed after delivery).
             </span>
           ) : bodyHtml.trim() !== "" ? (
-            <EmailHtmlBody html={bodyHtml} />
+            <EmailHtmlBody
+              html={bodyHtml}
+              attachments={attachments}
+              email={agentEmail}
+              messageId={msg.data.id}
+            />
           ) : (
             bodyText || (
               <span style={{ color: "var(--fg-muted)", fontStyle: "italic" }}>
                 (message body not available)
               </span>
             )
+          )}
+          {!isTerminal && chipAttachments.length > 0 && agentEmail && (
+            <AttachmentChips
+              email={agentEmail}
+              messageId={msg.data.id}
+              attachments={chipAttachments}
+            />
           )}
         </div>
       )}

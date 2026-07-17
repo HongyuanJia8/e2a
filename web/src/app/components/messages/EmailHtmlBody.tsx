@@ -5,8 +5,13 @@
 //   2. The cleaned markup is rendered inside a sandboxed <iframe srcdoc> with
 //      NO allow-scripts — so even if something slipped past the sanitizer it
 //      cannot execute, touch cookies, or reach the dashboard DOM.
-// Remote images are blocked by default (tracking-pixel / read-receipt defense,
-// the Gmail convention) and loaded only when the user opts in.
+//
+// Inline images (attachments the body references by a `cid:` URL — e.g. a
+// pasted screenshot) are resolved to data:/blob: URLs of the fetched bytes and
+// rendered BY DEFAULT: they travelled with the mail and are not a remote
+// tracking vector. Remote http(s) images ARE blocked by default (tracking-pixel
+// / read-receipt defense, the Gmail convention) and loaded only when the user
+// opts in.
 //
 // The iframe keeps `allow-same-origin` (so we can measure its content height to
 // auto-size) and `allow-popups` (so sanitized links can open in a new tab via
@@ -15,10 +20,30 @@
 
 import DOMPurify from "dompurify";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { loadInlineAttachmentUrl } from "../onboarding/api";
+import type { AttachmentMeta } from "../types";
+import { findCidRefs, rewriteCidImages } from "./inlineImages";
+
+// isRemoteUrl reports whether a single URL points off-origin over the network
+// (http/https/protocol-relative). data:/relative URLs are NOT remote — a data:
+// URL is self-contained (an inline image we resolved) and must survive the
+// remote-image block. Scheme is checked at the START so a "//" inside base64
+// data can't be mistaken for a protocol-relative host.
+function isRemoteUrl(v: string): boolean {
+  const s = v.trim().toLowerCase();
+  return s.startsWith("http://") || s.startsWith("https://") || s.startsWith("//");
+}
+
+// isRemoteSrcset reports whether a srcset (comma-separated `url descriptor`
+// candidates) references any remote URL.
+function isRemoteSrcset(v: string): boolean {
+  return v.split(",").some((cand) => isRemoteUrl(cand.trim().split(/\s+/)[0] ?? ""));
+}
 
 // sanitizeEmail cleans the raw email HTML. When showImages is false it also
-// neutralizes remote image sources (img src/srcset and CSS url() backgrounds),
-// reporting whether anything was actually blocked so the caller can offer a
+// neutralizes REMOTE image sources (img src/srcset and CSS url() backgrounds)
+// while leaving already-resolved inline data:/blob: images intact, reporting
+// whether any remote resource was actually blocked so the caller can offer a
 // "Load images" affordance only when it matters.
 function sanitizeEmail(
   html: string,
@@ -34,20 +59,33 @@ function sanitizeEmail(
       el.setAttribute("rel", "noopener noreferrer nofollow");
     }
     if (!showImages) {
-      // Strip every remote-resource carrier so the "Load images" banner is
-      // honest (blockedRemote reflects what was actually present). This is the
-      // belt; the CSP injected in wrapDocument is the authoritative block that
-      // also covers CSS-escaped url() and any vector missed here.
-      for (const attr of ["src", "srcset", "background", "poster"] as const) {
-        if (el.getAttribute?.(attr)) {
+      // Strip only REMOTE resource carriers so inline (data:/blob:) images we
+      // resolved still render; blockedRemote reflects what was actually blocked.
+      // This is the belt; the CSP injected in wrapDocument is the authoritative
+      // block that also covers CSS-escaped url() and any vector missed here.
+      for (const attr of ["src", "background", "poster"] as const) {
+        const val = el.getAttribute?.(attr);
+        if (val && isRemoteUrl(val)) {
           blockedRemote = true;
           el.removeAttribute(attr);
         }
       }
+      const srcset = el.getAttribute?.("srcset");
+      if (srcset && isRemoteSrcset(srcset)) {
+        blockedRemote = true;
+        el.removeAttribute("srcset");
+      }
       const style = el.getAttribute?.("style");
       if (style && /url\s*\(/i.test(style)) {
-        blockedRemote = true;
-        el.setAttribute("style", style.replace(/url\s*\([^)]*\)/gi, "none"));
+        // Neutralize only remote url()s; keep inline data:/blob: backgrounds.
+        const next = style.replace(/url\s*\(\s*(['"]?)([^)'"]*)\1\s*\)/gi, (whole, _q, inner) => {
+          if (isRemoteUrl(inner)) {
+            blockedRemote = true;
+            return "none";
+          }
+          return whole;
+        });
+        el.setAttribute("style", next);
       }
     }
   });
@@ -67,11 +105,10 @@ function sanitizeEmail(
 // images, and a base target so links open in a new tab.
 //
 // The Content-Security-Policy is the AUTHORITATIVE control, not the DOMPurify
-// hook: `default-src 'none'` blocks scripts/frames/objects/fetches outright,
-// and when images are blocked `img-src data:` (no http/https) defeats every
-// remote-resource vector at once — <img>, CSS url() (including CSS-escaped
-// forms), <td background>, <video poster>, <source srcset>, web fonts — so the
-// tracking-pixel block can't be bypassed by markup the hook didn't anticipate.
+// hook: `default-src 'none'` blocks scripts/frames/objects/fetches outright.
+// Inline images (resolved to data: URLs) are always allowed — they are trusted
+// content that travelled with the mail; only when the user loads images does
+// `img-src` gain http:/https:, defeating remote-tracking vectors until then.
 function wrapDocument(innerHTML: string, showImages: boolean): string {
   const csp = showImages
     ? "default-src 'none'; img-src http: https: data:; media-src http: https: data:; style-src 'unsafe-inline'; font-src http: https: data:"
@@ -95,13 +132,60 @@ function wrapDocument(innerHTML: string, showImages: boolean): string {
   );
 }
 
-export function EmailHtmlBody({ html }: { html: string }) {
+export function EmailHtmlBody({
+  html,
+  attachments,
+  email,
+  messageId,
+}: {
+  html: string;
+  attachments?: AttachmentMeta[];
+  email?: string;
+  messageId?: string;
+}) {
   const [showImages, setShowImages] = useState(false);
+  const [cidUrls, setCidUrls] = useState<Map<string, string>>(() => new Map());
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
+  // Resolve inline (cid:) images: match each `cid:` reference in the body to an
+  // attachment by content_id, fetch its bytes, and build a cid→URL map. Runs
+  // whenever the body or its attachment set changes; object URLs are revoked on
+  // cleanup. No-op when we lack the message coordinates needed to fetch bytes.
+  useEffect(() => {
+    if (!email || !messageId) return;
+    const refs = findCidRefs(html);
+    if (refs.size === 0) return;
+    const inline = (attachments ?? []).filter(
+      (a) => a.content_id && refs.has(a.content_id),
+    );
+    if (inline.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      const resolved = new Map<string, string>();
+      await Promise.all(
+        inline.map(async (a) => {
+          try {
+            const { url } = await loadInlineAttachmentUrl(email, messageId, a);
+            if (!cancelled) resolved.set(a.content_id as string, url);
+          } catch {
+            /* leave this image unresolved — it degrades to a broken icon */
+          }
+        }),
+      );
+      if (!cancelled && resolved.size > 0) setCidUrls(resolved);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [html, attachments, email, messageId]);
+
+  const resolvedHtml = useMemo(() => rewriteCidImages(html, cidUrls), [html, cidUrls]);
+
   const { clean, blockedRemote } = useMemo(
-    () => sanitizeEmail(html, showImages),
-    [html, showImages],
+    () => sanitizeEmail(resolvedHtml, showImages),
+    [resolvedHtml, showImages],
   );
   const srcDoc = useMemo(() => wrapDocument(clean, showImages), [clean, showImages]);
 

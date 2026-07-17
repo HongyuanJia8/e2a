@@ -25,7 +25,7 @@ func attMultipart() []byte {
 		"Content-Type: multipart/mixed; boundary=B\r\n\r\n" +
 		"--B\r\nContent-Type: text/plain\r\n\r\nbody\r\n" +
 		"--B\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=\"report.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\n" + pdf + "\r\n" +
-		"--B\r\nContent-Type: image/png\r\nContent-Disposition: inline; filename=\"logo.png\"\r\nContent-Transfer-Encoding: base64\r\n\r\n" + png + "\r\n" +
+		"--B\r\nContent-Type: image/png\r\nContent-Disposition: inline; filename=\"logo.png\"\r\nContent-ID: <ii_logo@mail.gmail.com>\r\nContent-Transfer-Encoding: base64\r\n\r\n" + png + "\r\n" +
 		"--B--\r\n")
 }
 
@@ -118,6 +118,16 @@ func TestAttachment_MetadataAndSignedURL(t *testing.T) {
 	}
 	if _, hasData := body["data"]; hasData {
 		t.Errorf("data must NOT be present without inline=true: %v", body)
+	}
+	// The PDF is an ordinary attachment — no Content-ID.
+	if cid, present := body["content_id"]; present {
+		t.Errorf("non-inline attachment should omit content_id, got %v", cid)
+	}
+	// The inline image (index 1) carries its Content-ID (brackets stripped) so a
+	// renderer can resolve the body's `cid:` reference to it.
+	_, img := getJSONAtt(t, srv.URL+"/v1/agents/support%40acme.com/messages/msg_att/attachments/1", "acct")
+	if img["content_id"] != "ii_logo@mail.gmail.com" {
+		t.Errorf("inline image content_id want %q, got %v", "ii_logo@mail.gmail.com", img["content_id"])
 	}
 }
 

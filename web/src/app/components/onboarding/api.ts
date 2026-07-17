@@ -7,6 +7,7 @@ import type {
   ProtectionConfig,
 } from "./types";
 import type {
+  AttachmentMeta,
   DashboardAgent,
   InboundMessageDetail,
   ListMessagesResponse,
@@ -337,6 +338,7 @@ type MessageViewWire = {
   // Backend-derived body: `text` (injection-reduced) for any message with raw
   // MIME, plus `html` (decoded text/html part) for rich display when present.
   parsed?: { text?: string; html?: string };
+  attachments?: AttachmentMeta[];
   raw_message?: string;
 };
 
@@ -428,9 +430,101 @@ export async function getMessageDetail(
       auth_headers: w.auth_headers ?? {},
       parsed: w.parsed,
       body: w.body,
+      attachments: w.attachments ?? [],
       raw_message: w.raw_message ?? "",
     },
   };
+}
+
+// ── Attachments ──────────────────────────────────────────
+
+// Wire shape of AttachmentView (GET …/messages/{id}/attachments/{index}):
+// metadata + a short-lived signed download_url; `data` (base64) is present
+// only when `?inline=true` was requested for an attachment within the 256 KB
+// inline cap.
+type AttachmentViewWire = {
+  index: number;
+  filename?: string;
+  content_type?: string;
+  content_id?: string;
+  size_bytes: number;
+  download_url: string;
+  expires_at: string;
+  data?: string;
+};
+
+// GET one attachment's metadata + a short-lived signed download_url. Pass
+// inline=true to also receive base64 `data` for small attachments (≤256 KB);
+// the server rejects larger inline requests (413).
+export async function getAttachment(
+  email: string,
+  messageId: string,
+  index: number,
+  opts?: { inline?: boolean },
+): Promise<AttachmentViewWire> {
+  const q = opts?.inline ? "?inline=true" : "";
+  return request<AttachmentViewWire>(
+    "/v1/agents/" +
+      encodeURIComponent(email) +
+      "/messages/" +
+      encodeURIComponent(messageId) +
+      "/attachments/" +
+      index +
+      q,
+  );
+}
+
+// The largest attachment the backend will base64-inline (`?inline=true`); must
+// mirror httpapi.attachmentInlineMaxBytes. At/below it we fetch one JSON
+// round-trip that already carries the base64; above it we stream the bytes and
+// encode them client-side.
+const ATTACHMENT_INLINE_CAP = 256 * 1024;
+
+// Strip an absolute download_url down to a same-origin path so the browser
+// fetches it through the dashboard's own /v1 proxy (the signed token, not a
+// cookie, authorizes it) — avoiding a cross-origin request to the API host.
+function sameOriginPath(absoluteURL: string): string {
+  try {
+    const u = new URL(absoluteURL);
+    return u.pathname + u.search;
+  } catch {
+    return absoluteURL; // already relative
+  }
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+// Load one inline image's bytes as a `data:` URL usable inside the email
+// iframe. Small images come straight back base64-encoded from the inline
+// endpoint (one round-trip); larger ones stream through the signed download URL
+// and are encoded client-side. A data: URL is used (not blob:) because
+// DOMPurify's URI filter permits data: images but not blob:, and the sandboxed
+// iframe's CSP already allows `img-src data:`. Base64 in the browser is a
+// memory concern only — never the agent-context concern the API's inline cap
+// guards, so any size is fine to render here.
+export async function loadInlineAttachmentUrl(
+  email: string,
+  messageId: string,
+  meta: AttachmentMeta,
+): Promise<{ url: string }> {
+  const contentType = meta.content_type || "application/octet-stream";
+  if (meta.size_bytes <= ATTACHMENT_INLINE_CAP) {
+    const a = await getAttachment(email, messageId, meta.index, { inline: true });
+    if (a.data) {
+      return { url: `data:${contentType};base64,${a.data}` };
+    }
+  }
+  const a = await getAttachment(email, messageId, meta.index);
+  const res = await fetch(sameOriginPath(a.download_url), { credentials: "include" });
+  if (!res.ok) throw new ApiError("attachment fetch failed", res.status);
+  return { url: await blobToDataUrl(await res.blob()) };
 }
 
 // ── Protection config (review-queue holds) ──────────────
