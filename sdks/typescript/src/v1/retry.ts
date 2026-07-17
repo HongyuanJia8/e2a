@@ -145,7 +145,8 @@ export class RetryHttpLibrary implements HttpLibrary {
   //   - HTTP-idempotent writes (PUT/PATCH/DELETE) — repeating reaches the same
   //     end state — EXCEPT account deletion, which is irreversible and whose
   //     post-success retry would surface a spurious 404 to the caller;
-  //   - server-deduped POSTs (send/reply/forward/approve, rotate-secret),
+  //   - server-deduped POSTs (send/reply/forward/approve, rotate-secret,
+  //     create-api-key),
   //     recognised by the Idempotency-Key header the generated layer emits ONLY
   //     for those ops — the server replays the first result on a keyed retry.
   // Every other POST (create agent/domain/webhook, reject, verify, redeliver,
@@ -172,7 +173,7 @@ export class RetryHttpLibrary implements HttpLibrary {
   }
 
   // The generated layer sets an Idempotency-Key header param (possibly an empty
-  // stub) on exactly the four server-deduped POSTs. Its mere presence — not its
+  // stub) on the server-deduped POSTs. Its mere presence — not its
   // value — marks an op the server will dedupe, hence safe to retry.
   private hasIdempotencyHeader(request: RequestContext): boolean {
     const headers = request.getHeaders();
@@ -216,8 +217,8 @@ export class RetryHttpLibrary implements HttpLibrary {
   // means every retry of this request reuses the same key.
   //
   // The generated layer calls setHeaderParam("Idempotency-Key", serialize(undefined))
-  // on send/reply/forward/approve, leaving the header *present but empty* when the
-  // caller passed no key. So "present" isn't enough to mean "caller-supplied" —
+  // on send/reply/forward/approve/create-api-key, leaving the header *present but
+  // empty* when the caller passed no key. So "present" isn't enough to mean "caller-supplied" —
   // only a non-empty value counts; otherwise we mint (overwriting the empty stub).
   private ensureIdempotencyKey(request: RequestContext): void {
     if (request.getHttpMethod() !== HttpMethod.POST) return;

@@ -34,8 +34,9 @@ const (
 
 // runIdempotent executes fn under a caller-supplied `Idempotency-Key` header
 // and returns the (status, body) to emit. It is the one place the v1 write
-// endpoints (send/reply/forward/approve) get retry-safety, replacing the
-// legacy capturingWriter (which doesn't fit Huma's return-value handler model).
+// endpoints (send/reply/forward/approve/rotate-secret/create-api-key) get
+// retry-safety, replacing the legacy capturingWriter (which doesn't fit
+// Huma's return-value handler model).
 //
 // Semantics (api-v1-redesign §4 decision 8):
 //   - No key, or no store wired → just run fn (idempotency is opt-in).

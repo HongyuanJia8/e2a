@@ -27,6 +27,7 @@ from e2a.v1.generated.models import (
     APIKeyView,
     AttachmentView,
     ConversationSummaryView,
+    CreateAPIKeyResponse,
     DomainView,
     EventJSON,
     ErrorBody,
@@ -432,6 +433,53 @@ async def test_send_uses_caller_idempotency_key(httpx_mock):
             idempotency_key="caller-key-123",
         )
     assert httpx_mock.get_requests()[-1].headers["Idempotency-Key"] == "caller-key-123"
+
+
+@pytest.mark.anyio
+async def test_create_api_key_retries_with_one_idempotency_key(httpx_mock):
+    httpx_mock.add_response(
+        status_code=503,
+        json={"error": {"code": "internal_error", "message": "down", "request_id": "req_1"}},
+    )
+    httpx_mock.add_response(
+        status_code=201,
+        json=_valid(
+            CreateAPIKeyResponse,
+            id="apk_1",
+            key="e2a_account_secret",
+            key_prefix="e2a_acct_abcd",
+            scope="account",
+        ),
+    )
+
+    async with _client() as c:
+        created = await c.account.api_keys.create({"name": "ci"})
+
+    assert created.id == "apk_1"
+    requests = httpx_mock.get_requests()
+    assert len(requests) == 2
+    keys = [request.headers.get("Idempotency-Key") for request in requests]
+    assert keys[0]
+    assert keys[1] == keys[0]
+
+
+@pytest.mark.anyio
+async def test_create_api_key_uses_caller_idempotency_key(httpx_mock):
+    httpx_mock.add_response(
+        status_code=201,
+        json=_valid(
+            CreateAPIKeyResponse,
+            id="apk_1",
+            key="e2a_account_secret",
+            key_prefix="e2a_acct_abcd",
+            scope="account",
+        ),
+    )
+
+    async with _client() as c:
+        await c.account.api_keys.create({"name": "ci"}, idempotency_key="create-key-123")
+
+    assert httpx_mock.get_requests()[-1].headers["Idempotency-Key"] == "create-key-123"
 
 
 @pytest.mark.anyio
