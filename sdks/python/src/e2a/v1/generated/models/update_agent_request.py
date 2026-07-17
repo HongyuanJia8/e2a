@@ -27,7 +27,7 @@ class UpdateAgentRequest(BaseModel):
     """
     UpdateAgentRequest
     """ # noqa: E501
-    name: Optional[Annotated[str, Field(strict=True, max_length=200)]] = Field(default=None, description="New display name for the agent (a UI label; the agent's identity is its email).")
+    name: Optional[Annotated[str, Field(strict=True, max_length=200)]] = Field(default=None, description="New display name for the agent (a UI label; the agent's identity is its email). At most 200 characters (Unicode code points) — the same cap as createAgent.")
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["name"]
 

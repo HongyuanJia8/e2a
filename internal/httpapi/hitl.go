@@ -33,9 +33,16 @@ type RejectResultView struct {
 	RejectionReason string `json:"rejection_reason,omitempty"`
 }
 
+// maxRejectReasonLen bounds the reviewer-supplied rejection reason. Enforced
+// declaratively via the maxLength struct tag (Huma validates in Unicode code
+// points); TestGABoundTagsMatchConsts guards tag/const drift. Aliased to the
+// canonical identity.MaxRejectReasonLen so this and the magic-link reject
+// form (internal/agent, which clamps) share one source of truth.
+const maxRejectReasonLen = identity.MaxRejectReasonLen
+
 // RejectRequest is the reject body (MSG-10, was the inline RejectInputBody).
 type RejectRequest struct {
-	Reason string `json:"reason,omitempty"`
+	Reason string `json:"reason,omitempty" maxLength:"2000" doc:"Optional reviewer note explaining the rejection — echoed back as the held message's rejection_reason. At most 2000 characters (Unicode code points)."`
 }
 
 type rejectOutput struct {

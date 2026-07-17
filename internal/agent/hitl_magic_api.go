@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tokencanopy/e2a/internal/approvaltoken"
 	"github.com/tokencanopy/e2a/internal/identity"
@@ -118,7 +119,23 @@ func (a *API) handleRejectMagicLinkPost(w http.ResponseWriter, r *http.Request) 
 	if reason == "" {
 		reason = "magic-link rejection"
 	}
+	// Human-facing HTML form: CLAMP to the shared reject-reason cap rather
+	// than failing the whole rejection over a long note — the reviewer's
+	// decision matters more than the note's tail. The /v1 API path rejects
+	// (422) instead; both count Unicode code points against the same
+	// identity.MaxRejectReasonLen.
+	reason = clampRunes(reason, identity.MaxRejectReasonLen)
 	a.magicReject(w, r, claims.MessageID, userID, reason)
+}
+
+// clampRunes truncates s to at most n Unicode code points (runes, matching
+// the OpenAPI maxLength semantics of the equivalent /v1 field — never bytes,
+// which could split a multi-byte character).
+func clampRunes(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n])
 }
 
 // extractFormToken pulls the token from standard form encoding. Request

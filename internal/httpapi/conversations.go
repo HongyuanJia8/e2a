@@ -188,9 +188,8 @@ func (s *Server) handleGetConversation(ctx context.Context, in *ConversationIDPa
 	if err != nil {
 		return nil, err
 	}
-	if len(in.ConversationID) > maxFilterStr {
-		return nil, NewError(http.StatusBadRequest, "invalid_request", "conversation_id too long (max 200 chars)")
-	}
+	// Length (200, counted in runes so any stored conversation_id the request
+	// schemas admit stays fetchable) + CR/LF via the shared check.
 	if err := validateConversationID(in.ConversationID); err != nil {
 		return nil, NewError(http.StatusBadRequest, "invalid_request", err.Error())
 	}

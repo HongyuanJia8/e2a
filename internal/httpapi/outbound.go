@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5"
@@ -171,6 +172,24 @@ const (
 	// canonical outbound.MaxComposedMessageBytes so this and the HITL approve-
 	// override path (internal/agent) share one source of truth.
 	maxComposedMessageBytes = outbound.MaxComposedMessageBytes
+
+	// maxConversationIDLen caps a caller-supplied conversation_id, in Unicode
+	// code points (the maxLength semantics Huma enforces). Deliberately equal
+	// to the webhook filter-value cap (webhookMaxFilterValueLen = 200) and the
+	// message-list filter cap (maxFilterStr = 200) so EVERY accepted
+	// conversation_id remains usable as a filter value. Enforced declaratively
+	// via maxLength struct tags AND at runtime by validateConversationID (the
+	// shared backstop for non-schema paths).
+	maxConversationIDLen = 200
+
+	// maxEmailAddressLen caps any single email-address-bearing request string —
+	// a to/cc/bcc recipient item (display name + <addr> combined), a reply_to
+	// override, or an agent email — in Unicode code points. Aliased to the
+	// canonical agent.MaxAddressLen so the schema tags and the runtime
+	// recipient validation (agent.ValidateRecipients) share one source of
+	// truth. On array fields the maxLength tag applies to EACH ITEM (Huma puts
+	// scalar constraints on the items schema).
+	maxEmailAddressLen = agent.MaxAddressLen
 )
 
 // maxRecipients caps the combined to+cc+bcc fan-out of a single outbound
@@ -203,17 +222,17 @@ func recipientCountError(groups ...[]string) *ErrorEnvelope {
 // processing. subject/text moved from schema-required to handler-enforced so
 // the template shape can omit them.
 type SendEmailRequest struct {
-	To             []string              `json:"to" nullable:"false" doc:"Primary recipients. The message is limited to 50 recipients across to, cc, and bcc combined."`
-	CC             []string              `json:"cc,omitempty" nullable:"false" doc:"Cc recipients. The message is limited to 50 recipients across to, cc, and bcc combined."`
-	BCC            []string              `json:"bcc,omitempty" nullable:"false" doc:"Bcc recipients. The message is limited to 50 recipients across to, cc, and bcc combined."`
+	To             []string              `json:"to" nullable:"false" maxLength:"320" doc:"Primary recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters."`
+	CC             []string              `json:"cc,omitempty" nullable:"false" maxLength:"320" doc:"Cc recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters."`
+	BCC            []string              `json:"bcc,omitempty" nullable:"false" maxLength:"320" doc:"Bcc recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters."`
 	Subject        string                `json:"subject,omitempty" maxLength:"2000" doc:"Literal subject. Required unless a template reference is used (mutually exclusive with template_id/template_alias)."`
 	Body           string                `json:"text,omitempty" maxLength:"1048576" doc:"Literal plain-text body. Required unless a template reference is used (mutually exclusive with template_id/template_alias)."`
 	HTMLBody       string                `json:"html,omitempty" maxLength:"1048576" doc:"Literal HTML body. Mutually exclusive with template_id/template_alias."`
 	TemplateID     string                `json:"template_id,omitempty" doc:"Send using a stored template (rendered server-side, before any review hold). Mutually exclusive with template_alias and with literal subject/body/html_body. Beta: templates are unstable — their shape may change before they are declared stable."`
 	TemplateAlias  string                `json:"template_alias,omitempty" doc:"Send using a stored template resolved by its per-user alias. Mutually exclusive with template_id and with literal subject/body/html_body. Beta: templates are unstable — their shape may change before they are declared stable."`
 	TemplateData   TemplateData          `json:"template_data,omitempty" doc:"Variables for the referenced template ({{name}}, dot paths into nested objects). Missing variables render as empty strings. Beta: templates are unstable — their shape may change before they are declared stable."`
-	ConversationID string                `json:"conversation_id,omitempty"`
-	ReplyTo        string                `json:"reply_to,omitempty" doc:"Sets the Reply-To header — where replies to this message are directed. A single RFC 5322 address, optionally with a display name (e.g. \"Support <support@acme.com>\"). Defaults to the sending agent's own address."`
+	ConversationID string                `json:"conversation_id,omitempty" maxLength:"200" doc:"Caller-assigned conversation (thread) id. At most 200 characters — deliberately the same cap as the webhook conversation_ids filter-value limit and the message-list conversation_id filter limit (both 200), so an accepted conversation_id is never too long to filter by. Must not contain CR or LF."`
+	ReplyTo        string                `json:"reply_to,omitempty" maxLength:"320" doc:"Sets the Reply-To header — where replies to this message are directed. A single RFC 5322 address, optionally with a display name (e.g. \"Support <support@acme.com>\"). At most 320 characters (display name + address combined). Defaults to the sending agent's own address."`
 	Attachments    []outbound.Attachment `json:"attachments,omitempty" nullable:"false" doc:"File attachments (base64 in each item's data). Limits: at most 10 attachments, each ≤ 10 MB decoded, and ≤ 25 MB decoded combined. Exceeding the count → 400 invalid_request; exceeding a size → 413 payload_too_large."`
 }
 
@@ -327,10 +346,10 @@ type ReplyRequest struct {
 	Body           string                `json:"text" maxLength:"1048576"` // required (MSG-3); to/subject derived from the original
 	HTMLBody       string                `json:"html,omitempty" maxLength:"1048576"`
 	ReplyAll       bool                  `json:"reply_all,omitempty"`
-	CC             []string              `json:"cc,omitempty" nullable:"false" doc:"Additional Cc recipients. The final message is limited to 50 recipients across to, cc, and bcc combined."`
-	BCC            []string              `json:"bcc,omitempty" nullable:"false" doc:"Additional Bcc recipients. The final message is limited to 50 recipients across to, cc, and bcc combined."`
-	ConversationID string                `json:"conversation_id,omitempty"`
-	ReplyTo        string                `json:"reply_to,omitempty" doc:"Sets the Reply-To header — where replies to this message are directed. A single RFC 5322 address, optionally with a display name. Defaults to the sending agent's own address."`
+	CC             []string              `json:"cc,omitempty" nullable:"false" maxLength:"320" doc:"Additional Cc recipients. The final message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters."`
+	BCC            []string              `json:"bcc,omitempty" nullable:"false" maxLength:"320" doc:"Additional Bcc recipients. The final message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters."`
+	ConversationID string                `json:"conversation_id,omitempty" maxLength:"200" doc:"Caller-assigned conversation (thread) id override. At most 200 characters — deliberately the same cap as the webhook conversation_ids filter-value limit and the message-list conversation_id filter limit (both 200), so an accepted conversation_id is never too long to filter by. Must not contain CR or LF."`
+	ReplyTo        string                `json:"reply_to,omitempty" maxLength:"320" doc:"Sets the Reply-To header — where replies to this message are directed. A single RFC 5322 address, optionally with a display name. At most 320 characters (display name + address combined). Defaults to the sending agent's own address."`
 	Attachments    []outbound.Attachment `json:"attachments,omitempty" nullable:"false" doc:"File attachments (base64 in each item's data). Limits: at most 10 attachments, each ≤ 10 MB decoded, and ≤ 25 MB decoded combined. Exceeding the count → 400 invalid_request; exceeding a size → 413 payload_too_large."`
 }
 
@@ -460,13 +479,13 @@ func (s *Server) replyRecipients(msg *identity.Message, replyAll bool, extraCC [
 
 // ForwardRequest mirrors the legacy forward body.
 type ForwardRequest struct {
-	To             []string              `json:"to" nullable:"false" doc:"Primary recipients. The message is limited to 50 recipients across to, cc, and bcc combined."` // required (MSG-3)
-	CC             []string              `json:"cc,omitempty" nullable:"false" doc:"Cc recipients. The message is limited to 50 recipients across to, cc, and bcc combined."`
-	BCC            []string              `json:"bcc,omitempty" nullable:"false" doc:"Bcc recipients. The message is limited to 50 recipients across to, cc, and bcc combined."`
+	To             []string              `json:"to" nullable:"false" maxLength:"320" doc:"Primary recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters."` // required (MSG-3)
+	CC             []string              `json:"cc,omitempty" nullable:"false" maxLength:"320" doc:"Cc recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters."`
+	BCC            []string              `json:"bcc,omitempty" nullable:"false" maxLength:"320" doc:"Bcc recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters."`
 	Body           string                `json:"text" maxLength:"1048576"` // required (MSG-3); subject derived as "Fwd:"
 	HTMLBody       string                `json:"html,omitempty" maxLength:"1048576"`
-	ConversationID string                `json:"conversation_id,omitempty"`
-	ReplyTo        string                `json:"reply_to,omitempty" doc:"Sets the Reply-To header — where replies to this message are directed. A single RFC 5322 address, optionally with a display name. Defaults to the sending agent's own address."`
+	ConversationID string                `json:"conversation_id,omitempty" maxLength:"200" doc:"Caller-assigned conversation (thread) id override. At most 200 characters — deliberately the same cap as the webhook conversation_ids filter-value limit and the message-list conversation_id filter limit (both 200), so an accepted conversation_id is never too long to filter by. Must not contain CR or LF."`
+	ReplyTo        string                `json:"reply_to,omitempty" maxLength:"320" doc:"Sets the Reply-To header — where replies to this message are directed. A single RFC 5322 address, optionally with a display name. At most 320 characters (display name + address combined). Defaults to the sending agent's own address."`
 	Attachments    []outbound.Attachment `json:"attachments,omitempty" nullable:"false" doc:"Additional attachments to include alongside the forwarded message's original attachments, which are carried over automatically. Limits apply to the combined set (originals + these): at most 10 attachments, each ≤ 10 MB decoded, and ≤ 25 MB decoded combined. Exceeding the count → 400 invalid_request; exceeding a size → 413 payload_too_large."`
 }
 
@@ -579,6 +598,14 @@ func composedMessageSizeError(subject, text, html string, atts []outbound.Attach
 func validateReplyTo(replyTo string) *ErrorEnvelope {
 	if replyTo == "" {
 		return nil
+	}
+	// Length bound BEFORE parsing (runes, matching the schema maxLength
+	// semantics) so an oversized string is rejected on a cheap count, never
+	// handed to the address parser. The schema tag rejects this at the edge
+	// for /v1 bodies; this is the shared runtime backstop.
+	if n := utf8.RuneCountInString(replyTo); n > maxEmailAddressLen {
+		return NewError(http.StatusBadRequest, "invalid_request",
+			fmt.Sprintf("reply_to too long — %d characters, max %d (display name + address combined)", n, maxEmailAddressLen))
 	}
 	addrs, err := mail.ParseAddressList(replyTo)
 	if err != nil {

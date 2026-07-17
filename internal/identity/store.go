@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -1118,6 +1119,11 @@ type agentExecutor interface {
 }
 
 func createAgent(ctx context.Context, exec agentExecutor, agentEmail, domain, name, userID string) (*AgentIdentity, error) {
+	// Same display-name bound as UpdateAgentName (one shared constant +
+	// check), so create and update can never disagree on the cap.
+	if err := ValidateAgentName(name); err != nil {
+		return nil, err
+	}
 	a := &AgentIdentity{
 		ID:                   agentEmail,
 		Domain:               normalizeDomain(domain),
@@ -1211,15 +1217,41 @@ func (s *Store) UpdateAgentInboundPolicy(ctx context.Context, agentID, userID, p
 	return nil
 }
 
-// maxAgentNameLen bounds the agent display name (a UI label, not an identifier).
-const maxAgentNameLen = 200
+// MaxAgentNameLen bounds the agent display name (a UI label, not an
+// identifier). It is the single source of truth shared by the create and
+// update paths: the /v1 request schemas declare it as maxLength (validated by
+// Huma in Unicode code points) and ValidateAgentName enforces the same
+// rune-count semantics here, so the spec and the runtime always agree.
+const MaxAgentNameLen = 200
+
+// MaxAPIKeyNameLen bounds the API-key display name (a human label, not an
+// identifier). One source of truth for every entry path: the /v1 createApiKey
+// schema tag AND the legacy dashboard POST /api/keys handler (internal/auth).
+// Counted in Unicode code points, matching OpenAPI maxLength semantics.
+const MaxAPIKeyNameLen = 200
+
+// MaxRejectReasonLen bounds a reviewer-supplied rejection reason. One source
+// of truth for every entry path: the /v1 rejectReview schema tag AND the
+// magic-link reject form (internal/agent), which clamps rather than fails a
+// human's rejection. Counted in Unicode code points.
+const MaxRejectReasonLen = 2000
+
+// ValidateAgentName checks the display-name bound. The length is counted in
+// Unicode code points (runes), NOT bytes, to match the OpenAPI maxLength
+// semantics of the /v1 request schemas (JSON Schema counts code points).
+func ValidateAgentName(name string) error {
+	if n := utf8.RuneCountInString(name); n > MaxAgentNameLen {
+		return fmt.Errorf("name has %d characters, max %d", n, MaxAgentNameLen)
+	}
+	return nil
+}
 
 // UpdateAgentName sets an agent's display name for an agent owned by userID.
 // The name is a UI label only — the agent's identity is its email. Returns an
 // error if the agent isn't found or not owned.
 func (s *Store) UpdateAgentName(ctx context.Context, agentID, userID, name string) error {
-	if len(name) > maxAgentNameLen {
-		return fmt.Errorf("name has %d characters, max %d", len(name), maxAgentNameLen)
+	if err := ValidateAgentName(name); err != nil {
+		return err
 	}
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE agent_identities SET name = $3 WHERE id = $1 AND user_id = $2`,

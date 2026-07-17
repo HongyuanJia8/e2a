@@ -17,8 +17,9 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictStr
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List, Optional
+from typing_extensions import Annotated
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -26,7 +27,7 @@ class RejectRequest(BaseModel):
     """
     RejectRequest
     """ # noqa: E501
-    reason: Optional[StrictStr] = None
+    reason: Optional[Annotated[str, Field(strict=True, max_length=2000)]] = Field(default=None, description="Optional reviewer note explaining the rejection — echoed back as the held message's rejection_reason. At most 2000 characters (Unicode code points).")
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["reason"]
 

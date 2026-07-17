@@ -19,20 +19,23 @@ export class SendEmailRequest {
     */
     'attachments'?: Array<Attachment>;
     /**
-    * Bcc recipients. The message is limited to 50 recipients across to, cc, and bcc combined.
+    * Bcc recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.
     */
     'bcc'?: Array<string>;
     /**
-    * Cc recipients. The message is limited to 50 recipients across to, cc, and bcc combined.
+    * Cc recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.
     */
     'cc'?: Array<string>;
+    /**
+    * Caller-assigned conversation (thread) id. At most 200 characters — deliberately the same cap as the webhook conversation_ids filter-value limit and the message-list conversation_id filter limit (both 200), so an accepted conversation_id is never too long to filter by. Must not contain CR or LF.
+    */
     'conversationId'?: string;
     /**
     * Literal HTML body. Mutually exclusive with template_id/template_alias.
     */
     'html'?: string;
     /**
-    * Sets the Reply-To header — where replies to this message are directed. A single RFC 5322 address, optionally with a display name (e.g. \"Support <support@acme.com>\"). Defaults to the sending agent\'s own address.
+    * Sets the Reply-To header — where replies to this message are directed. A single RFC 5322 address, optionally with a display name (e.g. \"Support <support@acme.com>\"). At most 320 characters (display name + address combined). Defaults to the sending agent\'s own address.
     */
     'replyTo'?: string;
     /**
@@ -56,7 +59,7 @@ export class SendEmailRequest {
     */
     'text'?: string;
     /**
-    * Primary recipients. The message is limited to 50 recipients across to, cc, and bcc combined.
+    * Primary recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.
     */
     'to': Array<string>;
 

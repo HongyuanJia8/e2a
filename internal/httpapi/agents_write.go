@@ -36,8 +36,8 @@ func isUniqueViolation(err error) bool {
 // the deployment's shared domain (e.g. xyz@agents.e2a.dev) — detected by the
 // domain, not a separate `slug` field. The legacy `slug` field is dropped.
 type CreateAgentRequest struct {
-	Email string `json:"email"`
-	Name  string `json:"name,omitempty"`
+	Email string `json:"email" maxLength:"320" doc:"The agent's full email address — its identity. At most 320 characters (Unicode code points)."`
+	Name  string `json:"name,omitempty" maxLength:"200" doc:"Display name for the agent (a UI label; the agent's identity is its email). At most 200 characters (Unicode code points) — the same cap as updateAgent."`
 }
 
 type createAgentInput struct {
@@ -134,7 +134,7 @@ func (s *Server) registerAgentWrites() {
 // 2026-06-22), so the only mutable field left on the agent itself is the
 // display name. Pointer so absent != "" (an empty name is a valid clear).
 type UpdateAgentRequest struct {
-	Name *string `json:"name,omitempty" maxLength:"200" doc:"New display name for the agent (a UI label; the agent's identity is its email)."`
+	Name *string `json:"name,omitempty" maxLength:"200" doc:"New display name for the agent (a UI label; the agent's identity is its email). At most 200 characters (Unicode code points) — the same cap as createAgent."`
 }
 
 type updateAgentInput struct {

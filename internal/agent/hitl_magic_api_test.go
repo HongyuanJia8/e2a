@@ -333,6 +333,38 @@ func TestMagicRejectPOSTWithReason(t *testing.T) {
 	}
 }
 
+// The magic-link form is a human-facing entry path around the /v1 schema, so
+// an over-long reason is CLAMPED to the shared identity.MaxRejectReasonLen
+// (2000 Unicode code points — runes, not bytes: the fixture uses 3-byte CJK
+// characters) rather than failing the rejection. The stored reason is exactly
+// the first 2000 code points.
+func TestMagicRejectPOSTClampsOverlongReason(t *testing.T) {
+	server, store, signer, _ := setupMagicLinkAPI(t)
+	a, userID := prepareHITLAgent(t, store, "post-reject-clamp")
+	msg := issuePending(t, store, a.ID)
+
+	long := strings.Repeat("日", identity.MaxRejectReasonLen+100)
+	tok, _ := signer.Sign(msg.ID, approvaltoken.ActionReject, time.Now().Add(1*time.Hour))
+	resp := postForm(t, server.URL+"/v1/reject", map[string]string{
+		"t":      tok,
+		"reason": long,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST reject with over-long reason: status = %d (must clamp, not fail)", resp.StatusCode)
+	}
+
+	got, _ := store.GetOutboundMessageForUser(context.Background(), msg.ID, userID)
+	if got.Status != identity.MessageStatusReviewRejected {
+		t.Fatalf("status = %q, want rejected", got.Status)
+	}
+	want := strings.Repeat("日", identity.MaxRejectReasonLen)
+	if got.RejectionReason != want {
+		t.Errorf("rejection_reason = %d code points (%d bytes), want clamped to exactly %d code points",
+			len([]rune(got.RejectionReason)), len(got.RejectionReason), identity.MaxRejectReasonLen)
+	}
+}
+
 func TestMagicRejectPOSTWithoutReasonUsesDefault(t *testing.T) {
 	server, store, signer, _ := setupMagicLinkAPI(t)
 	a, userID := prepareHITLAgent(t, store, "post-reject-default")

@@ -13,7 +13,13 @@
 import { HttpFile } from '../http/http.js';
 
 export class CreateAgentRequest {
+    /**
+    * The agent\'s full email address — its identity. At most 320 characters (Unicode code points).
+    */
     'email': string;
+    /**
+    * Display name for the agent (a UI label; the agent\'s identity is its email). At most 200 characters (Unicode code points) — the same cap as updateAgent.
+    */
     'name'?: string;
 
     static readonly discriminator: string | undefined = undefined;

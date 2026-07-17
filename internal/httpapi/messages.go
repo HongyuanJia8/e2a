@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/tokencanopy/e2a/internal/agent"
@@ -664,9 +665,8 @@ func (s *Server) handleListMessages(ctx context.Context, in *ListMessagesInput) 
 	if len(in.SubjectContains) > maxFilterStr {
 		return nil, NewError(http.StatusBadRequest, "invalid_filter", "subject_contains filter too long (max 200 chars)")
 	}
-	if len(in.ConversationID) > maxFilterStr {
-		return nil, NewError(http.StatusBadRequest, "invalid_filter", "conversation_id too long (max 200 chars)")
-	}
+	// Length (200, counted in runes so any stored conversation_id the request
+	// schemas admit stays filterable) + CR/LF via the shared check.
 	if err := validateConversationID(in.ConversationID); err != nil {
 		return nil, NewError(http.StatusBadRequest, "invalid_filter", err.Error())
 	}
@@ -787,6 +787,15 @@ const (
 )
 
 func validateConversationID(id string) error {
+	// Runes, not bytes: matches the OpenAPI maxLength semantics of the
+	// request schemas (JSON Schema counts Unicode code points), so a
+	// conversation_id the schema admits is never rejected here — and, at the
+	// same 200 cap as the webhook/list filter values, every accepted id
+	// remains filterable. The schema tags reject this at the edge for /v1
+	// bodies; this is the shared runtime backstop.
+	if n := utf8.RuneCountInString(id); n > maxConversationIDLen {
+		return fmt.Errorf("conversation_id too long — %d characters, max %d", n, maxConversationIDLen)
+	}
 	if strings.ContainsAny(id, "\r\n") {
 		return errors.New("conversation_id must not contain CR or LF")
 	}

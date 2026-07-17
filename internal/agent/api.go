@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/go-github/v72/github"
 	"github.com/gorilla/mux"
@@ -1537,11 +1538,28 @@ func NormalizeAndValidateLabelList(raw []string, op string) ([]string, error) {
 // httpapi layer reuses the same RFC 5322 recipient check.
 func ValidateRecipients(groups ...[]string) error { return validateRecipients(groups...) }
 
+// MaxAddressLen bounds a single email-address-bearing request string — a
+// recipient item in to/cc/bcc, a reply_to override, or an agent email — as the
+// FULL string (optional display name + <addr>), so a multi-megabyte display
+// name can't ride in on an otherwise-valid address. 320 is the classic
+// 64+1+255 addr-spec ceiling with the display-name form held to the same
+// budget. Counted in Unicode code points (runes), NOT bytes, to match the
+// OpenAPI maxLength semantics of the /v1 request schemas (JSON Schema counts
+// code points; Huma validates with utf8.RuneCountInString). The /v1 schemas
+// declare the same value declaratively; this runtime check is the shared
+// backstop for every recipient list that reaches the send path.
+const MaxAddressLen = 320
+
 func validateRecipients(groups ...[]string) error {
 	for _, group := range groups {
 		for _, addr := range group {
 			if addr == "" {
 				return errors.New("recipient address must not be empty")
+			}
+			// Bound BEFORE parsing so an oversized string is rejected on a
+			// cheap length count, never handed to the address parser.
+			if n := utf8.RuneCountInString(addr); n > MaxAddressLen {
+				return fmt.Errorf("recipient address too long — %d characters, max %d (display name + address combined)", n, MaxAddressLen)
 			}
 			if _, err := mail.ParseAddress(addr); err != nil {
 				return fmt.Errorf("invalid recipient %q: %w", addr, err)
