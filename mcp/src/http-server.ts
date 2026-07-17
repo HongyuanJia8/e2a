@@ -30,8 +30,14 @@ export interface HttpServerOptions {
    * client needs the host-reachable URL (http://localhost:8080). Set
    * this to override what's advertised in protected-resource metadata
    * without changing where the SDK forwards bearer tokens.
-   */
+  */
   authorizationServerUrl?: string;
+  /**
+   * Express `trust proxy` setting. Controls which hops' `X-Forwarded-*`
+   * headers are honored when computing externally visible discovery URLs.
+   * Defaults to `"loopback"`, matching the production Caddy topology.
+   */
+  trustProxy?: boolean | number | string;
   /** Optional shared resolution cache (defaults to a fresh one). */
   resolveCache?: ResolveCache;
   /** How long a resolved bearer→principal entry stays cached (ms). */
@@ -77,6 +83,9 @@ export function buildApp(opts: HttpServerOptions): BuiltApp {
     });
 
   const app = express();
+  // Set this before any route reads req.protocol. The default trusts only the
+  // same-host production proxy, so public clients cannot spoof the scheme.
+  app.set("trust proxy", opts.trustProxy ?? "loopback");
   // The body limit must clear the attachment contract: the tools advertise up
   // to 10 MB/attachment and 25 MB combined (see tools/attachments.ts), which
   // base64-encode to ~34 MB on the wire, plus the JSON-RPC envelope. A 1 MB cap
@@ -120,8 +129,8 @@ export function buildApp(opts: HttpServerOptions): BuiltApp {
   //   1. publicUrl set explicitly: trust it verbatim (local-dev http,
   //      or any deployment behind a fronting proxy that knows its own
   //      external URL better than we do).
-  //   2. unset + Host header present + Host in allowlist: synthesize
-  //      `https://{Host}`. This is the prod-default Caddy-fronted path.
+  //   2. unset + Host header present + Host in allowlist: synthesize the URL
+  //      from the trusted request protocol and Host.
   //   3. unset + Host missing/disallowed: caller wrapped function
   //      rejects with 421 before reaching here.
   const resolveResourceUrl = (req: Request): string | null => {
@@ -132,7 +141,7 @@ export function buildApp(opts: HttpServerOptions): BuiltApp {
     if (!host) return null;
     const bare = host.split(":")[0]!.toLowerCase();
     if (!allowedHosts.has(bare)) return null;
-    return `https://${host}`;
+    return `${externalScheme(req)}://${host}`;
   };
 
   app.get("/.well-known/oauth-protected-resource", (req, res) => {
@@ -196,13 +205,18 @@ function methodNotAllowed(_req: Request, res: Response): void {
     .json(jsonRpcError(null, -32000, "Method not allowed: the e2a MCP server is stateless"));
 }
 
+// req.protocol honors X-Forwarded-Proto only for hops allowed by `trust proxy`.
+function externalScheme(req: Request): string {
+  return req.protocol === "https" ? "https" : "http";
+}
+
 // resourceMetadataURL returns the value the `WWW-Authenticate` header
 // should advertise. Honors publicUrl when set (local-dev http), falls
-// back to https+Host otherwise (prod behind Caddy).
+// back to the trusted request scheme + Host otherwise.
 function resourceMetadataURL(req: Request, opts: HttpServerOptions): string {
   const base = opts.publicUrl
     ? opts.publicUrl.replace(/\/+$/, "")
-    : `https://${req.headers.host}`;
+    : `${externalScheme(req)}://${req.headers.host}`;
   return `${base}/.well-known/oauth-protected-resource`;
 }
 
