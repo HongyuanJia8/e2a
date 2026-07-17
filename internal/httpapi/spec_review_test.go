@@ -72,6 +72,26 @@ func TestSpecOutboundIdempotencyDocumentsResponseLoss(t *testing.T) {
 	}
 }
 
+// Every operation that honors Idempotency-Key must publish the two distinct
+// error branches callers need to handle: 409 is retryable after the in-flight
+// request completes, while 422 means the key was reused for a different
+// request and must not be retried as-is.
+func TestSpecIdempotencyResponsesDeclared(t *testing.T) {
+	doc := renderSpec(t)
+	for _, operationID := range []string{
+		"sendMessage", "replyToMessage", "forwardMessage", "approveReview",
+		"rotateWebhookSecret", "createApiKey",
+	} {
+		resp := operationResponses(t, doc, operationID)
+		for _, code := range []string{"409", "422"} {
+			if ref := responseSchemaRef(resp, code); ref != "#/components/schemas/ErrorEnvelope" {
+				t.Errorf("%s: %s must be declared with ErrorEnvelope, got %q; codes=%v",
+					operationID, code, ref, keysOf(resp))
+			}
+		}
+	}
+}
+
 // schemaProps returns the properties map of a named component schema.
 func schemaProps(t *testing.T, doc map[string]any, schemaName string) map[string]any {
 	t.Helper()

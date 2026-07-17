@@ -67,7 +67,8 @@ func (s *Server) rateLimitedResponse() *huma.Response {
 }
 
 // idempotencyInFlightResponse is the declared 409 for every operation that
-// honors the Idempotency-Key header (send/reply/forward/approve/rotate-secret):
+// honors the Idempotency-Key header
+// (send/reply/forward/approve/rotate-secret/create-api-key):
 // a request with the same key is still executing. It is RETRY-ABLE — the retry
 // contract is the opposite of the 422 below, so the two must stay separately
 // documented on every keyed operation.

@@ -232,7 +232,8 @@ class AsyncE2AClient:
         return await request_with_retry(make, cfg=self._cfg, retryable=True, idempotency=False)
 
     async def _write_keyed(self, make: _Make, idempotency_key: Optional[str]) -> Any:
-        # send/reply/forward/approve: server dedupes on the key → safe to retry.
+        # send/reply/forward/approve/create-api-key: the server dedupes on the
+        # key, so retrying the same serialized request is safe.
         return await request_with_retry(
             make, cfg=self._cfg, retryable=True, idempotency=True, idempotency_key=idempotency_key
         )
@@ -786,12 +787,16 @@ class APIKeysResource:
 
         return AutoPager(fetch)
 
-    async def create(self, body: Body) -> CreateAPIKeyResponse:
-        # Returns the one-time plaintext key in `.key` — store it now. Not
-        # retried (mirrors webhooks.create): minting a secret isn't safely
-        # replayable.
+    async def create(
+        self, body: Body, *, idempotency_key: Optional[str] = None
+    ) -> CreateAPIKeyResponse:
+        # Returns the one-time plaintext key in `.key` — store it now. The
+        # server replays the same credential for a keyed retry, so the SDK can
+        # safely retry an ambiguous transport failure without minting twice.
         req = _coerce(CreateAPIKeyRequest, body)
-        return await self._c._write_unsafe(lambda h: self._api.create_api_key(req, _headers=h))
+        return await self._c._write_keyed(
+            lambda h: self._api.create_api_key(req, _headers=h), idempotency_key
+        )
 
     async def delete(self, key_id: str) -> DeleteApiKeyResult:
         # Returns the deletion object ({deleted, id}).

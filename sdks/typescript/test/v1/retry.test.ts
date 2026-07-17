@@ -44,15 +44,16 @@ class FakeHttp implements HttpLibrary {
 }
 
 const noSleep = async () => {};
-// A server-deduped POST (send/reply/forward/approve): the generated layer emits
-// an empty Idempotency-Key stub, which marks the op safe to retry.
+// A server-deduped POST (send/reply/forward/approve/rotate-secret/create-api-key):
+// the generated layer emits an empty Idempotency-Key stub, which marks the op
+// safe to retry.
 const post = () => {
   const r = new RequestContext("https://api.e2a.dev/v1/agents/a@x.com/messages", HttpMethod.POST);
   r.setHeaderParam("Idempotency-Key", ""); // empty generated stub
   return r;
 };
 // A bare, non-idempotent POST (create agent/domain/webhook, reject, redeliver,
-// verify, test, rotate-secret): no server-honored key — must NOT be retried.
+// verify, test): no server-honored key — must NOT be retried.
 const barePost = (url = "https://api.e2a.dev/v1/agents") =>
   new RequestContext(url, HttpMethod.POST);
 const get = () => new RequestContext("https://api.e2a.dev/v1/agents/a@x.com/messages", HttpMethod.GET);

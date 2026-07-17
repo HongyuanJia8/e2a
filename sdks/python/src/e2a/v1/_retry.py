@@ -6,7 +6,8 @@ exposes no such seam — its ``ApiClient`` builds its own client — so we retry
 the hand-written resource layer instead:
 
 * Mint an ``Idempotency-Key`` ONCE per write and pass it (via ``_headers``) on
-  every attempt, so the server dedupes a retried send/reply/forward/approve.
+  every attempt, so the server dedupes a retried send/reply/forward/approve or
+  API-key creation.
 * Retry only the SAFE subset on a retryable failure: reads, the server-deduped
   keyed writes, and HTTP-idempotent writes (PUT/PATCH/DELETE). A bare,
   non-idempotent POST (create/reject/redeliver/test) is NOT retried on an

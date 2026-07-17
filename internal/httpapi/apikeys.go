@@ -85,6 +85,11 @@ func (s *Server) registerAPIKeys() {
 		Summary: "Create an API key", Tags: []string{"account"},
 		Description: "Mint a new API key; the plaintext key is returned once. scope=account is workspace admin (agent/domain/key management); scope=agent binds the key to one inbox so it can act only as that agent. Account scope only.",
 		Security:    []map[string][]string{{"bearer": {}}}, DefaultStatus: http.StatusCreated,
+		Responses: map[string]*huma.Response{
+			"409":     s.idempotencyInFlightResponse(),
+			"422":     s.idempotencyReuseResponse(),
+			"default": s.errorEnvelopeResponse(),
+		},
 	}, s.handleCreateAPIKey)
 
 	huma.Register(s.API, huma.Operation{
