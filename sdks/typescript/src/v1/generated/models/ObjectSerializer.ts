@@ -199,18 +199,18 @@ import { PageSuppression } from '../models/PageSuppression.js';
 import { PageTemplateSummaryView } from '../models/PageTemplateSummaryView.js';
 import { PageWebhookDeliveryView } from '../models/PageWebhookDeliveryView.js';
 import { PageWebhookView } from '../models/PageWebhookView.js';
-import { PayloadTooLargeDetails   , PayloadTooLargeDetailsScopeEnum   } from '../models/PayloadTooLargeDetails.js';
+import { PayloadTooLargeDetails } from '../models/PayloadTooLargeDetails.js';
 import { ProtectionConfigRequest } from '../models/ProtectionConfigRequest.js';
 import { ProtectionConfigView } from '../models/ProtectionConfigView.js';
 import { ProtectionDirectionRequest } from '../models/ProtectionDirectionRequest.js';
 import { ProtectionDirectionView } from '../models/ProtectionDirectionView.js';
 import { ProtectionEventExportEntry } from '../models/ProtectionEventExportEntry.js';
 import { ProtectionGateRequest, ProtectionGateRequestActionEnum   , ProtectionGateRequestPolicyEnum   } from '../models/ProtectionGateRequest.js';
-import { ProtectionGateView, ProtectionGateViewActionEnum   , ProtectionGateViewPolicyEnum   } from '../models/ProtectionGateView.js';
+import { ProtectionGateView } from '../models/ProtectionGateView.js';
 import { ProtectionHoldsRequest, ProtectionHoldsRequestOnExpiryEnum     } from '../models/ProtectionHoldsRequest.js';
-import { ProtectionHoldsView, ProtectionHoldsViewOnExpiryEnum     } from '../models/ProtectionHoldsView.js';
+import { ProtectionHoldsView } from '../models/ProtectionHoldsView.js';
 import { ProtectionScanRequest, ProtectionScanRequestSensitivityEnum   } from '../models/ProtectionScanRequest.js';
-import { ProtectionScanView, ProtectionScanViewSensitivityEnum   } from '../models/ProtectionScanView.js';
+import { ProtectionScanView } from '../models/ProtectionScanView.js';
 import { RateLimitedDetails } from '../models/RateLimitedDetails.js';
 import { RateLimitedEnvelope } from '../models/RateLimitedEnvelope.js';
 import { RateLimitedErrorBody, RateLimitedErrorBodyCodeEnum      } from '../models/RateLimitedErrorBody.js';
@@ -275,15 +275,10 @@ let enumsMap: Set<string> = new Set<string>([
     "LimitExceededErrorBodyCodeEnum",
     "MessageSummaryViewDirectionEnum",
     "MessageViewDirectionEnum",
-    "PayloadTooLargeDetailsScopeEnum",
     "ProtectionGateRequestActionEnum",
     "ProtectionGateRequestPolicyEnum",
-    "ProtectionGateViewActionEnum",
-    "ProtectionGateViewPolicyEnum",
     "ProtectionHoldsRequestOnExpiryEnum",
-    "ProtectionHoldsViewOnExpiryEnum",
     "ProtectionScanRequestSensitivityEnum",
-    "ProtectionScanViewSensitivityEnum",
     "RateLimitedErrorBodyCodeEnum",
     "ReviewViewDirectionEnum",
     "TestWebhookRequestTypeEnum",

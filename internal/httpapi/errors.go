@@ -140,7 +140,10 @@ type TooManyRecipientsDetails struct {
 }
 
 type PayloadTooLargeDetails struct {
-	Scope       string `json:"scope" enum:"composed_message,attachment,attachments_total,request_body" doc:"Which byte budget was exceeded."`
+	// Scope is an OPEN set (evolving response-side vocabulary): a new byte
+	// budget (e.g. a future batch or template cap) means a new value here,
+	// and that must not break spec-generated clients.
+	Scope       string `json:"scope" doc:"Which byte budget was exceeded. Open set: new values may be added over time, so treat these as strings and tolerate unknown values. Known values: composed_message, attachment, attachments_total, request_body."`
 	ActualBytes int64  `json:"actual_bytes" minimum:"0" doc:"Observed byte count. Exact when Content-Length or decoded content is available; for chunked request bodies this is the lower bound observed before rejection."`
 	MaxBytes    int64  `json:"max_bytes" minimum:"1" doc:"Maximum bytes accepted for this scope."`
 	Filename    string `json:"filename,omitempty" doc:"Attachment filename when scope is attachment."`
