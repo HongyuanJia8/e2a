@@ -30,17 +30,12 @@ response objects and value sets are explicitly forward-compatible. Tightening
 requests, removing response fields, changing types or nullability, removing
 success responses, and other incompatible changes remain blocked by oasdiff.
 
-**Pre-GA exception — restore at the freeze:** `request-property-max-length-set`
-is temporarily downgraded to `info` in `api/oasdiff-levels.txt` so the
-pre-freeze bounds program (setting a FIRST `maxLength` on previously-unbounded
-request fields) can land without tripping the gate. Once GA is cut, adding a
-`maxLength` to an existing field becomes a request tightening the gate must
-flag again: **at the GA freeze, delete the `request-property-max-length-set
-info` line** so the check reverts to its failing default. (The severity file
-does not support comment lines — oasdiff rejects `#` — so this note is the
-marker; grep for `request-property-max-length-set`.)
-`request-property-max-length-decreased` was never downgraded: lowering an
-already-published cap fails the gate throughout.
+The GA freeze rejects adding a first `maxLength` to an existing request field
+(`request-property-max-length-set`) and lowering an existing cap
+(`request-property-max-length-decreased`). Both changes tighten requests that
+previously valid clients may already send. The compatibility fixture suite pins
+the first-bound rule so a future severity override cannot silently reopen the
+pre-GA exception.
 
 Beta operations carry the canonical `x-stability-level: beta` lifecycle marker
 understood by oasdiff. Historical specs that used
