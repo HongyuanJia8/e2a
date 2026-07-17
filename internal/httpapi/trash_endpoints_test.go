@@ -132,6 +132,46 @@ func TestDeleteMessagePermanentRequiresConfirm(t *testing.T) {
 	}
 }
 
+// TestDeleteMessagePermanentConfirmPrecedesScopeAndLookup: the confirm guard
+// answers first — matching the declarative delete ops, where Huma validates
+// the schema-required confirm before the handler runs, i.e. before any scope
+// check or resource resolution. The 422 discloses only public spec knowledge,
+// never resource existence or the caller's scope standing.
+func TestDeleteMessagePermanentConfirmPrecedesScopeAndLookup(t *testing.T) {
+	// Nonexistent agent/message: 422, not 404 — the guard runs before
+	// agent/message resolution.
+	var c trashCalls
+	srv := testServer(t, withTrashDeps(&c))
+	code, body := sendJSON(t, "DELETE",
+		srv.URL+"/v1/agents/ghost%40acme.com/messages/msg_ghost?permanent=true", "good", nil)
+	if code != 422 || errCode(body) != "invalid_request" {
+		t.Fatalf("missing confirm on nonexistent target: want 422 invalid_request, got %d %v", code, body)
+	}
+
+	// Agent-scoped credential: 422, not 403 — the guard runs before the
+	// account-scope check, same as Huma's schema validation would.
+	srv2 := testServer(t, withTrashDeps(&c), func(d *Deps) {
+		d.PrincipalAuthenticator = func(r *http.Request) (*identity.Principal, error) {
+			if r.Header.Get("Authorization") == "Bearer agentkey" {
+				return &identity.Principal{
+					User:    &identity.User{ID: "u_1", Email: "owner@acme.com"},
+					Scope:   identity.ScopeAgent,
+					AgentID: "support@acme.com",
+				}, nil
+			}
+			return nil, errUnauthorizedTest
+		}
+	})
+	code, body = sendJSON(t, "DELETE",
+		srv2.URL+"/v1/agents/support%40acme.com/messages/msg_1?permanent=true", "agentkey", nil)
+	if code != 422 || errCode(body) != "invalid_request" {
+		t.Fatalf("missing confirm with agent-scoped key: want 422 invalid_request, got %d %v", code, body)
+	}
+	if c.purgeMsg != 0 || c.softMsg != 0 {
+		t.Fatal("no dep should be reached without confirm=DELETE")
+	}
+}
+
 func TestDeleteMessagePermanent(t *testing.T) {
 	var c trashCalls
 	srv := testServer(t, withTrashDeps(&c))

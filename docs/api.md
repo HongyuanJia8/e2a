@@ -279,9 +279,12 @@ Workspace identity, plan limits, keys, suppressions, and data rights.
   — the recipient suppression list (auto-added on hard bounce/complaint; sends to
   a suppressed address fail with `recipient_suppressed`). Delete to un-suppress.
 
-Every `DELETE` endpoint requires the `?confirm=DELETE` query param (a required
-`enum: [DELETE]`); a missing or wrong value is rejected before the delete runs.
-The SDKs and CLI supply it automatically for their typed `delete(...)` calls.
+Irreversible deletes require the `?confirm=DELETE` query param — schema-required
+(`enum: [DELETE]`) on every `DELETE` endpoint except message delete, where it is
+required only together with `permanent=true` (the default message delete is a
+reversible trash move and takes no confirmation). A missing or wrong value is
+rejected with `422 invalid_request` before the delete runs. The SDKs and CLI
+supply it automatically for their typed `delete(...)` calls.
 
 **Uniform delete responses.** Every `DELETE` returns `200 OK` with a small
 typed deletion object — never `204 No Content`. The base shape is
