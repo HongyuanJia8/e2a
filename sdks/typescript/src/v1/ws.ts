@@ -316,14 +316,17 @@ export class WSStream extends EventEmitter<WSListenerEvents>
     this.listener.on("open", () => this.emit("open"));
     this.listener.on("close", (code, reason) => {
       this.emit("close", code, reason);
-      // A transient close with reconnect disabled emits no "error" (nothing is
-      // fatally wrong) yet the listener schedules no redial — so a pending
-      // next() would hang forever. End iteration cleanly. This is deferred to a
-      // microtask because a fatal close emits its typed "error" synchronously
-      // right after this "close"; letting that run first lets the error path
+      // A normal close is terminal regardless of the reconnect setting. A
+      // transient close is also terminal when reconnect is disabled, because
+      // the listener schedules no redial. End iteration cleanly in both cases
+      // so a pending next() cannot hang forever. This is deferred to a microtask
+      // because a fatal close emits its typed "error" synchronously right after
+      // this "close"; letting that run first lets the error path
       // (finishWithError) win, and finish() then no-ops on the already-closed
-      // stream. Mirrors the Python SDK's reconnect=False behavior.
-      if (!this.reconnectEnabled) queueMicrotask(() => this.finish());
+      // stream. Mirrors the Python SDK's close behavior.
+      if (code === 1000 || !this.reconnectEnabled) {
+        queueMicrotask(() => this.finish());
+      }
     });
     this.listener.on("error", (err) => {
       // Node's EventEmitter THROWS when "error" is emitted with no registered
