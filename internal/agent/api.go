@@ -837,9 +837,9 @@ type dnsRecordCheck struct {
 // Probe semantics:
 //   - TXT: any TXT record contains the verification token (ownership proof)
 //   - MX: any MX record points at smtpDomain (mail routing)
-//   - SPF: any TXT record begins with v=spf1 and contains the relay's
-//     send domain. We accept either smtpDomain or just the bare domain
-//     as a substring — operators commonly use either form.
+//   - SPF: any apex TXT record begins with v=spf1 (case-insensitive) and
+//     contains smtpDomain as a substring (case-insensitive). Advisory only —
+//     SPF does not gate domain verification.
 //   - DKIM: when dkimSelector + dkimPublicKey are present, looks up
 //     "{selector}._domainkey.{domain}" and matches the stored public
 //     key — "found" on a match, "mismatch" when a key is published but

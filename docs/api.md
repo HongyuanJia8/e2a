@@ -322,6 +322,20 @@ Custom sending/receiving domains and their DNS verification.
   fetch / delete (delete deprovisions the sending identity; irreversible).
 - `POST /v1/domains/{domain}/verify` — verify ownership via the TXT record.
 
+The domain surface deliberately speaks **two record-state vocabularies**, one
+per axis. `dns_records[].status` (on `GET /v1/domains/{domain}`) is the
+**persisted** verification state of each record — `verified | pending |
+missing | failed` — what the platform has recorded, updated by verification
+checks and the SES reconciler. The `mx` / `spf` / `dkim` fields returned by
+`POST /v1/domains/{domain}/verify` are the **live probe** outcome of that
+verification attempt — `found | missing | deferred | mismatch` — what DNS
+returned just now. Seeing `found` from verify while the same record still
+reads `pending` on GET is intentional, not a bug: the probe result feeds the
+persisted state, it does not replace its vocabulary. (`deferred` means the
+DKIM probe was skipped because no per-domain keypair is stored yet; `mismatch`
+means a DKIM record is published but its key doesn't match the issued one —
+usually a truncated TXT.)
+
 ### Agents (`/v1/agents`)
 
 An agent is an addressable inbox. Its email must be on a verified domain you own,

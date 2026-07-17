@@ -14,11 +14,17 @@ import { HttpFile } from '../http/http.js';
 
 export class VerifyDomainView {
     /**
-    * Live DKIM probe state. Known values: found, missing, deferred, mismatch. \'mismatch\' means a DKIM record IS published at the selector but its key doesn\'t match the issued one — almost always a truncated/clipped TXT (the value is ~400 chars and must be published in full, ending in \'AQAB\'). On \'mismatch\', re-publish the complete DKIM record; do not just wait.
+    * Live DNS probe outcome for the domain\'s DKIM record ({selector}._domainkey.{domain}) from THIS verification attempt — not the persisted domain state (that is dns_records[].status on GET /v1/domains/{domain}, which uses the deliberately distinct persisted vocabulary verified/pending/missing/failed). Advisory diagnostic: DKIM does not gate verified. Open set; tolerate unknown values. Known values: found (a TXT at the selector carries a p= key equal to the issued one; a match wins over a stale key during rotation), missing (a keypair is issued but no p= payload is published at the selector, or the DNS lookup failed), deferred (the probe was skipped because no per-domain DKIM keypair is stored for this domain yet — legacy pre-keying rows; NOT a DNS-propagation wait), mismatch (a DKIM record IS published at the selector but its key doesn\'t match the issued one — almost always a truncated/clipped TXT: the value is ~400 chars and must be published in full, ending in \'AQAB\'; re-publish the complete DKIM record, do not just wait).
     */
     'dkim'?: string;
     'domain': string;
+    /**
+    * Live DNS probe outcome for the inbound MX record from THIS verification attempt — not the persisted domain state (that is dns_records[].status on GET /v1/domains/{domain}, which uses the deliberately distinct persisted vocabulary verified/pending/missing/failed). Open set; tolerate unknown values. Known values: found (an MX record on the apex domain points at the e2a relay host), missing (no apex MX points at the relay, or the DNS lookup failed). The MX probe gates verification together with the ownership TXT: verified flips true only when both are present.
+    */
     'mx'?: string;
+    /**
+    * Live DNS probe outcome for the apex SPF record from THIS verification attempt — not the persisted domain state (that is dns_records[].status on GET /v1/domains/{domain}, which uses the deliberately distinct persisted vocabulary verified/pending/missing/failed). Advisory diagnostic only: SPF does not gate verified. Open set; tolerate unknown values. Known values: found (an apex TXT record starts with v=spf1 and includes the e2a relay\'s send domain), missing (no such TXT record, or the DNS lookup failed). This probes the APEX SPF authorizing the relay; it is not the mail_from_spf record (the custom MAIL FROM subdomain\'s SPF), whose persisted state is reported in dns_records[].status.
+    */
     'spf'?: string;
     'verified': boolean;
     'verifiedAt'?: Date;
