@@ -18,6 +18,7 @@ func TestDeliveryEventConstantsInCatalog(t *testing.T) {
 		delivery.EventEmailDelivered,
 		delivery.EventEmailBounced,
 		delivery.EventEmailComplained,
+		delivery.EventEmailFailed,
 		delivery.EventSuppressionAdded,
 	} {
 		if !webhookpub.IsValidEventType(et) {

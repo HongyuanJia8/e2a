@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tokencanopy/e2a/internal/delivery"
+	"github.com/tokencanopy/e2a/internal/eventpayload"
 	"github.com/tokencanopy/e2a/internal/identity"
 	"github.com/tokencanopy/e2a/internal/testutil"
 )
@@ -162,14 +163,23 @@ func TestCorrelationMatchesBracketedSESID(t *testing.T) {
 	store := identity.NewStore(pool)
 
 	// Store the realistic bracketed+suffixed shape; correlate with the bare id.
-	_, msgID, agentEmail := seedOutbound(t, store, "corr", "<010f0193abc-000000@us-east-2.amazonses.com>", []string{"a@x.com"})
+	userID, msgID, agentEmail := seedOutbound(t, store, "corr", "<010f0193abc-000000@us-east-2.amazonses.com>", []string{"a@x.com"})
 
-	mID, _, _, _, found, err := store.CorrelateBySESMessageID(ctx, "010f0193abc-000000")
+	m, found, err := store.CorrelateBySESMessageID(ctx, "010f0193abc-000000")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !found || mID != msgID {
-		t.Fatalf("bare-id correlation against bracketed stored id failed: found=%v id=%q want %q", found, mID, msgID)
+	if !found || m.MessageID != msgID {
+		t.Fatalf("bare-id correlation against bracketed stored id failed: found=%v m=%+v want id %q", found, m, msgID)
+	}
+	// The correlation result carries the message fields the canonical event
+	// payloads need — locked here against the seeded row.
+	if m.UserID != userID || m.AgentID != agentEmail || m.Subject != "Subj" ||
+		m.From != agentEmail || m.Method != "smtp" || m.MessageType != "send" {
+		t.Fatalf("correlated fields wrong: %+v", m)
+	}
+	if len(m.To) != 1 || m.To[0] != "a@x.com" || len(m.CC) != 0 || len(m.BCC) != 0 {
+		t.Fatalf("correlated recipient lists wrong: %+v", m)
 	}
 
 	// And the full pipeline must transition delivery_status via the bare id.
@@ -181,6 +191,95 @@ func TestCorrelationMatchesBracketedSESID(t *testing.T) {
 	}
 	if got := deliveryStatus(t, store, msgID, agentEmail); got != "delivered" {
 		t.Fatalf("delivery_status=%q, want delivered (bare-id correlation)", got)
+	}
+}
+
+// TestDeliveryPipeline_RejectFailsMessageOnceWithoutSuppression drives the SES
+// Reject path end-to-end against the real store: a correlated Reject must (1)
+// transition the sent rollup to failed, (2) fire exactly ONE message-level
+// email.failed with the canonical correlated payload, (3) never suppress, and
+// (4) stay idempotent under duplicate SNS delivery (same dedup key, monotonic
+// no-op status writes).
+func TestDeliveryPipeline_RejectFailsMessageOnceWithoutSuppression(t *testing.T) {
+	pool := testutil.TestDB(t)
+	ctx := context.Background()
+	store := identity.NewStore(pool)
+
+	userID, msgID, agentEmail := seedOutbound(t, store, "rej", "ses-reject-1", []string{"a@x.com", "b@x.com"})
+	if got := deliveryStatus(t, store, msgID, agentEmail); got != "sent" {
+		t.Fatalf("initial delivery_status=%q, want sent", got)
+	}
+
+	type fired struct {
+		typ, dedup string
+		data       any
+	}
+	var events []fired
+	consumer := delivery.NewConsumer(store, func(_ context.Context, _, _, eventType string, data any, dedupKey string) {
+		events = append(events, fired{eventType, dedupKey, data})
+	})
+
+	rejectEv := &delivery.Event{
+		Kind: delivery.KindReject, SESMessageID: "ses-reject-1",
+		Recipients: []delivery.RecipientOutcome{
+			{Address: "a@x.com", Status: delivery.StatusFailed, Detail: "Bad content"},
+			{Address: "b@x.com", Status: delivery.StatusFailed, Detail: "Bad content"},
+		},
+	}
+	if err := consumer.Process(ctx, rejectEv); err != nil {
+		t.Fatal(err)
+	}
+
+	// sent → failed on the message rollup, and both recipient rows failed.
+	if got := deliveryStatus(t, store, msgID, agentEmail); got != "failed" {
+		t.Fatalf("delivery_status=%q, want failed after SES Reject", got)
+	}
+	var failedRows int
+	if err := pool.QueryRow(ctx,
+		"SELECT count(*) FROM message_recipients WHERE message_id=$1 AND status='failed'", msgID,
+	).Scan(&failedRows); err != nil {
+		t.Fatal(err)
+	}
+	if failedRows != 2 {
+		t.Fatalf("failed recipient rows=%d, want 2", failedRows)
+	}
+
+	// Exactly ONE message-level email.failed — not one per recipient.
+	if len(events) != 1 || events[0].typ != "email.failed" {
+		t.Fatalf("events=%+v, want exactly one email.failed", events)
+	}
+	data, ok := events[0].data.(eventpayload.EmailFailedData)
+	if !ok {
+		t.Fatalf("data is not the canonical typed payload: %T", events[0].data)
+	}
+	if data.MessageID != msgID || data.AgentEmail != agentEmail || data.Direction != "outbound" ||
+		data.From != agentEmail || data.Subject != "Subj" || data.Method != "smtp" ||
+		data.MessageType != "send" || data.Reason != "Bad content" {
+		t.Fatalf("payload=%+v", data)
+	}
+	if len(data.To) != 2 || data.To[0] != "a@x.com" || data.To[1] != "b@x.com" {
+		t.Fatalf("payload to=%v, want both recipients from the correlated row", data.To)
+	}
+
+	// A Reject must never suppress the recipient addresses.
+	supp, err := store.SuppressedAddresses(ctx, userID, []string{"a@x.com", "b@x.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(supp) != 0 {
+		t.Fatalf("SES Reject must not suppress, got %v", supp)
+	}
+
+	// Duplicate SNS delivery: status stays failed, refire carries the SAME
+	// dedup key (the outbox collapses it via the deterministic event id).
+	if err := consumer.Process(ctx, rejectEv); err != nil {
+		t.Fatal(err)
+	}
+	if got := deliveryStatus(t, store, msgID, agentEmail); got != "failed" {
+		t.Fatalf("delivery_status=%q after duplicate, want failed", got)
+	}
+	if len(events) != 2 || events[1].typ != "email.failed" || events[1].dedup != events[0].dedup {
+		t.Fatalf("duplicate delivery must refire with an identical dedup key: %+v", events)
 	}
 }
 

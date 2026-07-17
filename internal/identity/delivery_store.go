@@ -25,8 +25,9 @@ const OutboundSendClaimStaleWindow = 10 * time.Minute
 // SES-assigned provider_message_id captured at send time. found=false when the
 // id is unknown (expired message, or an event for a different deployment).
 //
-// subject rides along for the delivered/bounced/complained event payloads —
-// it's a column on the very row this query already reads, so including it
+// The message fields (subject, and the envelope/threading fields the
+// message-level email.failed payload needs on an SES Reject) ride along —
+// they're columns on the very row this query already reads, so including them
 // costs no extra query (contract freeze PR-2: `subject` on delivery events).
 //
 // The SNS notification carries the BARE SES id (e.g. 010f0193…-000000), but the
@@ -34,12 +35,16 @@ const OutboundSendClaimStaleWindow = 10 * time.Minute
 // suffix (parseMessageIDFromResponse) — same discrepancy LookupConversationID
 // works around. Match all three stored shapes against the bare id: exact,
 // <id>, and <id@…>. SES ids are [A-Za-z0-9-] so they carry no LIKE metacharacters.
-func (s *Store) CorrelateBySESMessageID(ctx context.Context, sesMessageID string) (messageID, userID, agentID, subject string, found bool, err error) {
+func (s *Store) CorrelateBySESMessageID(ctx context.Context, sesMessageID string) (*delivery.CorrelatedMessage, bool, error) {
 	if sesMessageID == "" {
-		return "", "", "", "", false, nil
+		return nil, false, nil
 	}
-	err = s.pool.QueryRow(ctx,
-		`SELECT m.id, a.user_id, m.agent_id, COALESCE(m.subject, '')
+	m := &delivery.CorrelatedMessage{}
+	err := s.pool.QueryRow(ctx,
+		`SELECT m.id, a.user_id, m.agent_id, COALESCE(m.subject, ''),
+		        COALESCE(m.conversation_id, ''), COALESCE(m.method, ''),
+		        COALESCE(m.message_type, ''), COALESCE(m.sender, ''),
+		        m.to_recipients, m.cc, m.bcc
 		   FROM messages m
 		   JOIN agent_identities a ON a.id = m.agent_id
 		  WHERE m.direction = 'outbound'
@@ -48,14 +53,16 @@ func (s *Store) CorrelateBySESMessageID(ctx context.Context, sesMessageID string
 		       OR m.provider_message_id LIKE '<' || $1 || '@%' )
 		  LIMIT 1`,
 		sesMessageID,
-	).Scan(&messageID, &userID, &agentID, &subject)
+	).Scan(&m.MessageID, &m.UserID, &m.AgentID, &m.Subject,
+		&m.ConversationID, &m.Method, &m.MessageType, &m.From,
+		&m.To, &m.CC, &m.BCC)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", "", "", "", false, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return "", "", "", "", false, err
+		return nil, false, err
 	}
-	return messageID, userID, agentID, subject, true, nil
+	return m, true, nil
 }
 
 // RecordDeliveryOutcome upserts one recipient's status monotonically (by the

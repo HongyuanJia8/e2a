@@ -72,6 +72,50 @@ func TestParseSESNotification(t *testing.T) {
 		}
 	})
 
+	t.Run("reject → failed for every destination, reason carried, never suppresses", func(t *testing.T) {
+		ev, err := ParseSESNotification([]byte(`{
+			"eventType":"Reject",
+			"mail":{"messageId":"ses-8","destination":["G@x.com","h@y.com"]},
+			"reject":{"reason":"Bad content"}
+		}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ev.Kind != KindReject || len(ev.Recipients) != 2 {
+			t.Fatalf("ev=%+v", ev)
+		}
+		for _, r := range ev.Recipients {
+			if r.Status != StatusFailed {
+				t.Fatalf("status=%s, want failed", r.Status)
+			}
+			if r.Suppress {
+				t.Fatal("SES Reject is about the message content, not the address — it must never auto-suppress")
+			}
+			if r.Detail != "Bad content" {
+				t.Fatalf("detail=%q, want the reject.reason", r.Detail)
+			}
+		}
+		if ev.Recipients[0].Address != "g@x.com" || ev.Recipients[1].Address != "h@y.com" {
+			t.Fatalf("addresses must be normalized: %+v", ev.Recipients)
+		}
+	})
+
+	t.Run("reject without a reject block still fails recipients (empty detail)", func(t *testing.T) {
+		ev, err := ParseSESNotification([]byte(`{
+			"eventType":"Reject",
+			"mail":{"messageId":"ses-9","destination":["i@x.com"]}
+		}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ev.Kind != KindReject || len(ev.Recipients) != 1 {
+			t.Fatalf("ev=%+v", ev)
+		}
+		if r := ev.Recipients[0]; r.Status != StatusFailed || r.Detail != "" || r.Suppress {
+			t.Fatalf("recipient=%+v", r)
+		}
+	})
+
 	t.Run("legacy notificationType key", func(t *testing.T) {
 		ev, err := ParseSESNotification([]byte(`{
 			"notificationType":"Delivery",

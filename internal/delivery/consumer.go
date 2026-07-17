@@ -7,15 +7,35 @@ import (
 	"github.com/tokencanopy/e2a/internal/eventpayload"
 )
 
+// CorrelatedMessage is CorrelateBySESMessageID's result: the outbound message
+// a SES provider id maps to, plus the message fields the canonical event
+// payloads need — all columns of the same row/join the correlation SELECT
+// already reads, so widening it costs no extra query.
+type CorrelatedMessage struct {
+	MessageID string
+	UserID    string
+	// AgentID is the agent's own address (an agent identity's id IS its
+	// email), so it doubles as agent_email on event payloads.
+	AgentID        string
+	Subject        string
+	ConversationID string
+	Method         string
+	MessageType    string
+	From           string
+	To             []string
+	CC             []string
+	BCC            []string
+}
+
 // Store is the narrow persistence surface the consumer needs. *identity.Store
 // satisfies it.
 type Store interface {
 	// CorrelateBySESMessageID finds the outbound message + owning user + agent
-	// (plus the message subject, for the event payloads — same single SELECT,
+	// (plus the message fields the event payloads need — same single SELECT,
 	// no extra query) by the SES-assigned provider_message_id captured at send
 	// time. found=false when the id is unknown (message expired, or an event
 	// for another deployment).
-	CorrelateBySESMessageID(ctx context.Context, sesMessageID string) (messageID, userID, agentID, subject string, found bool, err error)
+	CorrelateBySESMessageID(ctx context.Context, sesMessageID string) (m *CorrelatedMessage, found bool, err error)
 	// RecordDeliveryOutcome upserts the per-recipient status monotonically and
 	// recomputes the message rollup (worst status by precedence). Idempotent:
 	// a duplicate/older event is a no-op.
@@ -28,7 +48,7 @@ type Store interface {
 // Firer publishes a delivery/suppression webhook event to the owning user's
 // subscribers. data is the canonical typed payload for the event
 // (eventpayload.EmailDeliveredData / EmailBouncedData / EmailComplainedData /
-// DomainSuppressionAddedData). agentID lets subscribers with an agent_ids
+// EmailFailedData / DomainSuppressionAddedData). agentID lets subscribers with an agent_ids
 // filter match (empty for account-scoped events like suppression). dedupKey
 // makes redeliveries idempotent (the publisher derives a stable event id from
 // it). Injected as a closure so this package does not depend on webhookpub.
@@ -36,16 +56,27 @@ type Firer func(ctx context.Context, userID, agentID, eventType string, data any
 
 // Event push types for delivery outcomes (decision 9 vocabulary).
 const (
-	EventEmailDelivered     = "email.delivered"
-	EventEmailBounced       = "email.bounced"
-	EventEmailComplained    = "email.complained"
+	EventEmailDelivered  = "email.delivered"
+	EventEmailBounced    = "email.bounced"
+	EventEmailComplained = "email.complained"
+	// EventEmailFailed is the canonical stable terminal-failure event
+	// (webhookpub.EventEmailFailed — string-duplicated so this package stays a
+	// light leaf). The SES Reject path emits it MESSAGE-level, not per
+	// recipient; see Process.
+	EventEmailFailed        = "email.failed"
 	EventSuppressionAdded   = "domain.suppression_added" // account-scoped despite the prefix (design vocab)
 	suppressionSourceBounce = "bounce"
 	suppressionSourceCompl  = "complaint"
 )
 
-// pushEventFor maps a recipient status to its webhook event type, or "" for
-// statuses with no push event (queued/sent/deferred/failed — poll instead).
+// rejectFallbackReason keeps email.failed's required `reason` non-empty when
+// an SES Reject notification carries no reject.reason.
+const rejectFallbackReason = "rejected by the email provider after acceptance"
+
+// pushEventFor maps a recipient status to its PER-RECIPIENT webhook event
+// type, or "" for statuses with no per-recipient push event (queued/sent/
+// deferred — poll instead; failed is emitted message-level by the Reject path
+// in Process, never per recipient).
 func pushEventFor(s Status) string {
 	switch s {
 	case StatusDelivered:
@@ -78,7 +109,7 @@ func (c *Consumer) Process(ctx context.Context, ev *Event) error {
 	if ev == nil || len(ev.Recipients) == 0 {
 		return nil
 	}
-	messageID, userID, agentID, subject, found, err := c.store.CorrelateBySESMessageID(ctx, ev.SESMessageID)
+	m, found, err := c.store.CorrelateBySESMessageID(ctx, ev.SESMessageID)
 	if err != nil {
 		return err
 	}
@@ -87,24 +118,42 @@ func (c *Consumer) Process(ctx context.Context, ev *Event) error {
 		return nil
 	}
 
+	recorded := 0
 	for _, r := range ev.Recipients {
 		if r.Address == "" || !r.Status.Valid() {
 			continue
 		}
-		if err := c.store.RecordDeliveryOutcome(ctx, messageID, r.Address, r.Status, r.Detail); err != nil {
+		if err := c.store.RecordDeliveryOutcome(ctx, m.MessageID, r.Address, r.Status, r.Detail); err != nil {
 			return err
 		}
+		recorded++
 		if evType := pushEventFor(r.Status); evType != "" && c.fire != nil {
-			// agentID is the agent's own address (agent identity id == email), so it
-			// doubles as agent_email. smtp_detail is the SES diagnostic string (named
-			// to disambiguate from email.failed's `reason`). The event TYPE is the
-			// outcome — there is no redundant `status` field (contract freeze PR-2).
-			c.fire(ctx, userID, agentID, evType, deliveryEventData(evType, messageID, agentID, subject, ev, r),
-				evType+"|"+messageID+"|"+r.Address)
+			// m.AgentID is the agent's own address (agent identity id == email), so
+			// it doubles as agent_email. smtp_detail is the SES diagnostic string
+			// (named to disambiguate from email.failed's `reason`). The event TYPE
+			// is the outcome — there is no redundant `status` field (contract
+			// freeze PR-2).
+			c.fire(ctx, m.UserID, m.AgentID, evType, deliveryEventData(evType, m, ev, r),
+				evType+"|"+m.MessageID+"|"+r.Address)
 		}
 		if r.Suppress {
-			c.suppress(ctx, userID, messageID, r)
+			c.suppress(ctx, m.UserID, m.MessageID, r)
 		}
+	}
+
+	// An SES Reject is the provider refusing the whole already-accepted
+	// message (e.g. content scan), so it emits ONE message-level email.failed
+	// — the same canonical stable event/shape the async send worker publishes
+	// on terminal send failure — never a per-recipient event: the payload's
+	// to/cc/bcc lists carry the recipients, and two events for one message
+	// would be conflicting duplicates of a message-level fact. The dedup key
+	// hashes to the IDENTICAL deterministic event id as the worker path
+	// (DeterministicEventID(messageID, "email.failed")), so duplicate SNS
+	// deliveries AND any cross-path double emission collapse in the durable
+	// outbox via ON CONFLICT (id) DO NOTHING.
+	if ev.Kind == KindReject && recorded > 0 && c.fire != nil {
+		c.fire(ctx, m.UserID, m.AgentID, EventEmailFailed,
+			failedEventData(m, rejectReason(ev)), m.MessageID+"|"+EventEmailFailed)
 	}
 	return nil
 }
@@ -113,7 +162,7 @@ func (c *Consumer) Process(ctx context.Context, ev *Event) error {
 // delivery outcome. bounce_type/bounce_sub_type come from the SES bounce
 // notification's classification, parsed in ParseSESNotification; a bounced
 // outcome that somehow lacks one is "undetermined" (the field is required).
-func deliveryEventData(evType, messageID, agentEmail, subject string, ev *Event, r RecipientOutcome) any {
+func deliveryEventData(evType string, m *CorrelatedMessage, ev *Event, r RecipientOutcome) any {
 	switch evType {
 	case EventEmailBounced:
 		bounceType := ev.BounceType
@@ -121,34 +170,78 @@ func deliveryEventData(evType, messageID, agentEmail, subject string, ev *Event,
 			bounceType = "undetermined"
 		}
 		return eventpayload.EmailBouncedData{
-			MessageID:     messageID,
-			AgentEmail:    agentEmail,
+			MessageID:     m.MessageID,
+			AgentEmail:    m.AgentID,
 			Direction:     "outbound",
 			DeliveredTo:   r.Address,
-			Subject:       subject,
+			Subject:       m.Subject,
 			SMTPDetail:    r.Detail,
 			BounceType:    bounceType,
 			BounceSubType: ev.BounceSubType,
 		}
 	case EventEmailComplained:
 		return eventpayload.EmailComplainedData{
-			MessageID:   messageID,
-			AgentEmail:  agentEmail,
+			MessageID:   m.MessageID,
+			AgentEmail:  m.AgentID,
 			Direction:   "outbound",
 			DeliveredTo: r.Address,
-			Subject:     subject,
+			Subject:     m.Subject,
 			SMTPDetail:  r.Detail,
 		}
 	default: // EventEmailDelivered
 		return eventpayload.EmailDeliveredData{
-			MessageID:   messageID,
-			AgentEmail:  agentEmail,
+			MessageID:   m.MessageID,
+			AgentEmail:  m.AgentID,
 			Direction:   "outbound",
 			DeliveredTo: r.Address,
-			Subject:     subject,
+			Subject:     m.Subject,
 			SMTPDetail:  r.Detail,
 		}
 	}
+}
+
+// failedEventData builds the canonical eventpayload.EmailFailedData for an SES
+// Reject — byte-identical in shape to the async send worker's emission
+// (golden-fixture-locked): every field the correlated message carries is
+// populated; ReasonCode and Retryable stay unset because the SES Reject
+// notification carries only the human-readable reject.reason, matching the
+// worker path's convention (absent ≠ false).
+func failedEventData(m *CorrelatedMessage, reason string) eventpayload.EmailFailedData {
+	return eventpayload.EmailFailedData{
+		MessageID:      m.MessageID,
+		AgentEmail:     m.AgentID,
+		Direction:      "outbound",
+		ConversationID: m.ConversationID,
+		Method:         m.Method,
+		From:           m.From,
+		To:             nonNil(m.To),
+		CC:             m.CC,
+		BCC:            m.BCC,
+		Subject:        m.Subject,
+		MessageType:    m.MessageType,
+		Reason:         reason,
+	}
+}
+
+// rejectReason returns the SES reject.reason (the parser stamps the same
+// reason on every recipient outcome), or a stable fallback so email.failed's
+// required `reason` is never empty.
+func rejectReason(ev *Event) string {
+	for _, r := range ev.Recipients {
+		if r.Detail != "" {
+			return r.Detail
+		}
+	}
+	return rejectFallbackReason
+}
+
+// nonNil keeps `to` (nullable:false in the published schema) marshaling as []
+// when the correlated row carried no recipient list.
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 func (c *Consumer) suppress(ctx context.Context, userID, messageID string, r RecipientOutcome) {
