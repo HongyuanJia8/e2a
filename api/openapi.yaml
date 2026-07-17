@@ -311,6 +311,9 @@ components:
     AttachmentMetaView:
       additionalProperties: true
       properties:
+        content_id:
+          description: "Content-ID (angle brackets stripped) for an inline part referenced by a body 'cid:' URL, e.g. an embedded image; the key a cid: reference resolves against. Omitted for non-inline attachments."
+          type: string
         content_type:
           type: string
         filename:
@@ -330,6 +333,9 @@ components:
     AttachmentView:
       additionalProperties: true
       properties:
+        content_id:
+          description: Content-ID (angle brackets stripped) for an inline part referenced by a body 'cid:' URL, e.g. an embedded image. Omitted for non-inline attachments.
+          type: string
         content_type:
           type: string
         data:

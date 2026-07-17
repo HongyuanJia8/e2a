@@ -210,6 +210,7 @@ func messageViewFromIdentity(m *identity.Message) MessageView {
 				Filename:    a.Filename,
 				ContentType: a.ContentType,
 				SizeBytes:   len(a.Data),
+				ContentID:   a.ContentID,
 			})
 		}
 	}

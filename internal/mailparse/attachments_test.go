@@ -29,6 +29,7 @@ func sampleMultipart() []byte {
 		"--BOUND\r\n" +
 		"Content-Type: image/png\r\n" +
 		"Content-Disposition: inline; filename=\"logo.png\"\r\n" +
+		"Content-ID: <ii_logo@mail.gmail.com>\r\n" +
 		"Content-Transfer-Encoding: base64\r\n" +
 		"\r\n" + b64("\x89PNG\r\n fake png") + "\r\n" +
 		"--BOUND--\r\n")
@@ -50,6 +51,37 @@ func TestAttachments_OrderAndDecode(t *testing.T) {
 	}
 	if !bytes.Equal(atts[1].Data, []byte("\x89PNG\r\n fake png")) {
 		t.Errorf("att1 binary bytes not decoded: %q", atts[1].Data)
+	}
+}
+
+// The inline image's Content-ID is captured (angle brackets stripped) so a
+// renderer can resolve an HTML `cid:` reference to it; the ordinary PDF
+// attachment carries none.
+func TestAttachments_ContentID(t *testing.T) {
+	atts := Attachments(sampleMultipart())
+	if len(atts) != 2 {
+		t.Fatalf("want 2 attachments, got %d", len(atts))
+	}
+	if atts[0].ContentID != "" {
+		t.Errorf("PDF attachment should have no Content-ID, got %q", atts[0].ContentID)
+	}
+	if atts[1].ContentID != "ii_logo@mail.gmail.com" {
+		t.Errorf("inline image Content-ID want %q, got %q", "ii_logo@mail.gmail.com", atts[1].ContentID)
+	}
+}
+
+func TestTrimContentID(t *testing.T) {
+	cases := map[string]string{
+		"<ii_abc@mail.gmail.com>": "ii_abc@mail.gmail.com",
+		"  <ii_abc>  ":            "ii_abc",
+		"ii_bare":                 "ii_bare",
+		"":                        "",
+		"   ":                     "",
+	}
+	for in, want := range cases {
+		if got := trimContentID(in); got != want {
+			t.Errorf("trimContentID(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

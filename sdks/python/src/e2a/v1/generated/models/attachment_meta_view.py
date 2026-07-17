@@ -26,12 +26,13 @@ class AttachmentMetaView(BaseModel):
     """
     AttachmentMetaView
     """ # noqa: E501
+    content_id: Optional[StrictStr] = Field(default=None, description="Content-ID (angle brackets stripped) for an inline part referenced by a body 'cid:' URL, e.g. an embedded image; the key a cid: reference resolves against. Omitted for non-inline attachments.")
     content_type: Optional[StrictStr] = None
     filename: Optional[StrictStr] = None
     index: StrictInt = Field(description="Stable 0-based attachment index (document order) — the fetch key for the attachment-bytes endpoint.")
     size_bytes: StrictInt = Field(description="DECODED attachment payload size in bytes (Content-Transfer-Encoding undone) — the size of the file a download yields, not its encoded size inside the raw MIME.")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["content_type", "filename", "index", "size_bytes"]
+    __properties: ClassVar[List[str]] = ["content_id", "content_type", "filename", "index", "size_bytes"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -91,6 +92,7 @@ class AttachmentMetaView(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
+            "content_id": obj.get("content_id"),
             "content_type": obj.get("content_type"),
             "filename": obj.get("filename"),
             "index": obj.get("index"),
