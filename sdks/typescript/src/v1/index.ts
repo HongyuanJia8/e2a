@@ -65,7 +65,7 @@ export type {
   VerifySignatureOptions,
   ConstructEventOptions,
   WebhookEvent,
-  AttachmentMeta,
+  AttachmentMetaView,
   EmailReceivedData,
   EmailSentData,
   EmailFailedData,

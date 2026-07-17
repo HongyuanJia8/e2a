@@ -10,7 +10,7 @@ import (
 	"github.com/tokencanopy/e2a/internal/testutil"
 )
 
-// B4a (review correctness bug): EventJSON.delivery_status is populated by
+// B4a (review correctness bug): EventView.delivery_status is populated by
 // getEvent (which calls loadDeliveryStatus) but NOT by listEvents — so the same
 // event has a delivery roll-up when fetched by id and silently lacks it in the
 // list. This test seeds a delivered subscriber-delivery and expects both paths

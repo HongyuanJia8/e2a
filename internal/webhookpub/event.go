@@ -197,7 +197,7 @@ func NewEvent(eventType, userID string, data any) Event {
 // stores the envelope verbatim and the delivery worker POSTs it
 // unchanged.
 // Type is the event-type discriminator. Named `type` on the wire to match
-// the /v1/events REST resource (EventJSON.type) and the Stripe-style SDK
+// the /v1/events REST resource (EventView.type) and the Stripe-style SDK
 // `construct_event` helper — a webhook delivery body is the same shape as a
 // GET /v1/events/{id} object, so consumers handle both identically.
 type Envelope struct {

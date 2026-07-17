@@ -10,19 +10,12 @@
  * Do not edit the class manually.
  */
 
+import { EventView } from '../models/EventView.js';
 import { HttpFile } from '../http/http.js';
 
-export class AttachmentMeta {
-    'contentType'?: string;
-    'filename'?: string;
-    /**
-    * Stable 0-based attachment index (document order) — the fetch key for the attachment-bytes endpoint.
-    */
-    'index': number;
-    /**
-    * DECODED attachment payload size in bytes (Content-Transfer-Encoding undone) — the size of the file a download yields, not its encoded size inside the raw MIME.
-    */
-    'sizeBytes': number;
+export class PageEventView {
+    'items': Array<EventView>;
+    'nextCursor': string | null;
 
     static readonly discriminator: string | undefined = undefined;
 
@@ -30,32 +23,20 @@ export class AttachmentMeta {
 
     static readonly attributeTypeMap: Array<{name: string, baseName: string, type: string, format: string}> = [
         {
-            "name": "contentType",
-            "baseName": "content_type",
-            "type": "string",
+            "name": "items",
+            "baseName": "items",
+            "type": "Array<EventView>",
             "format": ""
         },
         {
-            "name": "filename",
-            "baseName": "filename",
+            "name": "nextCursor",
+            "baseName": "next_cursor",
             "type": "string",
             "format": ""
-        },
-        {
-            "name": "index",
-            "baseName": "index",
-            "type": "number",
-            "format": "int64"
-        },
-        {
-            "name": "sizeBytes",
-            "baseName": "size_bytes",
-            "type": "number",
-            "format": "int64"
         }    ];
 
     static getAttributeTypeMap() {
-        return AttachmentMeta.attributeTypeMap;
+        return PageEventView.attributeTypeMap;
     }
 
     public constructor() {

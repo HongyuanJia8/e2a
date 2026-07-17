@@ -19,15 +19,15 @@ import json
 
 from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
-from e2a.v1.generated.models.event_json import EventJSON
+from e2a.v1.generated.models.event_view import EventView
 from typing import Optional, Set
 from typing_extensions import Self
 
-class PageEventJSON(BaseModel):
+class PageEventView(BaseModel):
     """
-    PageEventJSON
+    PageEventView
     """ # noqa: E501
-    items: List[EventJSON]
+    items: List[EventView]
     next_cursor: Optional[StrictStr]
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["items", "next_cursor"]
@@ -50,7 +50,7 @@ class PageEventJSON(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of PageEventJSON from a JSON string"""
+        """Create an instance of PageEventView from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -94,7 +94,7 @@ class PageEventJSON(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of PageEventJSON from a dict"""
+        """Create an instance of PageEventView from a dict"""
         if obj is None:
             return None
 
@@ -102,7 +102,7 @@ class PageEventJSON(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "items": [EventJSON.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None,
+            "items": [EventView.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None,
             "next_cursor": obj.get("next_cursor")
         })
         # store additional fields in additional_properties

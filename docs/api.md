@@ -282,7 +282,7 @@ Workspace identity, plan limits, keys, suppressions, and data rights.
   Interior schemas carry `x-stability-level: beta` in the OpenAPI document to
   mark that exemption machine-readably; the operation itself is stable.
   Each exported message carries `attachments` as the same typed
-  `AttachmentMeta` metadata (`{filename, content_type, size_bytes, index}`,
+  `AttachmentMetaView` metadata (`{filename, content_type, size_bytes, index}`,
   `size_bytes` = decoded payload) the live API uses; the attachment **bytes**
   of sent/inbound messages are inside the exported `raw_message`. A held
   draft's (`pending_review`) staged attachment bytes are internal transient

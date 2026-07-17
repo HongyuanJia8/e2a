@@ -169,10 +169,10 @@ func BuildDeps(p Params) httpapi.Deps {
 			return u
 		},
 
-		ListEvents: func(ctx context.Context, q httpapi.EventQuery) ([]agent.EventJSON, error) {
+		ListEvents: func(ctx context.Context, q httpapi.EventQuery) ([]agent.EventView, error) {
 			return agent.ListEventsForUser(ctx, p.Pool, q.UserID, q.Type, q.AgentID, q.ConversationID, q.MessageID, q.Since, q.Until, q.CursorCreatedAt, q.CursorID, q.Limit)
 		},
-		GetEvent2: func(ctx context.Context, userID, eventID string) (*agent.EventJSON, error) {
+		GetEvent2: func(ctx context.Context, userID, eventID string) (*agent.EventView, error) {
 			return agent.GetEventForUser(ctx, p.Pool, userID, eventID)
 		},
 		LoadReplayEvent: func(ctx context.Context, userID, eventID string) (*agent.ReplayEvent, error) {

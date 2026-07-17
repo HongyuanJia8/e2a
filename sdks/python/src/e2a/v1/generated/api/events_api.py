@@ -19,8 +19,8 @@ from typing_extensions import Annotated
 from pydantic import Field, StrictStr
 from typing import Optional
 from typing_extensions import Annotated
-from e2a.v1.generated.models.event_json import EventJSON
-from e2a.v1.generated.models.page_event_json import PageEventJSON
+from e2a.v1.generated.models.event_view import EventView
+from e2a.v1.generated.models.page_event_view import PageEventView
 from e2a.v1.generated.models.redeliver_event_request import RedeliverEventRequest
 from e2a.v1.generated.models.redeliver_view import RedeliverView
 
@@ -58,7 +58,7 @@ class EventsApi:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> EventJSON:
+    ) -> EventView:
         """Get an event
 
 
@@ -95,7 +95,7 @@ class EventsApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "EventJSON",
+            '200': "EventView",
         }
         response_data = await self.api_client.call_api(
             *_param,
@@ -124,7 +124,7 @@ class EventsApi:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[EventJSON]:
+    ) -> ApiResponse[EventView]:
         """Get an event
 
 
@@ -161,7 +161,7 @@ class EventsApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "EventJSON",
+            '200': "EventView",
         }
         response_data = await self.api_client.call_api(
             *_param,
@@ -227,7 +227,7 @@ class EventsApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "EventJSON",
+            '200': "EventView",
         }
         response_data = await self.api_client.call_api(
             *_param,
@@ -323,7 +323,7 @@ class EventsApi:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> PageEventJSON:
+    ) -> PageEventView:
         """List events
 
         The webhook-event delivery log, filterable by type/agent/conversation/message and time range, with cursor pagination.
@@ -382,7 +382,7 @@ class EventsApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "PageEventJSON",
+            '200': "PageEventView",
         }
         response_data = await self.api_client.call_api(
             *_param,
@@ -418,7 +418,7 @@ class EventsApi:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[PageEventJSON]:
+    ) -> ApiResponse[PageEventView]:
         """List events
 
         The webhook-event delivery log, filterable by type/agent/conversation/message and time range, with cursor pagination.
@@ -477,7 +477,7 @@ class EventsApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "PageEventJSON",
+            '200': "PageEventView",
         }
         response_data = await self.api_client.call_api(
             *_param,
@@ -572,7 +572,7 @@ class EventsApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "PageEventJSON",
+            '200': "PageEventView",
         }
         response_data = await self.api_client.call_api(
             *_param,

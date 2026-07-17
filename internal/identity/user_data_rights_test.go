@@ -13,7 +13,7 @@ import (
 
 // seedRawWithAttachment is a raw RFC 5322 multipart message carrying ONE
 // base64 attachment whose DECODED payload is "hello world" (11 bytes). The
-// export must surface it as typed AttachmentMeta with size_bytes = 11 (the
+// export must surface it as typed AttachmentMetaView with size_bytes = 11 (the
 // decoded size — not the 16-byte base64 wire size inside the MIME).
 const seedRawWithAttachment = "From: alice@gmail.com\r\n" +
 	"Subject: Hi\r\n" +
@@ -84,7 +84,7 @@ func seedUserData(t *testing.T, store *identity.Store, ctx context.Context, labe
 
 	// Held pending_review draft with one staged attachment ("hello", 5 bytes
 	// decoded). Its internal storage blob carries inline base64 `data`; the
-	// export must surface typed AttachmentMeta and never that blob.
+	// export must surface typed AttachmentMetaView and never that blob.
 	draftAtts := []byte(`[{"filename":"notes.txt","content_type":"text/plain","data":"aGVsbG8="}]`)
 	if _, err := store.CreatePendingOutboundMessage(ctx, customAgent.ID,
 		[]string{"alice@gmail.com"}, nil, nil,
@@ -218,7 +218,7 @@ func TestExportUserData(t *testing.T) {
 	}
 
 	// Typed attachments (one shape everywhere): the inbound message's
-	// attachments come parsed from raw_message as AttachmentMeta, with
+	// attachments come parsed from raw_message as AttachmentMetaView, with
 	// size_bytes = the DECODED payload (11, "hello world") — not the 16-byte
 	// base64 wire size.
 	if len(inbound.Attachments) != 1 {
@@ -230,7 +230,7 @@ func TestExportUserData(t *testing.T) {
 	}
 
 	// The held draft maps its internal attachments_json blob to the same
-	// AttachmentMeta shape (size_bytes = decoded base64 length, 5 for
+	// AttachmentMetaView shape (size_bytes = decoded base64 length, 5 for
 	// "hello") — the inline base64 bytes must NOT be exported.
 	var draft *identity.Message
 	for i := range dump.Messages {
@@ -264,7 +264,7 @@ func TestExportUserData(t *testing.T) {
 		t.Error("export leaks key_hash — that's a credential equivalent")
 	}
 	// The held draft's internal attachments_json blob carries inline base64
-	// under a `data` key; the export types attachments as AttachmentMeta and
+	// under a `data` key; the export types attachments as AttachmentMetaView and
 	// must not emit that internal storage shape.
 	if jsonContains(raw, "data") {
 		t.Error("export leaks `data` — the held-draft attachment blob's inline base64 must not be exported")

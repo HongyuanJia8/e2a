@@ -10,7 +10,6 @@ import { AgentIdentity } from '../models/AgentIdentity.js';
 import { AgentView } from '../models/AgentView.js';
 import { ApproveRequest } from '../models/ApproveRequest.js';
 import { Attachment } from '../models/Attachment.js';
-import { AttachmentMeta } from '../models/AttachmentMeta.js';
 import { AttachmentMetaView } from '../models/AttachmentMetaView.js';
 import { AttachmentView } from '../models/AttachmentView.js';
 import { AuthVerdict } from '../models/AuthVerdict.js';
@@ -48,7 +47,7 @@ import { EmailSentData } from '../models/EmailSentData.js';
 import { ErrorBody } from '../models/ErrorBody.js';
 import { ErrorEnvelope } from '../models/ErrorEnvelope.js';
 import { EventEnvelope } from '../models/EventEnvelope.js';
-import { EventJSON } from '../models/EventJSON.js';
+import { EventView } from '../models/EventView.js';
 import { FieldError } from '../models/FieldError.js';
 import { ForwardRequest } from '../models/ForwardRequest.js';
 import { LimitExceededDetails } from '../models/LimitExceededDetails.js';
@@ -66,11 +65,11 @@ import { PageAPIKeyView } from '../models/PageAPIKeyView.js';
 import { PageAgentView } from '../models/PageAgentView.js';
 import { PageConversationSummaryView } from '../models/PageConversationSummaryView.js';
 import { PageDomainView } from '../models/PageDomainView.js';
-import { PageEventJSON } from '../models/PageEventJSON.js';
+import { PageEventView } from '../models/PageEventView.js';
 import { PageMessageSummaryView } from '../models/PageMessageSummaryView.js';
 import { PageReviewView } from '../models/PageReviewView.js';
 import { PageStarterTemplateView } from '../models/PageStarterTemplateView.js';
-import { PageSuppression } from '../models/PageSuppression.js';
+import { PageSuppressionView } from '../models/PageSuppressionView.js';
 import { PageTemplateSummaryView } from '../models/PageTemplateSummaryView.js';
 import { PageWebhookDeliveryView } from '../models/PageWebhookDeliveryView.js';
 import { PageWebhookView } from '../models/PageWebhookView.js';
@@ -97,7 +96,6 @@ import { RejectRequest } from '../models/RejectRequest.js';
 import { RejectResultView } from '../models/RejectResultView.js';
 import { RenderedTemplateView } from '../models/RenderedTemplateView.js';
 import { ReplyRequest } from '../models/ReplyRequest.js';
-import { Result } from '../models/Result.js';
 import { RetryAfterDetails } from '../models/RetryAfterDetails.js';
 import { ReviewView } from '../models/ReviewView.js';
 import { RotateSecretResponse } from '../models/RotateSecretResponse.js';
@@ -106,8 +104,8 @@ import { SendResultView } from '../models/SendResultView.js';
 import { StarterTemplateDetailView } from '../models/StarterTemplateDetailView.js';
 import { StarterTemplateVariableView } from '../models/StarterTemplateVariableView.js';
 import { StarterTemplateView } from '../models/StarterTemplateView.js';
-import { Suppression } from '../models/Suppression.js';
 import { SuppressionExportEntry } from '../models/SuppressionExportEntry.js';
+import { SuppressionView } from '../models/SuppressionView.js';
 import { TemplatePartError } from '../models/TemplatePartError.js';
 import { TemplateSummaryView } from '../models/TemplateSummaryView.js';
 import { TemplateView } from '../models/TemplateView.js';
@@ -376,7 +374,7 @@ export class ObjectAccountApi {
      * List suppressed recipient addresses
      * @param param the request object
      */
-    public listSuppressionsWithHttpInfo(param: AccountApiListSuppressionsRequest = {}, options?: ConfigurationOptions): Promise<HttpInfo<PageSuppression>> {
+    public listSuppressionsWithHttpInfo(param: AccountApiListSuppressionsRequest = {}, options?: ConfigurationOptions): Promise<HttpInfo<PageSuppressionView>> {
         return this.api.listSuppressionsWithHttpInfo(param.cursor, param.limit,  options).toPromise();
     }
 
@@ -385,7 +383,7 @@ export class ObjectAccountApi {
      * List suppressed recipient addresses
      * @param param the request object
      */
-    public listSuppressions(param: AccountApiListSuppressionsRequest = {}, options?: ConfigurationOptions): Promise<PageSuppression> {
+    public listSuppressions(param: AccountApiListSuppressionsRequest = {}, options?: ConfigurationOptions): Promise<PageSuppressionView> {
         return this.api.listSuppressions(param.cursor, param.limit,  options).toPromise();
     }
 
@@ -1065,7 +1063,7 @@ export class ObjectEventsApi {
      * Get an event
      * @param param the request object
      */
-    public getEventWithHttpInfo(param: EventsApiGetEventRequest, options?: ConfigurationOptions): Promise<HttpInfo<EventJSON>> {
+    public getEventWithHttpInfo(param: EventsApiGetEventRequest, options?: ConfigurationOptions): Promise<HttpInfo<EventView>> {
         return this.api.getEventWithHttpInfo(param.id,  options).toPromise();
     }
 
@@ -1073,7 +1071,7 @@ export class ObjectEventsApi {
      * Get an event
      * @param param the request object
      */
-    public getEvent(param: EventsApiGetEventRequest, options?: ConfigurationOptions): Promise<EventJSON> {
+    public getEvent(param: EventsApiGetEventRequest, options?: ConfigurationOptions): Promise<EventView> {
         return this.api.getEvent(param.id,  options).toPromise();
     }
 
@@ -1082,7 +1080,7 @@ export class ObjectEventsApi {
      * List events
      * @param param the request object
      */
-    public listEventsWithHttpInfo(param: EventsApiListEventsRequest = {}, options?: ConfigurationOptions): Promise<HttpInfo<PageEventJSON>> {
+    public listEventsWithHttpInfo(param: EventsApiListEventsRequest = {}, options?: ConfigurationOptions): Promise<HttpInfo<PageEventView>> {
         return this.api.listEventsWithHttpInfo(param.type, param.agentEmail, param.conversationId, param.messageId, param.since, param.until, param.cursor, param.limit,  options).toPromise();
     }
 
@@ -1091,7 +1089,7 @@ export class ObjectEventsApi {
      * List events
      * @param param the request object
      */
-    public listEvents(param: EventsApiListEventsRequest = {}, options?: ConfigurationOptions): Promise<PageEventJSON> {
+    public listEvents(param: EventsApiListEventsRequest = {}, options?: ConfigurationOptions): Promise<PageEventView> {
         return this.api.listEvents(param.type, param.agentEmail, param.conversationId, param.messageId, param.since, param.until, param.cursor, param.limit,  options).toPromise();
     }
 

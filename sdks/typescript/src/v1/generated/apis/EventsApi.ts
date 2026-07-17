@@ -9,8 +9,8 @@ import {SecurityAuthentication} from '../auth/auth.js';
 
 
 import { ErrorEnvelope } from '../models/ErrorEnvelope.js';
-import { EventJSON } from '../models/EventJSON.js';
-import { PageEventJSON } from '../models/PageEventJSON.js';
+import { EventView } from '../models/EventView.js';
+import { PageEventView } from '../models/PageEventView.js';
 import { RedeliverEventRequest } from '../models/RedeliverEventRequest.js';
 import { RedeliverView } from '../models/RedeliverView.js';
 
@@ -209,13 +209,13 @@ export class EventsApiResponseProcessor {
      * @params response Response returned by the server for a request to getEvent
      * @throws ApiException if the response code was not in [200, 299]
      */
-     public async getEventWithHttpInfo(response: ResponseContext): Promise<HttpInfo<EventJSON >> {
+     public async getEventWithHttpInfo(response: ResponseContext): Promise<HttpInfo<EventView >> {
         const contentType = ObjectSerializer.normalizeMediaType(response.headers["content-type"]);
         if (isCodeInRange("200", response.httpStatusCode)) {
-            const body: EventJSON = ObjectSerializer.deserialize(
+            const body: EventView = ObjectSerializer.deserialize(
                 ObjectSerializer.parse(await response.body.text(), contentType),
-                "EventJSON", ""
-            ) as EventJSON;
+                "EventView", ""
+            ) as EventView;
             return new HttpInfo(response.httpStatusCode, response.headers, response.body, body);
         }
         if (isCodeInRange("0", response.httpStatusCode)) {
@@ -228,10 +228,10 @@ export class EventsApiResponseProcessor {
 
         // Work around for missing responses in specification, e.g. for petstore.yaml
         if (response.httpStatusCode >= 200 && response.httpStatusCode <= 299) {
-            const body: EventJSON = ObjectSerializer.deserialize(
+            const body: EventView = ObjectSerializer.deserialize(
                 ObjectSerializer.parse(await response.body.text(), contentType),
-                "EventJSON", ""
-            ) as EventJSON;
+                "EventView", ""
+            ) as EventView;
             return new HttpInfo(response.httpStatusCode, response.headers, response.body, body);
         }
 
@@ -245,13 +245,13 @@ export class EventsApiResponseProcessor {
      * @params response Response returned by the server for a request to listEvents
      * @throws ApiException if the response code was not in [200, 299]
      */
-     public async listEventsWithHttpInfo(response: ResponseContext): Promise<HttpInfo<PageEventJSON >> {
+     public async listEventsWithHttpInfo(response: ResponseContext): Promise<HttpInfo<PageEventView >> {
         const contentType = ObjectSerializer.normalizeMediaType(response.headers["content-type"]);
         if (isCodeInRange("200", response.httpStatusCode)) {
-            const body: PageEventJSON = ObjectSerializer.deserialize(
+            const body: PageEventView = ObjectSerializer.deserialize(
                 ObjectSerializer.parse(await response.body.text(), contentType),
-                "PageEventJSON", ""
-            ) as PageEventJSON;
+                "PageEventView", ""
+            ) as PageEventView;
             return new HttpInfo(response.httpStatusCode, response.headers, response.body, body);
         }
         if (isCodeInRange("0", response.httpStatusCode)) {
@@ -264,10 +264,10 @@ export class EventsApiResponseProcessor {
 
         // Work around for missing responses in specification, e.g. for petstore.yaml
         if (response.httpStatusCode >= 200 && response.httpStatusCode <= 299) {
-            const body: PageEventJSON = ObjectSerializer.deserialize(
+            const body: PageEventView = ObjectSerializer.deserialize(
                 ObjectSerializer.parse(await response.body.text(), contentType),
-                "PageEventJSON", ""
-            ) as PageEventJSON;
+                "PageEventView", ""
+            ) as PageEventView;
             return new HttpInfo(response.httpStatusCode, response.headers, response.body, body);
         }
 

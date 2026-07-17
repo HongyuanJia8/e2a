@@ -9,7 +9,7 @@ import (
 
 // TestEnvelope_WireKeyIsType locks the webhook delivery discriminator to the
 // JSON key `type` (NOT `event`). The SDK `construct_event`/`constructEvent`
-// helpers and the /v1/events REST resource (EventJSON.type) both key on
+// helpers and the /v1/events REST resource (EventView.type) both key on
 // `type`; a regression to `event` silently breaks every SDK webhook consumer
 // (the helper raises "missing a string type"). A struct-field check can't
 // catch a tag regression, so assert the raw bytes.

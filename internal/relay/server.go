@@ -692,7 +692,7 @@ func buildEmailReceivedPayload(
 	authHeaders map[string]string,
 	agent *identity.AgentIdentity,
 	receivedAt time.Time,
-	attachments []eventpayload.AttachmentMeta,
+	attachments []eventpayload.AttachmentMetaView,
 ) eventpayload.EmailReceivedData {
 	if authHeaders == nil {
 		authHeaders = map[string]string{} // required field: present-but-empty, never null

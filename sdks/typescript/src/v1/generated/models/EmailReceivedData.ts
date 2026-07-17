@@ -10,7 +10,7 @@
  * Do not edit the class manually.
  */
 
-import { AttachmentMeta } from '../models/AttachmentMeta.js';
+import { AttachmentMetaView } from '../models/AttachmentMetaView.js';
 import { HttpFile } from '../http/http.js';
 
 export class EmailReceivedData {
@@ -18,7 +18,7 @@ export class EmailReceivedData {
     * The receiving agent\'s email — its id and address (an agent\'s id IS its email).
     */
     'agentEmail': string;
-    'attachments'?: Array<AttachmentMeta>;
+    'attachments'?: Array<AttachmentMetaView>;
     'authHeaders': { [key: string]: string; };
     /**
     * The From-header identity SPF/DKIM/DMARC verified — treat THIS (not from) as the gated identity.
@@ -58,7 +58,7 @@ export class EmailReceivedData {
         {
             "name": "attachments",
             "baseName": "attachments",
-            "type": "Array<AttachmentMeta>",
+            "type": "Array<AttachmentMetaView>",
             "format": ""
         },
         {

@@ -45,7 +45,7 @@ import type {
   DomainView,
   RegisterDomainRequest,
   VerifyDomainView,
-  EventJSON,
+  EventView,
   RedeliverEventRequest,
   RedeliverView,
   WebhookView,
@@ -65,7 +65,7 @@ import type {
   DeleteApiKeyResult,
   DeleteTemplateResult,
   DeleteWebhookResult,
-  Suppression,
+  SuppressionView,
   APIKeyView,
   CreateAPIKeyRequest,
   CreateAPIKeyResponse,
@@ -455,7 +455,7 @@ export interface ListEventsParams {
 
 class EventsResource {
   constructor(private readonly api: PromiseEventsApi) {}
-  list(params: ListEventsParams = {}): AutoPager<EventJSON> {
+  list(params: ListEventsParams = {}): AutoPager<EventView> {
     return new AutoPager(async (cursor) => {
       const page = await call(() =>
         this.api.listEvents(params.type, params.agentEmail, params.conversationId, params.messageId,
@@ -464,7 +464,7 @@ class EventsResource {
       return { items: page.items ?? [], next_cursor: page.nextCursor };
     });
   }
-  get(id: string): Promise<EventJSON> {
+  get(id: string): Promise<EventView> {
     return call(() => this.api.getEvent(id));
   }
   redeliver(id: string, body: RedeliverEventRequest = {}): Promise<RedeliverView> {
@@ -543,7 +543,7 @@ class WebhooksResource {
 
 class SuppressionsResource {
   constructor(private readonly api: PromiseAccountApi) {}
-  list(): AutoPager<Suppression> {
+  list(): AutoPager<SuppressionView> {
     return new AutoPager(async (cursor) => {
       const page = await call(() => this.api.listSuppressions(cursor));
       return { items: page.items ?? [], next_cursor: page.nextCursor };

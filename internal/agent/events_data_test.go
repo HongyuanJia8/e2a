@@ -10,7 +10,7 @@ import (
 	"github.com/tokencanopy/e2a/internal/testutil"
 )
 
-// B3 (review correctness bug): EventJSON.data is `required` + `type: object` in
+// B3 (review correctness bug): EventView.data is `required` + `type: object` in
 // the spec, but a stored envelope whose `data` is JSON null (or absent) parses
 // successfully with a nil map, so the response serializes `"data": null` —
 // violating the contract and breaking strict SDK deserializers. Drive the real

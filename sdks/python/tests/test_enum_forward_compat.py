@@ -14,11 +14,11 @@ from __future__ import annotations
 import glob
 import os
 
-from e2a.v1.generated.models.event_json import EventJSON
+from e2a.v1.generated.models.event_view import EventView
 
 
 def test_unknown_event_type_parses() -> None:
-    e = EventJSON.from_dict(
+    e = EventView.from_dict(
         {
             "id": "evt_1",
             "type": "email.some_future_type",  # not in the known catalog
@@ -34,7 +34,7 @@ def test_unknown_event_type_parses() -> None:
 
 
 def test_unknown_event_status_parses() -> None:
-    e = EventJSON.from_dict(
+    e = EventView.from_dict(
         {
             "id": "evt_1",
             "type": "email.received",

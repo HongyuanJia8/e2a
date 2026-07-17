@@ -8,7 +8,7 @@
 
 from e2a.v1 import (  # noqa: F401
     AsyncE2AClient,
-    AttachmentMeta,
+    AttachmentMetaView,
     AutoPager,
     DomainSendingFailedData,
     DomainSendingVerifiedData,
@@ -77,7 +77,7 @@ __all__ = [
     "verify_webhook_signature",
     "construct_event",
     "WebhookEvent",
-    "AttachmentMeta",
+    "AttachmentMetaView",
     "EmailReceivedData",
     "EmailSentData",
     "EmailFailedData",

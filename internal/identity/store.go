@@ -310,8 +310,8 @@ type Message struct {
 	// (messages.auth_verdict from migration 032): SPF/DKIM/DMARC each with
 	// a status and detail. Populated on inbound read paths when the column
 	// is non-null; nil on outbound rows (which never have a verdict).
-	Auth           *emailauth.Result `json:"auth,omitempty"`
-	ConversationID string            `json:"conversation_id,omitempty"`
+	Auth           *emailauth.AuthVerdict `json:"auth,omitempty"`
+	ConversationID string                 `json:"conversation_id,omitempty"`
 	// DeliveryStatus is overloaded by direction. On inbound rows it carries
 	// the inbox read/unread status (messages.inbox_status) under this legacy
 	// JSON key. On outbound rows it carries the outbound delivery rollup
@@ -342,7 +342,7 @@ type Message struct {
 	// SizeBytes is the RAW MIME byte length of the whole stored message —
 	// the octet length of raw_message (headers + bodies + encoded attachments
 	// as transported). NOT a decoded-attachment size: the per-attachment
-	// size_bytes (eventpayload.AttachmentMeta / httpapi.AttachmentMetaView)
+	// size_bytes (eventpayload.AttachmentMetaView / httpapi.AttachmentMetaView)
 	// is the DECODED payload of one attachment. This raw length is also the
 	// dominant term of storage-quota accounting — the messages storage
 	// trigger (migrations 016/039) sums octet_length(raw_message) plus the
@@ -410,14 +410,14 @@ type Message struct {
 	// Never serialized — the wire representation is Attachments below.
 	AttachmentsJSON json.RawMessage `json:"-"`
 	// Attachments is the typed per-attachment METADATA for the wire (the
-	// user-data export's Message schema) — the same AttachmentMeta shape
+	// user-data export's Message schema) — the same AttachmentMetaView shape
 	// {filename, content_type, size_bytes (DECODED), index} the live API
 	// (MessageView.attachments, email.received) uses. Populated at export
 	// time: parsed from raw_message when present (inbound + sent outbound),
 	// else mapped from the held-draft AttachmentsJSON blob. Bytes are never
 	// inlined — for sent/inbound messages they are inside the exported
 	// raw_message.
-	Attachments []eventpayload.AttachmentMeta `json:"attachments,omitempty"`
+	Attachments []eventpayload.AttachmentMetaView `json:"attachments,omitempty"`
 
 	// Flagged + FlagReason carry the inbound ingestion verdict (migration 033 /
 	// Slice 7): true when the agent's inbound_policy gate flagged this message
@@ -1799,7 +1799,7 @@ func unmarshalAuthVerdict(b []byte, m *Message) error {
 	if len(b) == 0 {
 		return nil
 	}
-	var r emailauth.Result
+	var r emailauth.AuthVerdict
 	if err := json.Unmarshal(b, &r); err != nil {
 		return fmt.Errorf("unmarshal auth verdict: %w", err)
 	}

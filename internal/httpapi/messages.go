@@ -12,6 +12,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/tokencanopy/e2a/internal/agent"
 	"github.com/tokencanopy/e2a/internal/emailauth"
+	"github.com/tokencanopy/e2a/internal/eventpayload"
 	"github.com/tokencanopy/e2a/internal/identity"
 	"github.com/tokencanopy/e2a/internal/mailparse"
 )
@@ -121,12 +122,11 @@ type MessageView struct {
 // payload size (Content-Transfer-Encoding undone) — the size of the file a
 // download yields, NOT the encoded size inside the raw MIME and NOT the
 // message-level size_bytes (raw MIME length of the whole message).
-type AttachmentMetaView struct {
-	Index       int    `json:"index"`
-	Filename    string `json:"filename,omitempty"`
-	ContentType string `json:"content_type,omitempty"`
-	SizeBytes   int    `json:"size_bytes" doc:"DECODED attachment payload size in bytes (Content-Transfer-Encoding undone) — the size of the file a download yields, not its encoded size inside the raw MIME."`
-}
+//
+// Alias of the canonical eventpayload.AttachmentMetaView so the REST message
+// views, the stable event payloads, and the account export publish ONE public
+// attachment-metadata component schema.
+type AttachmentMetaView = eventpayload.AttachmentMetaView
 
 // MessageParsedView is the parsed-body payload (see MessageView.Parsed).
 type MessageParsedView struct {
@@ -170,7 +170,7 @@ func messageViewFromIdentity(m *identity.Message) MessageView {
 		CreatedAt:   m.CreatedAt.UTC(),
 		DeletedAt:   utcPtr(m.DeletedAt),
 		AuthHeaders: m.AuthHeaders,
-		Auth:        authVerdict(m.Auth),
+		Auth:        m.Auth,
 		RawMessage:  m.RawMessage,
 		Flagged:     m.Flagged,
 		FlagReason:  m.FlagReason,
@@ -284,18 +284,10 @@ type MessageSummaryView struct {
 }
 
 // AuthVerdict is the wire schema for the structured inbound auth verdict
-// (MSG-11) — a clean public name for emailauth.Result (the trust primitive the
-// inbound policy enforces on). Identical shape; converted via authVerdict().
-type AuthVerdict emailauth.Result
-
-// authVerdict converts the domain verdict to its wire view (nil-safe).
-func authVerdict(r *emailauth.Result) *AuthVerdict {
-	if r == nil {
-		return nil
-	}
-	v := AuthVerdict(*r)
-	return &v
-}
+// (MSG-11). Alias of emailauth.AuthVerdict — the trust primitive the inbound
+// policy enforces on — so the REST message views and the account export
+// publish ONE public auth-verdict component schema.
+type AuthVerdict = emailauth.AuthVerdict
 
 // inboundReplyToView returns the parsed inbound Reply-To for the wire view. The
 // reply_to field is defined as the Reply-To header PARSED off an inbound message;
@@ -326,7 +318,7 @@ func messageSummaryFromIdentity(m identity.Message) MessageSummaryView {
 		Labels:         orEmptyStrings(m.Labels),
 		CreatedAt:      m.CreatedAt.UTC(),
 		DeletedAt:      utcPtr(m.DeletedAt),
-		Auth:           authVerdict(m.Auth),
+		Auth:           m.Auth,
 		Flagged:        m.Flagged,
 		FlagReason:     m.FlagReason,
 	}

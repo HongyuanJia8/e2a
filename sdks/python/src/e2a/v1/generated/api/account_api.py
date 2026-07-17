@@ -26,7 +26,7 @@ from e2a.v1.generated.models.delete_api_key_result import DeleteApiKeyResult
 from e2a.v1.generated.models.delete_suppression_result import DeleteSuppressionResult
 from e2a.v1.generated.models.delete_user_data_result import DeleteUserDataResult
 from e2a.v1.generated.models.page_api_key_view import PageAPIKeyView
-from e2a.v1.generated.models.page_suppression import PageSuppression
+from e2a.v1.generated.models.page_suppression_view import PageSuppressionView
 from e2a.v1.generated.models.user_export import UserExport
 
 from e2a.v1.generated.api_client import ApiClient, RequestSerialized
@@ -1953,7 +1953,7 @@ class AccountApi:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> PageSuppression:
+    ) -> PageSuppressionView:
         """List suppressed recipient addresses
 
         Addresses e2a will refuse to send to (auto-added on a hard bounce or complaint, or added manually). Sends to a suppressed address fail with recipient_suppressed.
@@ -1994,7 +1994,7 @@ class AccountApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "PageSuppression",
+            '200': "PageSuppressionView",
         }
         response_data = await self.api_client.call_api(
             *_param,
@@ -2024,7 +2024,7 @@ class AccountApi:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[PageSuppression]:
+    ) -> ApiResponse[PageSuppressionView]:
         """List suppressed recipient addresses
 
         Addresses e2a will refuse to send to (auto-added on a hard bounce or complaint, or added manually). Sends to a suppressed address fail with recipient_suppressed.
@@ -2065,7 +2065,7 @@ class AccountApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "PageSuppression",
+            '200': "PageSuppressionView",
         }
         response_data = await self.api_client.call_api(
             *_param,
@@ -2136,7 +2136,7 @@ class AccountApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "PageSuppression",
+            '200': "PageSuppressionView",
         }
         response_data = await self.api_client.call_api(
             *_param,

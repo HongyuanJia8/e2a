@@ -10,15 +10,15 @@
  * Do not edit the class manually.
  */
 
-import { AttachmentMeta } from '../models/AttachmentMeta.js';
-import { Result } from '../models/Result.js';
+import { AttachmentMetaView } from '../models/AttachmentMetaView.js';
+import { AuthVerdict } from '../models/AuthVerdict.js';
 import { HttpFile } from '../http/http.js';
 
 export class Message {
     'agentEmail': string;
     'approvalExpiresAt'?: Date;
-    'attachments'?: Array<AttachmentMeta> | null;
-    'auth'?: Result;
+    'attachments'?: Array<AttachmentMetaView> | null;
+    'auth'?: AuthVerdict;
     'authHeaders'?: { [key: string]: string; };
     'bcc'?: Array<string> | null;
     'cc'?: Array<string> | null;
@@ -84,13 +84,13 @@ export class Message {
         {
             "name": "attachments",
             "baseName": "attachments",
-            "type": "Array<AttachmentMeta>",
+            "type": "Array<AttachmentMetaView>",
             "format": ""
         },
         {
             "name": "auth",
             "baseName": "auth",
-            "type": "Result",
+            "type": "AuthVerdict",
             "format": ""
         },
         {

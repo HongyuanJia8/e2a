@@ -37,7 +37,7 @@ func TestCheckNoDKIMSignature(t *testing.T) {
 }
 
 func TestDomainAuthenticatedSPFPass(t *testing.T) {
-	r := &Result{
+	r := &AuthVerdict{
 		SPF:  CheckResult{Status: StatusPass},
 		DKIM: CheckResult{Status: StatusNone},
 	}
@@ -47,7 +47,7 @@ func TestDomainAuthenticatedSPFPass(t *testing.T) {
 }
 
 func TestDomainAuthenticatedDKIMPass(t *testing.T) {
-	r := &Result{
+	r := &AuthVerdict{
 		SPF:  CheckResult{Status: StatusNone},
 		DKIM: CheckResult{Status: StatusPass},
 	}
@@ -57,7 +57,7 @@ func TestDomainAuthenticatedDKIMPass(t *testing.T) {
 }
 
 func TestDomainAuthenticatedBothFail(t *testing.T) {
-	r := &Result{
+	r := &AuthVerdict{
 		SPF:  CheckResult{Status: StatusFail},
 		DKIM: CheckResult{Status: StatusFail},
 	}
@@ -67,7 +67,7 @@ func TestDomainAuthenticatedBothFail(t *testing.T) {
 }
 
 func TestSummaryFormat(t *testing.T) {
-	r := &Result{
+	r := &AuthVerdict{
 		SPF:   CheckResult{Status: StatusPass},
 		DKIM:  CheckResult{Status: StatusNone},
 		DMARC: CheckResult{Status: StatusFail},
