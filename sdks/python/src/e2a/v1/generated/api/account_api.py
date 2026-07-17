@@ -51,6 +51,7 @@ class AccountApi:
     async def create_api_key(
         self,
         create_api_key_request: CreateAPIKeyRequest,
+        idempotency_key: Annotated[Optional[StrictStr], Field(description="Optional idempotency key for safe retries (unique per logical request). A retry with the same key and byte-identical body replays the first request's response — the SAME key — instead of minting a second live credential. Completed keys are remembered for at least 24 hours (the published minimum dedup window). Within the window: same key + different body → 422 idempotency_key_reuse (do not retry as-is); same key while the first request is still executing → 409 idempotency_in_flight (wait, then retry unchanged). Dedup is best-effort: under idempotency-store degradation or a mid-request crash the guarantee degrades to at-least-once — a keyed retry may mint a new key rather than replay.")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -70,6 +71,8 @@ class AccountApi:
 
         :param create_api_key_request: (required)
         :type create_api_key_request: CreateAPIKeyRequest
+        :param idempotency_key: Optional idempotency key for safe retries (unique per logical request). A retry with the same key and byte-identical body replays the first request's response — the SAME key — instead of minting a second live credential. Completed keys are remembered for at least 24 hours (the published minimum dedup window). Within the window: same key + different body → 422 idempotency_key_reuse (do not retry as-is); same key while the first request is still executing → 409 idempotency_in_flight (wait, then retry unchanged). Dedup is best-effort: under idempotency-store degradation or a mid-request crash the guarantee degrades to at-least-once — a keyed retry may mint a new key rather than replay.
+        :type idempotency_key: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -94,6 +97,7 @@ class AccountApi:
 
         _param = self._create_api_key_serialize(
             create_api_key_request=create_api_key_request,
+            idempotency_key=idempotency_key,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -118,6 +122,7 @@ class AccountApi:
     async def create_api_key_with_http_info(
         self,
         create_api_key_request: CreateAPIKeyRequest,
+        idempotency_key: Annotated[Optional[StrictStr], Field(description="Optional idempotency key for safe retries (unique per logical request). A retry with the same key and byte-identical body replays the first request's response — the SAME key — instead of minting a second live credential. Completed keys are remembered for at least 24 hours (the published minimum dedup window). Within the window: same key + different body → 422 idempotency_key_reuse (do not retry as-is); same key while the first request is still executing → 409 idempotency_in_flight (wait, then retry unchanged). Dedup is best-effort: under idempotency-store degradation or a mid-request crash the guarantee degrades to at-least-once — a keyed retry may mint a new key rather than replay.")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -137,6 +142,8 @@ class AccountApi:
 
         :param create_api_key_request: (required)
         :type create_api_key_request: CreateAPIKeyRequest
+        :param idempotency_key: Optional idempotency key for safe retries (unique per logical request). A retry with the same key and byte-identical body replays the first request's response — the SAME key — instead of minting a second live credential. Completed keys are remembered for at least 24 hours (the published minimum dedup window). Within the window: same key + different body → 422 idempotency_key_reuse (do not retry as-is); same key while the first request is still executing → 409 idempotency_in_flight (wait, then retry unchanged). Dedup is best-effort: under idempotency-store degradation or a mid-request crash the guarantee degrades to at-least-once — a keyed retry may mint a new key rather than replay.
+        :type idempotency_key: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -161,6 +168,7 @@ class AccountApi:
 
         _param = self._create_api_key_serialize(
             create_api_key_request=create_api_key_request,
+            idempotency_key=idempotency_key,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -185,6 +193,7 @@ class AccountApi:
     async def create_api_key_without_preload_content(
         self,
         create_api_key_request: CreateAPIKeyRequest,
+        idempotency_key: Annotated[Optional[StrictStr], Field(description="Optional idempotency key for safe retries (unique per logical request). A retry with the same key and byte-identical body replays the first request's response — the SAME key — instead of minting a second live credential. Completed keys are remembered for at least 24 hours (the published minimum dedup window). Within the window: same key + different body → 422 idempotency_key_reuse (do not retry as-is); same key while the first request is still executing → 409 idempotency_in_flight (wait, then retry unchanged). Dedup is best-effort: under idempotency-store degradation or a mid-request crash the guarantee degrades to at-least-once — a keyed retry may mint a new key rather than replay.")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -204,6 +213,8 @@ class AccountApi:
 
         :param create_api_key_request: (required)
         :type create_api_key_request: CreateAPIKeyRequest
+        :param idempotency_key: Optional idempotency key for safe retries (unique per logical request). A retry with the same key and byte-identical body replays the first request's response — the SAME key — instead of minting a second live credential. Completed keys are remembered for at least 24 hours (the published minimum dedup window). Within the window: same key + different body → 422 idempotency_key_reuse (do not retry as-is); same key while the first request is still executing → 409 idempotency_in_flight (wait, then retry unchanged). Dedup is best-effort: under idempotency-store degradation or a mid-request crash the guarantee degrades to at-least-once — a keyed retry may mint a new key rather than replay.
+        :type idempotency_key: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -228,6 +239,7 @@ class AccountApi:
 
         _param = self._create_api_key_serialize(
             create_api_key_request=create_api_key_request,
+            idempotency_key=idempotency_key,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -247,6 +259,7 @@ class AccountApi:
     def _create_api_key_serialize(
         self,
         create_api_key_request,
+        idempotency_key,
         _request_auth,
         _content_type,
         _headers,
@@ -270,6 +283,8 @@ class AccountApi:
         # process the path parameters
         # process the query parameters
         # process the header parameters
+        if idempotency_key is not None:
+            _header_params['Idempotency-Key'] = idempotency_key
         # process the form parameters
         # process the body parameter
         if create_api_key_request is not None:
