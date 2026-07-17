@@ -441,4 +441,25 @@ describe("WSStream error handling (async-iterator consumers)", () => {
     vi.doUnmock("ws");
     vi.resetModules();
   });
+
+  it("ends iteration cleanly on a normal peer close when reconnect is enabled", async () => {
+    const { stream } = await makeStream(10, /* reconnect */ true);
+    const iterator = stream[Symbol.asyncIterator]();
+    const nextP = iterator.next();
+    let result: IteratorResult<unknown> | undefined;
+    void nextP.then((value) => {
+      result = value;
+    });
+
+    FakeWS.instances[0].serverOpen();
+    FakeWS.instances[0].serverClose(1000, "");
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    expect(result).toEqual({ value: undefined, done: true });
+    expect(FakeWS.instances).toHaveLength(1); // normal close never redials
+
+    stream.close();
+    vi.doUnmock("ws");
+    vi.resetModules();
+  });
 });
