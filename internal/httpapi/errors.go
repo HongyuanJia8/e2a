@@ -155,7 +155,10 @@ type PayloadTooLargeDetails struct {
 // time. `plan_code`/`upgrade_url` are the account's plan label and any upgrade
 // affordance the operator configured.
 type LimitExceededDetails struct {
-	Resource   string `json:"resource" enum:"agents,domains,messages_month,storage_bytes" doc:"The AccountView usage/limits field stem the cap applies to. Key it to usage.<resource> and limits.max_<resource>."`
+	// Resource is an OPEN set (evolving response-side vocabulary): a new
+	// capped resource means a new value here, and that must not break
+	// spec-generated clients.
+	Resource   string `json:"resource" doc:"The AccountView usage/limits field stem the cap applies to. Key it to usage.<resource> and limits.max_<resource>. Open set: new values may be added over time, so treat these as strings and tolerate unknown values. Known values: agents, domains, messages_month, storage_bytes."`
 	Limit      int64  `json:"limit" doc:"The cap that was hit (matches limits.max_<resource>)."`
 	Current    int64  `json:"current" doc:"The account's usage at the time the cap was hit (matches usage.<resource>)."`
 	PlanCode   string `json:"plan_code,omitempty" doc:"The account's plan label."`

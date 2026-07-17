@@ -128,9 +128,9 @@ export * from '../models/WebhookFiltersView.js';
 export * from '../models/WebhookView.js';
 
 import { APIKeyExportEntry } from '../models/APIKeyExportEntry.js';
-import { APIKeyView       , APIKeyViewScopeEnum   } from '../models/APIKeyView.js';
+import { APIKeyView } from '../models/APIKeyView.js';
 import { AccountUserView } from '../models/AccountUserView.js';
-import { AccountView   , AccountViewScopeEnum      } from '../models/AccountView.js';
+import { AccountView } from '../models/AccountView.js';
 import { AgentIdentity } from '../models/AgentIdentity.js';
 import { AgentView } from '../models/AgentView.js';
 import { ApproveRequest } from '../models/ApproveRequest.js';
@@ -143,7 +143,7 @@ import { CheckResult } from '../models/CheckResult.js';
 import { ConversationDetailView } from '../models/ConversationDetailView.js';
 import { ConversationSummaryView } from '../models/ConversationSummaryView.js';
 import { CreateAPIKeyRequest   , CreateAPIKeyRequestScopeEnum   } from '../models/CreateAPIKeyRequest.js';
-import { CreateAPIKeyResponse        , CreateAPIKeyResponseScopeEnum   } from '../models/CreateAPIKeyResponse.js';
+import { CreateAPIKeyResponse } from '../models/CreateAPIKeyResponse.js';
 import { CreateAgentRequest } from '../models/CreateAgentRequest.js';
 import { CreateTemplateRequest } from '../models/CreateTemplateRequest.js';
 import { CreateWebhookRequest , CreateWebhookRequestEventsEnum     } from '../models/CreateWebhookRequest.js';
@@ -162,7 +162,7 @@ import { DeploymentInfoView } from '../models/DeploymentInfoView.js';
 import { Domain } from '../models/Domain.js';
 import { DomainSendingFailedData } from '../models/DomainSendingFailedData.js';
 import { DomainSendingVerifiedData } from '../models/DomainSendingVerifiedData.js';
-import { DomainSuppressionAddedData   , DomainSuppressionAddedDataSourceEnum   } from '../models/DomainSuppressionAddedData.js';
+import { DomainSuppressionAddedData } from '../models/DomainSuppressionAddedData.js';
 import { DomainView } from '../models/DomainView.js';
 import { EmailBouncedData  , EmailBouncedDataBounceTypeEnum        } from '../models/EmailBouncedData.js';
 import { EmailComplainedData } from '../models/EmailComplainedData.js';
@@ -176,7 +176,7 @@ import { EventEnvelope } from '../models/EventEnvelope.js';
 import { EventJSON } from '../models/EventJSON.js';
 import { FieldError } from '../models/FieldError.js';
 import { ForwardRequest } from '../models/ForwardRequest.js';
-import { LimitExceededDetails   , LimitExceededDetailsResourceEnum    } from '../models/LimitExceededDetails.js';
+import { LimitExceededDetails } from '../models/LimitExceededDetails.js';
 import { LimitExceededEnvelope } from '../models/LimitExceededEnvelope.js';
 import { LimitExceededErrorBody, LimitExceededErrorBodyCodeEnum      } from '../models/LimitExceededErrorBody.js';
 import { LimitsCapsView } from '../models/LimitsCapsView.js';
@@ -269,14 +269,9 @@ let primitives = [
                  ];
 
 let enumsMap: Set<string> = new Set<string>([
-    "APIKeyViewScopeEnum",
-    "AccountViewScopeEnum",
     "CreateAPIKeyRequestScopeEnum",
-    "CreateAPIKeyResponseScopeEnum",
     "CreateWebhookRequestEventsEnum",
-    "DomainSuppressionAddedDataSourceEnum",
     "EmailBouncedDataBounceTypeEnum",
-    "LimitExceededDetailsResourceEnum",
     "LimitExceededErrorBodyCodeEnum",
     "MessageSummaryViewDirectionEnum",
     "MessageViewDirectionEnum",
