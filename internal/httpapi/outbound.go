@@ -280,7 +280,7 @@ func (s *Server) registerOutbound() {
 	huma.Register(s.API, huma.Operation{
 		OperationID: "testAgent", Method: http.MethodPost, Path: "/v1/agents/{email}/test",
 		Summary: "Send a test email to the agent's own address", Tags: []string{"agents"},
-		Description: "Send a platform test email to the agent's own address to confirm inbound delivery. 202 when held for HITL.",
+		Description: "Send a platform-originated test email (From: the platform noreply identity) to the agent's own address over the real external SMTP route, to confirm inbound delivery end to end. Returns 202: status=accepted (the message is durably persisted and queued; message_id is the GET-able e2a message id, and the terminal outcome arrives via GET /v1/messages/{id} or the email.sent / email.failed webhook events — provider_message_id appears only after provider submission) or status=pending_review when held for review. Always branch on body.status.",
 		Security:    []map[string][]string{{"bearer": {}}},
 		Responses:   map[string]*huma.Response{"202": accepted202(), "402": s.limitExceededResponse(), "429": s.rateLimitedResponse(), "default": s.errorEnvelopeResponse()},
 	}, s.handleTestSend)
@@ -316,10 +316,12 @@ func (s *Server) handleTestSend(ctx context.Context, in *AddressParam) (*sendOut
 	if derr != nil {
 		return nil, envelopeFromOutboundError(derr)
 	}
-	if res.Held {
-		return &sendOutput{Status: http.StatusAccepted, Body: SendResultView{Status: "pending_review", MessageID: res.PendingMessageID, ApprovalExpiresAt: res.ApprovalExpiresAt}}, nil
-	}
-	return &sendOutput{Status: http.StatusOK, Body: SendResultView{Status: "sent", MessageID: res.MessageID, ProviderMessageID: res.ProviderMessageID, SentAs: res.SentAs, Method: res.Method}}, nil
+	// Same wire mapping as send/reply/forward (outboundResultView): held →
+	// 202 pending_review, queued → 202 accepted (message_id = the durable e2a
+	// msg_ id; provider_message_id arrives only after the worker submits). The
+	// test send is queue-first, so a terminal-synchronous 200 no longer occurs.
+	status, view := outboundResultView(res)
+	return &sendOutput{Status: status, Body: view}, nil
 }
 
 // ReplyRequest mirrors the legacy reply body.

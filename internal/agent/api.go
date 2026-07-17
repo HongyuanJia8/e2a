@@ -1240,20 +1240,37 @@ func (a *API) DeliverOutbound(ctx context.Context, user *identity.User, agent *i
 	return &OutboundResult{MessageID: accepted.ID, Status: "accepted", SentAs: comp.SentAs, Method: comp.Method}, nil
 }
 
-// SendTestCore composes and sends (or HITL-holds) a platform test email to
-// the agent's own address. HTTP-free; shared by the legacy handler and the v1
-// layer. The caller has already authed, resolved + owned the agent,
-// domain-verified, and run the message-send cap.
+// SendTestCore accepts (or HITL-holds) a platform test email to the agent's
+// own address. HTTP-free; shared by the legacy handler and the v1 layer. The
+// caller has already authed, resolved + owned the agent, domain-verified,
+// rate-limited, and run the message-send cap.
+//
+// The message is PLATFORM-originated (From/envelope = noreply@<from_domain>)
+// and traverses the real external SMTP → inbound route back to the agent's
+// public address — that round-trip is the endpoint's purpose, so it must never
+// route through the agent self-send loopback. Delivery is queue-first like
+// every other send: a durable msg_ resource + outbound_send job are committed
+// before any provider I/O (status=accepted), and the terminal outcome arrives
+// via GET /v1/messages/{id} and the email.sent / email.failed events.
 func (a *API) SendTestCore(ctx context.Context, agent *identity.AgentIdentity) (*OutboundResult, *OutboundError) {
-	envelopeFrom := fmt.Sprintf("noreply@%s", a.fromDomain)
-	headerFrom := fmt.Sprintf("%q <%s>", "e2a", envelopeFrom)
 	to := []string{agent.EmailAddress()}
 	subject := "Test email from e2a"
 	body := fmt.Sprintf("This is a test email for %s.\n\nYour agent is set up and ready to receive emails.", agent.EmailAddress())
+	testReq := outbound.SendRequest{To: to, Subject: subject, Body: body}
+
+	// Suppression enforcement — the same recipient gate DeliverOutbound runs
+	// (decision 9): a suppressed agent address must never be submitted.
+	if supErr := a.checkSuppression(ctx, agent.UserID, testReq); supErr != nil {
+		return nil, supErr
+	}
+
+	// Mint the thread anchor exactly like DeliverOutbound does for a fresh send
+	// (#328), so the inbound copy — arriving over real SMTP with the
+	// X-E2A-Conversation-ID header — threads onto this outbound row.
+	testReq.ConversationID = identity.NewConversationID()
 
 	// A platform test is a normal outbound send through the same screening:
 	// block ⇒ refuse, review ⇒ hold, flag ⇒ send + annotate.
-	testReq := outbound.SendRequest{To: to, Subject: subject, Body: body}
 	verdict := a.screenOutbound(ctx, agent, testReq)
 	if verdict.Block() {
 		a.auditRowless(ctx, agent, blockAuditID(agent.ID, testReq), testReq, verdict)
@@ -1271,22 +1288,68 @@ func (a *API) SendTestCore(ctx context.Context, agent *identity.AgentIdentity) (
 		return &OutboundResult{Held: true, PendingMessageID: msg.ID, ApprovalExpiresAt: msg.ApprovalExpiresAt}, nil
 	}
 
-	message, err := outbound.ComposeMessage(headerFrom, to, nil, subject, body, "text/plain", "", nil, a.fromDomain, "", "")
-	if err != nil {
-		log.Printf("[api] compose test email failed: %v", err)
-		return nil, &OutboundError{Status: http.StatusInternalServerError, Code: "internal_error", Msg: "failed to compose test email"}
+	res, oerr := a.acceptPlatformSend(ctx, agent, testReq, "test")
+	if oerr != nil {
+		return nil, oerr
 	}
-	messageID, err := a.smtpRelay.Send(envelopeFrom, to, message)
-	if err != nil {
-		log.Printf("[api] send test email failed: %v", err)
-		return nil, &OutboundError{Status: http.StatusInternalServerError, Code: "internal_error", Msg: fmt.Sprintf("failed to send test email: %v", err)}
-	}
-	log.Printf("[api] test email sent to %s (message_id=%s)", agent.EmailAddress(), messageID)
-	// flag verdict: the test send persists no message row, so audit row-less.
 	if verdict.Annotate() {
-		a.auditRowless(ctx, agent, blockAuditID(agent.ID, testReq), testReq, verdict)
+		a.annotateAndAudit(ctx, agent, res.MessageID, testReq, verdict)
 	}
-	return &OutboundResult{MessageID: messageID, Method: "smtp"}, nil
+	return res, nil
+}
+
+// acceptPlatformSend durably persists + enqueues a PLATFORM-originated
+// outbound message (From/envelope = noreply@<from_domain>, never an agent
+// identity) on the same queue-first pipeline as DeliverOutbound's external
+// branch: message row (delivery_status='accepted') + outbound_send job +
+// job-id stamp in ONE transaction, with provider I/O strictly in the River
+// worker (internal/outboundsend), which records the terminal outcome
+// (email.sent / email.failed) and meters on success.
+//
+// It exists for the agent test send (msgType="test"), whose recipient is the
+// agent's OWN address: the agent-identity compose strips the agent's own
+// address ("no valid recipients") and the self-send predicate would reroute
+// delivery to local loopback — either would defeat the endpoint's purpose of
+// exercising the real external SMTP → inbound route. Callers run suppression
+// + screening first; this is the smallest accept seam, not a policy layer.
+func (a *API) acceptPlatformSend(ctx context.Context, agent *identity.AgentIdentity, req outbound.SendRequest, msgType string) (*OutboundResult, *OutboundError) {
+	// Missing queue wiring is a startup bug; fail closed before provider I/O
+	// and never submit inline (same contract as DeliverOutbound).
+	if a.outboundEnq == nil {
+		log.Printf("[api] outbound queue unavailable: agent=%s to=%v (platform %s)", agent.Domain, req.To, msgType)
+		return nil, &OutboundError{Status: http.StatusInternalServerError, Code: "internal_error", Msg: "outbound delivery queue unavailable"}
+	}
+	comp, cerr := a.sender.ComposePlatformForAccept(req)
+	if cerr != nil {
+		if outbound.IsValidationError(cerr) {
+			return nil, &OutboundError{Status: http.StatusBadRequest, Code: "invalid_request", Msg: cerr.Error()}
+		}
+		log.Printf("[api] platform compose failed: agent=%s to=%v error=%v", agent.Domain, req.To, cerr)
+		return nil, &OutboundError{Status: http.StatusInternalServerError, Code: "internal_error", Msg: fmt.Sprintf("compose failed: %v", cerr)}
+	}
+	var accepted *identity.Message
+	if txErr := a.store.WithTx(ctx, func(tx pgx.Tx) error {
+		msg, err := a.store.CreateOutboundMessageTx(ctx, tx, agent.ID, comp.To, comp.CC, comp.BCC, req.Subject, msgType, comp.Method, "", req.ConversationID, comp.Raw, "accepted", comp.EnvelopeFrom, comp.SentAs)
+		if err != nil {
+			return err
+		}
+		jobID, err := a.outboundEnq.EnqueueSendTx(ctx, tx, msg.ID)
+		if err != nil {
+			return err
+		}
+		if err := a.store.StampSendJobIDTx(ctx, tx, msg.ID, jobID); err != nil {
+			return err
+		}
+		accepted = msg
+		return nil
+	}); txErr != nil {
+		log.Printf("[api] platform accept tx failed: agent=%s to=%v error=%v", agent.Domain, req.To, txErr)
+		return nil, &OutboundError{Status: http.StatusInternalServerError, Code: "internal_error", Msg: "failed to accept message for send"}
+	}
+	slug, _, _ := strings.Cut(agent.EmailAddress(), "@")
+	log.Printf("[mail:%s] dir=outbound type=%s status=accepted from=%s to=%v slug=%s conv_id=%s subject=%q platform_originated=true",
+		accepted.ID, msgType, comp.EnvelopeFrom, comp.To, slug, req.ConversationID, req.Subject)
+	return &OutboundResult{MessageID: accepted.ID, Status: "accepted", SentAs: comp.SentAs, Method: comp.Method}, nil
 }
 
 // --- Send Email ---

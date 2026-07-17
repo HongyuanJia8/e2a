@@ -90,7 +90,7 @@ export function SuccessPanel({
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
-              Email is waiting in {agent.email}&apos;s inbox
+              Test email is on its way to {agent.email}
             </button>
             <p className="mt-3 text-sm text-muted text-center">
               Connect your agent below to receive it. It will be the first message that arrives.

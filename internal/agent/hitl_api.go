@@ -184,10 +184,21 @@ func (a *API) approveOutboundAsync(ctx context.Context, agent *identity.AgentIde
 		return nil, false, err
 	}
 	attachReferencesChain(ctx, a.store, agent.ID, &sendReq)
-	if isSelfSend(sendReq, agent.EmailAddress()) {
+	// A held platform test (type="test") targets the agent's own address by
+	// design, so the self-send predicate below would silently reroute its
+	// approval to local loopback — dropping the real SMTP → inbound round-trip
+	// the test exists to exercise. Keep it platform-originated instead: same
+	// compose the accept path (acceptPlatformSend) uses, same queued delivery.
+	isPlatformTest := draft.Type == "test"
+	if !isPlatformTest && isSelfSend(sendReq, agent.EmailAddress()) {
 		return nil, false, nil // self-send — caller uses the sync loopback path
 	}
-	comp, err := a.sender.ComposeForAccept(agent, sendReq)
+	var comp *outbound.ComposeResult
+	if isPlatformTest {
+		comp, err = a.sender.ComposePlatformForAccept(sendReq)
+	} else {
+		comp, err = a.sender.ComposeForAccept(agent, sendReq)
+	}
 	if err != nil {
 		return nil, false, err
 	}

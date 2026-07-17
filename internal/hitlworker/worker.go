@@ -236,10 +236,22 @@ func (w *Worker) autoApproveAsync(ctx context.Context, agent *identity.AgentIden
 		return true
 	}
 	w.attachReferencesChain(ctx, agent.ID, &req)
-	if loopback.IsSelfSend(req, agent.EmailAddress()) {
+	// A held platform test (type="test") targets the agent's own address by
+	// design, so the self-send predicate below would silently reroute its TTL
+	// auto-approval to local loopback — dropping the real SMTP → inbound
+	// round-trip the test exists to exercise. Keep it platform-originated
+	// (noreply@<from_domain>) instead, mirroring the human-approve path in
+	// internal/agent/hitl_api.go.
+	isPlatformTest := msg.Type == "test"
+	if !isPlatformTest && loopback.IsSelfSend(req, agent.EmailAddress()) {
 		return false // self-send — fall through to the local loopback path
 	}
-	comp, err := w.sender.ComposeForAccept(agent, req)
+	var comp *outbound.ComposeResult
+	if isPlatformTest {
+		comp, err = w.sender.ComposePlatformForAccept(req)
+	} else {
+		comp, err = w.sender.ComposeForAccept(agent, req)
+	}
 	if err != nil {
 		// Compose failures are deterministic (bad addresses / no visible
 		// recipients) — a retry can't fix them, so reject the draft.
