@@ -6,10 +6,14 @@
 //
 // Delivery is at-least-once: River re-drives a crashed job, so the provider may
 // receive a duplicate if the SMTP submit is accepted but the worker crashes before
-// marking the message sent. This is the irreducible residual. NOTE: the
-// X-E2A-Message-ID header + SNS-based reconciliation of that duplicate (and the
-// terminal-failure guard / delivery.Merge exception) are POST-GA — not implemented
-// here; see async-message-pipeline.md §7 "out of scope".
+// marking the message sent. That residual is narrowed by the X-E2A-Message-ID
+// wire header + SNS reconciliation (async-send-contract §3.1): the SNS consumer
+// records provider-accept evidence on the row, the re-driven claim then settles
+// the message as sent instead of re-submitting, and the terminal-failure guard
+// (here and in the terminal reconciler, via the store's guarded MarkFailed)
+// never declares a provider-accepted row failed. A final attempt that fails
+// ambiguously defers its terminal write to the reconciler's provider-evidence
+// grace window rather than firing an immediate — possibly false — email.failed.
 //
 // One SMTP attempt per job attempt — River owns the multi-attempt envelope via
 // NextRetry, so Work() stays short (the deliverer does a single submit, not an
@@ -75,6 +79,16 @@ type SendJob struct {
 	// AcceptedAt is messages.created_at — the outage tail's clock, so a job that has
 	// been snoozing through an outage past sendRetryHorizon can be terminated.
 	AcceptedAt time.Time
+	// ProviderAccepted is set when authoritatively correlated provider-accept
+	// evidence (an SNS-verified, header- or provider-id-matched SES
+	// notification) has been recorded for this message: the provider already
+	// has it — an earlier attempt's submit landed in the SMTP-accept↔mark-sent
+	// crash window — so the worker settles the row as sent instead of
+	// re-submitting a duplicate.
+	ProviderAccepted bool
+	// ProviderMessageID is the evidence-repaired provider id accompanying
+	// ProviderAccepted ('' when no evidence).
+	ProviderMessageID string
 }
 
 // pastRetryHorizon reports whether the accept is older than the outage-tolerant
@@ -130,9 +144,18 @@ type Store interface {
 	// MarkSent records the provider outcome monotonically from a pre-terminal
 	// state, including when trash won after ClaimSend.
 	MarkSent(ctx context.Context, messageID, providerMessageID, sentAs string) error
-	// MarkFailed sets delivery_status='failed' + detail and emits email.failed, in
-	// one transaction.
-	MarkFailed(ctx context.Context, messageID string, attempt int, detail string) error
+	// MarkFailed is the GUARDED terminal write (async-send-contract §3.1): if
+	// provider-accept evidence has reached the row it settles the message as
+	// sent (+ email.sent) instead; otherwise it sets delivery_status='failed'
+	// with the given failure provenance + detail and emits email.failed — all
+	// in one transaction. Callers therefore invoke it to "finalize a terminal
+	// state", not to unconditionally fail.
+	MarkFailed(ctx context.Context, messageID string, attempt int, detail string, source delivery.FailureSource) error
+	// DeferTerminalFailure records a final attempt's diagnostic + releases the
+	// I/O claim WITHOUT declaring failed: the terminal reconciler declares the
+	// outcome after the provider-evidence grace window (or settles the row as
+	// sent when evidence arrives first).
+	DeferTerminalFailure(ctx context.Context, messageID string, jobID int64, detail string) error
 	// SuppressedRecipients returns the subset of recipients on the owning
 	// account's suppression list — the last-line guard before provider I/O.
 	SuppressedRecipients(ctx context.Context, userID string, recipients []string) ([]string, error)
@@ -173,6 +196,13 @@ func (w *SendWorker) Work(ctx context.Context, job *river.Job[OutboundSendArgs])
 	if j.alreadyDone() {
 		return nil // already submitted (sent+) — idempotent re-drive
 	}
+	if j.ProviderAccepted {
+		// Provider-evidence guard (§3.1): an SNS notification already proved an
+		// earlier attempt's submit reached the provider — the crash window
+		// between SMTP accept and mark-sent. Re-submitting would duplicate the
+		// email; settle the row as sent (email.sent + metering, in the store).
+		return w.store.MarkSent(ctx, j.MessageID, j.ProviderMessageID, j.SentAs)
+	}
 
 	// Final suppression guard before provider I/O: a suppression added AFTER
 	// approval/acceptance (bounce, complaint, or manual add while the job sat
@@ -192,7 +222,7 @@ func (w *SendWorker) Work(ctx context.Context, job *river.Job[OutboundSendArgs])
 	}
 	if len(suppressed) > 0 {
 		supErr := fmt.Errorf("recipient_suppressed: %s — remove via DELETE /v1/account/suppressions/{address}", strings.Join(suppressed, ", "))
-		w.markFailed(ctx, j.MessageID, job.Attempt, supErr.Error())
+		w.markFailed(ctx, j.MessageID, job.Attempt, supErr.Error(), delivery.FailureSourceLocal)
 		return river.JobCancel(supErr)
 	}
 
@@ -203,17 +233,20 @@ func (w *SendWorker) Work(ctx context.Context, job *river.Job[OutboundSendArgs])
 	}
 
 	// Permanent failure (validation / permanent 5xx) — terminal now, no retries.
+	// Provenance 'provider': SES itself refused this submission, so the §3.1
+	// correction never revives it.
 	if out.Permanent {
-		w.markFailed(ctx, j.MessageID, job.Attempt, out.Err.Error())
+		w.markFailed(ctx, j.MessageID, job.Attempt, out.Err.Error(), delivery.FailureSourceProvider)
 		return river.JobCancel(out.Err)
 	}
 	// Provider outage (relay unreachable) — snooze WITHOUT burning an attempt so a
 	// multi-hour SES incident defers instead of exhausting MaxSendAttempts and
 	// mass-firing false email.failed (§8 circuit breaker). Bounded by the retry
-	// horizon: once the accept is older than sendRetryHorizon, give up terminally.
+	// horizon: once the accept is older than sendRetryHorizon, give up terminally
+	// (provenance 'local': the provider never confirmed a rejection).
 	if out.Outage {
 		if j.pastRetryHorizon() {
-			w.markFailed(ctx, j.MessageID, job.Attempt, out.Err.Error())
+			w.markFailed(ctx, j.MessageID, job.Attempt, out.Err.Error(), delivery.FailureSourceLocal)
 			return fmt.Errorf("outbound send failed (provider outage past %s horizon): %w", sendRetryHorizon, out.Err)
 		}
 		if err := w.store.ReleaseSend(ctx, j.MessageID, job.ID); err != nil {
@@ -221,11 +254,17 @@ func (w *SendWorker) Work(ctx context.Context, job *river.Job[OutboundSendArgs])
 		}
 		return river.JobSnooze(outageSnoozeInterval)
 	}
-	// Last attempt — River discards after this, so the terminal 'failed' write is
-	// the row's last chance (markFailed retries it).
+	// Last attempt — River discards after this. Do NOT declare failed inline:
+	// this attempt's error can be ambiguous (the connection may have died after
+	// SES accepted the DATA), and its Send/Delivery notification may still be in
+	// flight. Record the diagnostic + release the claim; the terminal reconciler
+	// declares the outcome after the provider-evidence grace window — evidence →
+	// sent, none → failed + exactly one email.failed (deterministic event id).
 	if job.Attempt >= MaxSendAttempts {
-		w.markFailed(ctx, j.MessageID, job.Attempt, out.Err.Error())
-		return fmt.Errorf("outbound send failed (final attempt %d): %w", job.Attempt, out.Err)
+		if err := w.store.DeferTerminalFailure(ctx, j.MessageID, job.ID, out.Err.Error()); err != nil {
+			log.Printf("[outbound-send] defer terminal failure for %s: %v", j.MessageID, err)
+		}
+		return fmt.Errorf("outbound send failed (final attempt %d; outcome deferred to terminal reconciler): %w", job.Attempt, out.Err)
 	}
 	// Retryable — River reschedules per NextRetry.
 	if err := w.store.ReleaseSend(ctx, j.MessageID, job.ID); err != nil {
@@ -245,10 +284,10 @@ const (
 	terminalWriteBackoff = 150 * time.Millisecond
 )
 
-func (w *SendWorker) markFailed(ctx context.Context, messageID string, attempt int, detail string) {
+func (w *SendWorker) markFailed(ctx context.Context, messageID string, attempt int, detail string, source delivery.FailureSource) {
 	var err error
 	for i := 0; i < terminalWriteRetries; i++ {
-		if err = w.store.MarkFailed(ctx, messageID, attempt, detail); err == nil {
+		if err = w.store.MarkFailed(ctx, messageID, attempt, detail, source); err == nil {
 			return
 		}
 		select {

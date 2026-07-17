@@ -36,6 +36,18 @@ type Store interface {
 	// time. found=false when the id is unknown (message expired, or an event
 	// for another deployment).
 	CorrelateBySESMessageID(ctx context.Context, sesMessageID string) (m *CorrelatedMessage, found bool, err error)
+	// CorrelateByE2AMessageID finds the outbound message by the e2a message id
+	// SES echoed back from the MessageIDHeader stamped at submit time — the
+	// correlation fallback for the SMTP-accept↔mark-sent crash window, where
+	// the provider id from the 250 response was never captured. Same return
+	// shape as CorrelateBySESMessageID; found=false for unknown/non-outbound.
+	CorrelateByE2AMessageID(ctx context.Context, e2aMessageID string) (m *CorrelatedMessage, found bool, err error)
+	// RecordProviderAcceptEvidence durably notes that SES reported having
+	// accepted this message's submission (any correlated post-acceptance
+	// notification kind) and repairs a provider_message_id lost to the
+	// crash window. Idempotent. The worker/terminal-reconciler guards read
+	// this evidence before declaring a terminal failure.
+	RecordProviderAcceptEvidence(ctx context.Context, messageID, sesMessageID string) error
 	// RecordDeliveryOutcome upserts the per-recipient status monotonically and
 	// recomputes the message rollup (worst status by precedence). Idempotent:
 	// a duplicate/older event is a no-op.
@@ -123,20 +135,47 @@ func NewConsumer(store Store, fire Firer) *Consumer {
 	return &Consumer{store: store, fire: fire}
 }
 
-// Process applies one normalized SES event. Unknown/uncorrelated messages and
-// event kinds with no recipient outcomes are no-ops (returns nil) — an SNS
-// notification e2a can't act on must still be ACKed so SES stops retrying.
+// Process applies one normalized SES event. Unknown/uncorrelated messages are
+// no-ops (returns nil) — an SNS notification e2a can't act on must still be
+// ACKed so SES stops retrying. A correlated event with no recipient outcomes
+// (e.g. an SES Send) still records provider-accept evidence before returning.
 func (c *Consumer) Process(ctx context.Context, ev *Event) error {
-	if ev == nil || len(ev.Recipients) == 0 {
+	if ev == nil {
 		return nil
 	}
 	m, found, err := c.store.CorrelateBySESMessageID(ctx, ev.SESMessageID)
 	if err != nil {
 		return err
 	}
+	if !found && validE2AMessageID(ev.E2AMessageID) {
+		// Correlation fallback: the X-E2A-Message-ID header e2a stamped on the
+		// wire, echoed back in the (signature-verified — handler.go verifies
+		// before Process) notification. This is what makes feedback for the
+		// SMTP-accept↔mark-sent crash window authoritatively correlatable:
+		// that window never captured a provider id, so the SES-id lookup
+		// above cannot match.
+		m, found, err = c.store.CorrelateByE2AMessageID(ctx, ev.E2AMessageID)
+		if err != nil {
+			return err
+		}
+	}
 	if !found {
+		if len(ev.Recipients) == 0 {
+			return nil
+		}
 		log.Printf("[delivery] SES %s for unknown message id=%s (expired/foreign); acking", ev.Kind, ev.SESMessageID)
 		return nil
+	}
+
+	// Record provider-accept evidence BEFORE the per-recipient outcomes: any
+	// post-acceptance notification kind proves SES accepted the submission,
+	// and the terminal-failure guards (send worker final attempt, terminal
+	// reconciler) read this evidence before declaring `failed`. An SES Reject
+	// explicitly means the submission was NOT accepted — never evidence.
+	if ev.Kind.impliesProviderAcceptance() {
+		if err := c.store.RecordProviderAcceptEvidence(ctx, m.MessageID, ev.SESMessageID); err != nil {
+			return err
+		}
 	}
 
 	recorded := 0

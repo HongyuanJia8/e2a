@@ -6,6 +6,17 @@ import (
 	"strings"
 )
 
+// MessageIDHeader is the stable e2a correlation marker (async-send-contract
+// §3.1 / async-message-pipeline §4): stamped on the outbound wire message at
+// submit time (internal/outbound.Sender.SubmitOnce) and echoed back by SES in
+// notification payloads (`mail.headers`) when the SES configuration set has
+// "include original headers" enabled. SES overrides supplied Message-ID/Date
+// headers on the wire, so this custom header is the only submit-time value
+// that survives into notifications — it correlates feedback for the
+// SMTP-accept↔mark-sent crash window, where the provider_message_id from the
+// 250 response was never captured.
+const MessageIDHeader = "X-E2A-Message-ID"
+
 // EventKind is the normalized SES event category.
 type EventKind string
 
@@ -18,6 +29,19 @@ const (
 	KindReject        EventKind = "Reject"
 	KindOther         EventKind = "Other"
 )
+
+// impliesProviderAcceptance reports whether this notification kind can only
+// occur AFTER SES accepted the submission. Send/Delivery/DeliveryDelay/Bounce/
+// Complaint all describe a message SES took responsibility for; Reject
+// explicitly means SES refused the submission, and Other is unknown — neither
+// is provider-accept evidence.
+func (k EventKind) impliesProviderAcceptance() bool {
+	switch k {
+	case KindSend, KindDelivery, KindDeliveryDelay, KindBounce, KindComplaint:
+		return true
+	}
+	return false
+}
 
 // RecipientOutcome is the delivery result for one address from one SES event.
 type RecipientOutcome struct {
@@ -33,6 +57,12 @@ type RecipientOutcome struct {
 type Event struct {
 	Kind         EventKind
 	SESMessageID string // the mail.messageId — correlates to messages.provider_message_id
+	// E2AMessageID is the e2a message id echoed back by SES from the
+	// MessageIDHeader stamped at submit time (`mail.headers` — present only
+	// when the SES configuration set enables "include original headers").
+	// It is the correlation fallback for the SMTP-accept↔mark-sent crash
+	// window; empty when headers are absent or the marker isn't among them.
+	E2AMessageID string
 	Recipients   []RecipientOutcome
 	// BounceType / BounceSubType carry the SES bounce classification (Bounce
 	// events only; empty otherwise). BounceType is normalized to the stable
@@ -52,6 +82,15 @@ type sesNotification struct {
 	Mail             struct {
 		MessageID   string   `json:"messageId"`
 		Destination []string `json:"destination"`
+		// Headers is the submitted message's original header list, echoed by
+		// SES when "include original headers" is enabled on the configuration
+		// set. HeadersTruncated marks a partial list (very large header
+		// blocks); whatever IS present is still usable.
+		Headers []struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+		} `json:"headers"`
+		HeadersTruncated bool `json:"headersTruncated"`
 	} `json:"mail"`
 	Bounce *struct {
 		BounceType        string `json:"bounceType"` // Permanent | Transient | Undetermined
@@ -98,6 +137,14 @@ func ParseSESNotification(messageBody []byte) (*Event, error) {
 		return nil, fmt.Errorf("SES notification missing mail.messageId")
 	}
 	ev := &Event{SESMessageID: n.Mail.MessageID}
+	for _, h := range n.Mail.Headers {
+		if strings.EqualFold(h.Name, MessageIDHeader) {
+			// Defensive trim: the marker is stamped bare, but tolerate an
+			// angle-bracketed echo.
+			ev.E2AMessageID = strings.Trim(strings.TrimSpace(h.Value), "<>")
+			break
+		}
+	}
 
 	switch typ {
 	case "Delivery":
@@ -168,6 +215,30 @@ func ParseSESNotification(messageBody []byte) (*Event, error) {
 }
 
 func norm(addr string) string { return strings.ToLower(strings.TrimSpace(addr)) }
+
+// maxE2AMessageIDLen bounds a plausible e2a message id ("msg_" + 32 hex chars
+// today; headroom for future id shapes without accepting arbitrary strings).
+const maxE2AMessageIDLen = 64
+
+// validE2AMessageID reports whether s is shaped like an e2a message id
+// (`msg_` prefix + [A-Za-z0-9_-] tail, bounded length) — the pre-lookup shape
+// check on the header-echoed correlation marker. The value only ever arrives
+// off a signature-verified SNS notification, but it originated inside a
+// message header block, so it is validated before being used as a lookup key.
+func validE2AMessageID(s string) bool {
+	const prefix = "msg_"
+	if !strings.HasPrefix(s, prefix) || len(s) <= len(prefix) || len(s) > maxE2AMessageIDLen {
+		return false
+	}
+	for _, r := range s[len(prefix):] {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
 
 // normalizeBounceType maps SES's bounceType (Permanent | Transient |
 // Undetermined, case per SES docs) to the stable event vocabulary. Anything

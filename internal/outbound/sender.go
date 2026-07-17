@@ -8,6 +8,7 @@ import (
 	"net/mail"
 	"strings"
 
+	"github.com/tokencanopy/e2a/internal/delivery"
 	"github.com/tokencanopy/e2a/internal/dkim"
 	"github.com/tokencanopy/e2a/internal/identity"
 	"github.com/tokencanopy/e2a/internal/mailfrom"
@@ -276,14 +277,37 @@ func (s *Sender) ComposeForAccept(agent *identity.AgentIdentity, req SendRequest
 }
 
 // SubmitOnce submits the persisted Sent-folder bytes in a SINGLE SMTP attempt
-// (River owns retries) and returns the provider Message-ID. It re-attaches the
-// X-SES-CONFIGURATION-SET header that Send prepends post-DKIM — raw_message is
-// stored WITHOUT it (SES strips it before delivery; the recipient/Sent-folder copy
-// must not carry it), so it is re-added here at submit time. Keeping the header
-// logic here (not in the worker) means Send and the async path share one source of
-// truth for what SES actually receives.
-func (s *Sender) SubmitOnce(envelopeFrom string, recipients []string, sentBody []byte) (string, error) {
-	return s.smtpRelay.SendOnce(envelopeFrom, recipients, s.applySESConfigSet(sentBody))
+// (River owns retries) and returns the provider Message-ID. It attaches two
+// wire-time headers post-DKIM (never in the signed header set):
+//
+//   - X-E2A-Message-ID (delivery.MessageIDHeader) — the stable e2a correlation
+//     marker (async-send-contract §3.1). SES overrides supplied Message-ID/Date
+//     headers, but echoes original headers back in its notifications
+//     (mail.headers, when "include original headers" is enabled on the
+//     configuration set), so this is the value that correlates feedback for
+//     the SMTP-accept↔mark-sent crash window. Unlike the config-set header SES
+//     does NOT strip it — recipients see it too; it is deliberately a stable
+//     public marker. Stamped at submit time (not compose time) so messages
+//     accepted before this header existed still carry it on re-drive.
+//
+//   - X-SES-CONFIGURATION-SET — re-attached because raw_message is stored
+//     WITHOUT it (SES strips it before delivery; the recipient/Sent-folder
+//     copy must not carry it).
+//
+// Keeping the header logic here (not in the worker) means Send and the async
+// path share one source of truth for what SES actually receives.
+func (s *Sender) SubmitOnce(messageID, envelopeFrom string, recipients []string, sentBody []byte) (string, error) {
+	return s.smtpRelay.SendOnce(envelopeFrom, recipients, s.applySESConfigSet(applyCorrelationHeader(sentBody, messageID)))
+}
+
+// applyCorrelationHeader prepends the X-E2A-Message-ID marker. The id is
+// server-minted, but sanitize anyway — this is a header write. Empty id
+// (defensive) = no header.
+func applyCorrelationHeader(message []byte, messageID string) []byte {
+	if messageID == "" {
+		return message
+	}
+	return append([]byte(delivery.MessageIDHeader+": "+sanitizeHeaderValue(messageID)+"\r\n"), message...)
 }
 
 // compose runs the full recipient-normalization + From-gating + MIME-compose +

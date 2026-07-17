@@ -353,3 +353,95 @@ func TestDetailNotClobberedByLaterEvent(t *testing.T) {
 		t.Fatalf("detail=%q, want the preserved bounce reason", detail)
 	}
 }
+
+// TestCrashWindowCorrectionEndToEnd drives the full §3.1 correction chain on a
+// real store: an outbound message whose SMTP accept was never recorded (no
+// provider id) is falsely failed locally; the raw SNS Delivery notification —
+// carrying the X-E2A-Message-ID header echo — is parsed, header-correlated,
+// records provider-accept evidence (repairing the provider id), and corrects
+// the stored message + recipient rollup to delivered.
+func TestCrashWindowCorrectionEndToEnd(t *testing.T) {
+	pool := testutil.TestDB(t)
+	ctx := context.Background()
+	store := identity.NewStore(pool)
+
+	// Seed WITHOUT a provider id and WITHOUT MarkMessageSent — the
+	// SMTP-accept↔mark-sent crash window shape.
+	user, err := store.CreateOrGetUser(ctx, "owner-crashwin@example.com", "Owner", "g-crashwin")
+	if err != nil {
+		t.Fatalf("CreateOrGetUser: %v", err)
+	}
+	domain := "crashwin.example.com"
+	if _, err := store.ClaimOrCreateDomain(ctx, domain, user.ID); err != nil {
+		t.Fatalf("ClaimOrCreateDomain: %v", err)
+	}
+	if err := store.VerifyDomain(ctx, domain, user.ID); err != nil {
+		t.Fatalf("VerifyDomain: %v", err)
+	}
+	agentEmail := "bot@" + domain
+	if _, err := store.CreateAgent(ctx, agentEmail, domain, "", "", "", user.ID); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	msg, err := store.CreateOutboundMessage(ctx, agentEmail, []string{"a@x.com"}, nil, nil, "Subj", "send", "smtp", "", "", nil)
+	if err != nil {
+		t.Fatalf("CreateOutboundMessage: %v", err)
+	}
+	// Locally inferred terminal failure (reconciler/final-attempt shape).
+	if _, err := pool.Exec(ctx,
+		`UPDATE messages SET delivery_status='failed', delivery_detail='send job discarded',
+		        delivery_failure_source='local' WHERE id=$1`, msg.ID); err != nil {
+		t.Fatalf("force local failed: %v", err)
+	}
+
+	// The raw SES notification with the header echo (what /webhooks/ses hands
+	// to ParseSESNotification after SNS signature verification).
+	ev, err := delivery.ParseSESNotification([]byte(`{
+		"eventType": "Delivery",
+		"mail": {
+			"messageId": "ses-crashwin-1",
+			"destination": ["a@x.com"],
+			"headers": [
+				{"name": "From", "value": "` + agentEmail + `"},
+				{"name": "X-E2A-Message-ID", "value": "` + msg.ID + `"}
+			]
+		},
+		"delivery": {"recipients": ["a@x.com"]}
+	}`))
+	if err != nil {
+		t.Fatalf("ParseSESNotification: %v", err)
+	}
+	consumer := delivery.NewConsumer(store, nil)
+	if err := consumer.Process(ctx, ev); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+
+	var status, detail, source, providerID string
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(delivery_status,''), COALESCE(delivery_detail,''),
+		        COALESCE(delivery_failure_source,''), COALESCE(provider_message_id,'')
+		   FROM messages WHERE id=$1`, msg.ID,
+	).Scan(&status, &detail, &source, &providerID); err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	if status != "delivered" {
+		t.Errorf("delivery_status=%q, want delivered (§3.1 correction)", status)
+	}
+	if source != "" || detail != "" {
+		t.Errorf("source/detail = %q/%q, want cleared", source, detail)
+	}
+	if providerID != "ses-crashwin-1" {
+		t.Errorf("provider_message_id=%q, want repaired from the notification", providerID)
+	}
+
+	// Replay of the same notification is idempotent.
+	if err := consumer.Process(ctx, ev); err != nil {
+		t.Fatalf("replay Process: %v", err)
+	}
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(delivery_status,'') FROM messages WHERE id=$1`, msg.ID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "delivered" {
+		t.Errorf("after replay delivery_status=%q, want delivered", status)
+	}
+}

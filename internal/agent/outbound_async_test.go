@@ -14,6 +14,7 @@ import (
 
 	"github.com/tokencanopy/e2a/internal/agent"
 	"github.com/tokencanopy/e2a/internal/config"
+	"github.com/tokencanopy/e2a/internal/delivery"
 	"github.com/tokencanopy/e2a/internal/identity"
 	"github.com/tokencanopy/e2a/internal/outbound"
 	"github.com/tokencanopy/e2a/internal/outboundsend"
@@ -578,7 +579,7 @@ func TestOutboundSendStore_MarkFailed(t *testing.T) {
 	}
 
 	adapter := agent.NewOutboundSendStore(store, outbox, usage.NewNoopUsageTracker())
-	if err := adapter.MarkFailed(ctx, res.MessageID, 6, "550 mailbox unavailable"); err != nil {
+	if err := adapter.MarkFailed(ctx, res.MessageID, 6, "550 mailbox unavailable", delivery.FailureSourceProvider); err != nil {
 		t.Fatalf("MarkFailed: %v", err)
 	}
 
