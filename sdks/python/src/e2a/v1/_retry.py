@@ -27,6 +27,7 @@ import httpx
 from .errors import (
     E2AError,
     IDEMPOTENCY_IN_FLIGHT_CODE,
+    _parse_retry_after,
     connection_error,
     error_code_from_api_exception,
     from_api_exception,
@@ -80,21 +81,15 @@ def _backoff_ms(cfg: RetryConfig, attempt: int, exc: Optional[ApiException]) -> 
 
 def _retry_after_ms(exc: ApiException) -> Optional[float]:
     headers = getattr(exc, "headers", None)
-    if not headers:
+    if not headers or not hasattr(headers, "items"):
         return None
-    try:
-        items = headers.items()
-    except AttributeError:
-        return None
-    for k, v in items:
-        if k.lower() == "retry-after":
-            try:
-                secs = float(v)
-                if secs >= 0:
-                    return secs * 1000.0
-            except (TypeError, ValueError):
-                return None
-    return None
+    # Reuse the error layer's parser so the retry path honors BOTH numeric
+    # seconds and the HTTP-date form (RFC 9110 §10.2.3, common behind CDNs) —
+    # identically to the error path and to the TS SDK. This previously parsed
+    # only integer seconds and silently fell back to exp-backoff on a dated
+    # Retry-After. Returns seconds; convert to ms for the backoff calculation.
+    secs = _parse_retry_after(headers)
+    return None if secs is None else secs * 1000.0
 
 
 async def request_with_retry(

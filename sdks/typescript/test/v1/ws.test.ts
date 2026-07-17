@@ -263,6 +263,29 @@ describe("WSListener close-code contract (docs/api.md)", () => {
     expect(FakeWS.instances).toHaveLength(1);
     expect(seen).toHaveLength(0);
   });
+
+  it("close() during the reconnect backoff cancels the pending redial (no zombie connection)", async () => {
+    FakeWS.instances = [];
+    vi.resetModules();
+    vi.doMock("ws", () => ({ default: FakeWS }));
+    vi.useFakeTimers();
+    const { WSListener } = await import("../../src/v1/ws.js");
+    const listener = new WSListener({
+      apiKey: "k",
+      agentEmail: "bot@x.dev",
+      reconnect: true,
+      reconnectDelay: 1000,
+    });
+    listener.connect();
+    expect(FakeWS.instances).toHaveLength(1);
+    FakeWS.instances[0].serverClose(1006, "");
+    listener.close();
+    await vi.advanceTimersByTimeAsync(60_000);
+    vi.useRealTimers();
+    vi.doUnmock("ws");
+    vi.resetModules();
+    expect(FakeWS.instances).toHaveLength(1);
+  });
 });
 
 describe("E2AClient.listen()", () => {
@@ -459,6 +482,43 @@ describe("WSStream error handling (async-iterator consumers)", () => {
     expect(FakeWS.instances).toHaveLength(1); // normal close never redials
 
     stream.close();
+    vi.doUnmock("ws");
+    vi.resetModules();
+  });
+
+  it("caps the un-consumed buffer, dropping the oldest events and warning once", async () => {
+    const { stream } = await makeStream(10, /* reconnect */ false);
+    const { WS_MAX_BUFFERED_EVENTS } = await import("../../src/v1/ws.js");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Deliver more than the cap with no iterator awaiting, so every event is
+    // initially queued in the stream's buffer.
+    const overflow = 5;
+    const total = WS_MAX_BUFFERED_EVENTS + overflow;
+    for (let i = 0; i < total; i++) {
+      FakeWS.instances[0].serverMessage({
+        type: "email.received",
+        id: `evt_${i}`,
+        schema_version: "1",
+        created_at: "2026-07-01T10:30:00Z",
+        data: {},
+      });
+    }
+
+    const iterator = stream[Symbol.asyncIterator]();
+    const ids: string[] = [];
+    for (let i = 0; i < WS_MAX_BUFFERED_EVENTS; i++) {
+      const result = await iterator.next();
+      expect(result.done).toBe(false);
+      ids.push((result.value as { id: string }).id);
+    }
+    expect(ids).toHaveLength(WS_MAX_BUFFERED_EVENTS);
+    expect(ids[0]).toBe(`evt_${overflow}`);
+    expect(ids[ids.length - 1]).toBe(`evt_${total - 1}`);
+    expect(warn).toHaveBeenCalledOnce();
+
+    stream.close();
+    warn.mockRestore();
     vi.doUnmock("ws");
     vi.resetModules();
   });
