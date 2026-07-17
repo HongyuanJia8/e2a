@@ -32,12 +32,13 @@ import (
 	"github.com/tokencanopy/e2a/internal/mailparse"
 )
 
-// AttachmentMeta is metadata for one attachment of the received message —
-// never the bytes. Same vocabulary as the REST message view's attachment
-// metadata (httpapi.AttachmentMetaView): `index` is the stable 0-based
-// attachment index (document order) used to fetch the bytes via
+// AttachmentMetaView is the CANONICAL wire shape for one attachment's
+// metadata — never the bytes. It is shared by the REST message views
+// (httpapi aliases it), the stable event payloads (EmailReceivedData), and
+// the account export: `index` is the stable 0-based attachment index
+// (document order) used to fetch the bytes via
 // GET /v1/agents/{email}/messages/{id}/attachments/{index}.
-type AttachmentMeta struct {
+type AttachmentMetaView struct {
 	Filename    string `json:"filename,omitempty"`
 	ContentType string `json:"content_type,omitempty"`
 	// SizeBytes is the DECODED attachment payload size — the byte count of the
@@ -87,7 +88,7 @@ type EmailReceivedData struct {
 	ReceivedAt  time.Time         `json:"received_at" format:"date-time"`
 	// Attachments is per-attachment METADATA (never bytes) parsed from the
 	// raw message. Omitted when the message has none.
-	Attachments []AttachmentMeta `json:"attachments,omitempty" nullable:"false"`
+	Attachments []AttachmentMetaView `json:"attachments,omitempty" nullable:"false"`
 }
 
 // EmailSentData is the `data` payload of an email.sent event — an outbound
@@ -231,7 +232,7 @@ type DomainSuppressionAddedData struct {
 // message for EmailReceivedData.Attachments — the same extraction the REST
 // message views use (mailparse.Attachments), so the event and the resource
 // agree on indexes and sizes. Returns nil when the message has none.
-func AttachmentMetadata(raw []byte) []AttachmentMeta {
+func AttachmentMetadata(raw []byte) []AttachmentMetaView {
 	if len(raw) == 0 {
 		return nil
 	}
@@ -239,9 +240,9 @@ func AttachmentMetadata(raw []byte) []AttachmentMeta {
 	if len(atts) == 0 {
 		return nil
 	}
-	out := make([]AttachmentMeta, 0, len(atts))
+	out := make([]AttachmentMetaView, 0, len(atts))
 	for i, a := range atts {
-		out = append(out, AttachmentMeta{
+		out = append(out, AttachmentMetaView{
 			Filename:    a.Filename,
 			ContentType: a.ContentType,
 			SizeBytes:   len(a.Data),

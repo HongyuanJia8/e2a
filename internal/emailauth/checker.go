@@ -31,22 +31,22 @@ type CheckResult struct {
 	Detail string      `json:"detail,omitempty"`
 }
 
-// Result aggregates SPF, DKIM, and DMARC check results. It is the inbound
+// AuthVerdict aggregates SPF, DKIM, and DMARC check results. It is the inbound
 // trust primitive surfaced as `auth: {spf,dkim,dmarc}` on inbound messages and
 // (Slice 7) enforced on by the inbound policy.
-type Result struct {
+type AuthVerdict struct {
 	SPF   CheckResult `json:"spf"`
 	DKIM  CheckResult `json:"dkim"`
 	DMARC CheckResult `json:"dmarc"`
 }
 
 // DomainAuthenticated returns true if at least one domain-level check passed.
-func (r *Result) DomainAuthenticated() bool {
+func (r *AuthVerdict) DomainAuthenticated() bool {
 	return r.SPF.Status == StatusPass || r.DKIM.Status == StatusPass
 }
 
 // Summary returns a short string describing the results, suitable for an auth header.
-func (r *Result) Summary() string {
+func (r *AuthVerdict) Summary() string {
 	parts := []string{
 		fmt.Sprintf("spf=%s", r.SPF.Status),
 		fmt.Sprintf("dkim=%s", r.DKIM.Status),
@@ -59,8 +59,8 @@ func (r *Result) Summary() string {
 // remoteIP is the IP address of the SMTP client that connected to us.
 // senderEmail is the envelope sender (MAIL FROM).
 // rawMessage is the full RFC 2822 message including headers.
-func Check(remoteIP net.IP, senderEmail string, rawMessage []byte) *Result {
-	result := &Result{}
+func Check(remoteIP net.IP, senderEmail string, rawMessage []byte) *AuthVerdict {
+	result := &AuthVerdict{}
 
 	// Run SPF and DKIM checks, then derive DMARC from their alignment.
 	result.SPF = checkSPF(remoteIP, senderEmail)

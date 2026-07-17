@@ -11,9 +11,9 @@ import (
 // reuse the exact webhook-event SQL + wire shapes instead of re-implementing
 // them. These move home (or into a shared events package) at the 1Z cutover.
 
-// EventJSON is the exported event wire shape (alias of the internal type, so
+// EventView is the exported event wire shape (alias of the internal type, so
 // the JSON contract is identical).
-type EventJSON = eventJSON
+type EventView = eventView
 
 // DeliveryStatusJSON is the exported per-event delivery roll-up.
 type DeliveryStatusJSON = deliveryStatusJSON
@@ -25,12 +25,12 @@ var (
 )
 
 // ListEventsForUser wraps the internal listEvents query.
-func ListEventsForUser(ctx context.Context, pool *pgxpool.Pool, userID, eventType, agentID, conversationID, messageID string, since, until *time.Time, cursorCreatedAt time.Time, cursorID string, limit int) ([]EventJSON, error) {
+func ListEventsForUser(ctx context.Context, pool *pgxpool.Pool, userID, eventType, agentID, conversationID, messageID string, since, until *time.Time, cursorCreatedAt time.Time, cursorID string, limit int) ([]EventView, error) {
 	return listEvents(ctx, pool, userID, eventType, agentID, conversationID, messageID, since, until, cursorCreatedAt, cursorID, limit)
 }
 
 // GetEventForUser wraps the internal getEvent query.
-func GetEventForUser(ctx context.Context, pool *pgxpool.Pool, userID, eventID string) (*EventJSON, error) {
+func GetEventForUser(ctx context.Context, pool *pgxpool.Pool, userID, eventID string) (*EventView, error) {
 	return getEvent(ctx, pool, userID, eventID)
 }
 

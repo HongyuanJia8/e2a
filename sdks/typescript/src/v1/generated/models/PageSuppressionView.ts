@@ -10,11 +10,11 @@
  * Do not edit the class manually.
  */
 
-import { EventJSON } from '../models/EventJSON.js';
+import { SuppressionView } from '../models/SuppressionView.js';
 import { HttpFile } from '../http/http.js';
 
-export class PageEventJSON {
-    'items': Array<EventJSON>;
+export class PageSuppressionView {
+    'items': Array<SuppressionView>;
     'nextCursor': string | null;
 
     static readonly discriminator: string | undefined = undefined;
@@ -25,7 +25,7 @@ export class PageEventJSON {
         {
             "name": "items",
             "baseName": "items",
-            "type": "Array<EventJSON>",
+            "type": "Array<SuppressionView>",
             "format": ""
         },
         {
@@ -36,7 +36,7 @@ export class PageEventJSON {
         }    ];
 
     static getAttributeTypeMap() {
-        return PageEventJSON.attributeTypeMap;
+        return PageSuppressionView.attributeTypeMap;
     }
 
     public constructor() {

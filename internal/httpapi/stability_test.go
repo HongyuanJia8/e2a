@@ -164,7 +164,7 @@ func TestSpecEvolutionStance(t *testing.T) {
 }
 
 // The stance must also hold for operation-UNREACHABLE components. The typed
-// per-event payload schemas (Email*Data / Domain*Data / AttachmentMeta,
+// per-event payload schemas (Email*Data / Domain*Data / AttachmentMetaView,
 // published by registerEventPayloadSchemas) are consumer-direction (server →
 // client) but referenced by NO operation's request or response, so the
 // response-reachability pass in applyEvolutionStance never sees them — they
@@ -219,10 +219,10 @@ func TestSpecEvolutionStanceCoversUnreachableComponents(t *testing.T) {
 	// therefore be covered by the loop above — a rename or a future "attach
 	// them to an operation" refactor must consciously revisit this test.
 	//
-	// Conscious exception: AttachmentMeta. Since the user-data export's Message
-	// schema typed its `attachments` as []AttachmentMeta (one shape everywhere),
-	// AttachmentMeta IS response-reachable (GET /v1/account/export → UserExport
-	// → Message → AttachmentMeta) and is opened by the normal response pass in
+	// Conscious exception: AttachmentMetaView. Since the user-data export's Message
+	// schema typed its `attachments` as []AttachmentMetaView (one shape everywhere),
+	// AttachmentMetaView IS response-reachable (GET /v1/account/export → UserExport
+	// → Message → AttachmentMetaView) and is opened by the normal response pass in
 	// applyEvolutionStance. It must still never become request-reachable.
 	for _, name := range eventPayloadComponentNames {
 		if _, ok := schemas[name]; !ok {
@@ -232,9 +232,9 @@ func TestSpecEvolutionStanceCoversUnreachableComponents(t *testing.T) {
 		if request[name] {
 			t.Errorf("event payload component %s became request-reachable — it would now be forced strict, breaking additive payload evolution", name)
 		}
-		if name == "AttachmentMeta" {
+		if name == "AttachmentMetaView" {
 			if !response[name] {
-				t.Error("AttachmentMeta expected response-reachable via the export's Message.attachments — if that changed, revisit this exception")
+				t.Error("AttachmentMetaView expected response-reachable via the export's Message.attachments — if that changed, revisit this exception")
 			}
 			continue
 		}

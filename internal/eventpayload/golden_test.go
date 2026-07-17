@@ -59,7 +59,7 @@ func canonicalEvents() []struct {
 						"X-E2A-Auth-Verified": "true",
 					},
 					ReceivedAt: fixtureCreatedAt,
-					Attachments: []eventpayload.AttachmentMeta{
+					Attachments: []eventpayload.AttachmentMetaView{
 						{Filename: "invoice.pdf", ContentType: "application/pdf", SizeBytes: 12345, Index: 0},
 					},
 				},

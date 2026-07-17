@@ -24,7 +24,6 @@ models/AgentIdentity.ts
 models/AgentView.ts
 models/ApproveRequest.ts
 models/Attachment.ts
-models/AttachmentMeta.ts
 models/AttachmentMetaView.ts
 models/AttachmentView.ts
 models/AuthVerdict.ts
@@ -62,7 +61,7 @@ models/EmailSentData.ts
 models/ErrorBody.ts
 models/ErrorEnvelope.ts
 models/EventEnvelope.ts
-models/EventJSON.ts
+models/EventView.ts
 models/FieldError.ts
 models/ForwardRequest.ts
 models/LimitExceededDetails.ts
@@ -81,11 +80,11 @@ models/PageAPIKeyView.ts
 models/PageAgentView.ts
 models/PageConversationSummaryView.ts
 models/PageDomainView.ts
-models/PageEventJSON.ts
+models/PageEventView.ts
 models/PageMessageSummaryView.ts
 models/PageReviewView.ts
 models/PageStarterTemplateView.ts
-models/PageSuppression.ts
+models/PageSuppressionView.ts
 models/PageTemplateSummaryView.ts
 models/PageWebhookDeliveryView.ts
 models/PageWebhookView.ts
@@ -112,7 +111,6 @@ models/RejectRequest.ts
 models/RejectResultView.ts
 models/RenderedTemplateView.ts
 models/ReplyRequest.ts
-models/Result.ts
 models/RetryAfterDetails.ts
 models/ReviewView.ts
 models/RotateSecretResponse.ts
@@ -121,8 +119,8 @@ models/SendResultView.ts
 models/StarterTemplateDetailView.ts
 models/StarterTemplateVariableView.ts
 models/StarterTemplateView.ts
-models/Suppression.ts
 models/SuppressionExportEntry.ts
+models/SuppressionView.ts
 models/TemplatePartError.ts
 models/TemplateSummaryView.ts
 models/TemplateView.ts

@@ -9,13 +9,13 @@ import (
 
 // eventPayloadComponentNames are every component schema published by
 // registerEventPayloadSchemas, plus the nested components reachable from them
-// (AttachmentMeta via EmailReceivedData.attachments).
+// (AttachmentMetaView via EmailReceivedData.attachments).
 var eventPayloadComponentNames = func() []string {
 	names := make([]string, 0, len(eventpayload.StableEvents)+1)
 	for _, event := range eventpayload.StableEvents {
 		names = append(names, event.SchemaName)
 	}
-	return append(names, "AttachmentMeta")
+	return append(names, "AttachmentMetaView")
 }()
 
 // TestEventPayloadSchemasAreOpen enforces the forward-compatibility invariant

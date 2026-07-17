@@ -21,7 +21,6 @@ from e2a.v1.generated.models.agent_identity import AgentIdentity
 from e2a.v1.generated.models.agent_view import AgentView
 from e2a.v1.generated.models.approve_request import ApproveRequest
 from e2a.v1.generated.models.attachment import Attachment
-from e2a.v1.generated.models.attachment_meta import AttachmentMeta
 from e2a.v1.generated.models.attachment_meta_view import AttachmentMetaView
 from e2a.v1.generated.models.attachment_view import AttachmentView
 from e2a.v1.generated.models.auth_verdict import AuthVerdict
@@ -59,7 +58,7 @@ from e2a.v1.generated.models.email_sent_data import EmailSentData
 from e2a.v1.generated.models.error_body import ErrorBody
 from e2a.v1.generated.models.error_envelope import ErrorEnvelope
 from e2a.v1.generated.models.event_envelope import EventEnvelope
-from e2a.v1.generated.models.event_json import EventJSON
+from e2a.v1.generated.models.event_view import EventView
 from e2a.v1.generated.models.field_error import FieldError
 from e2a.v1.generated.models.forward_request import ForwardRequest
 from e2a.v1.generated.models.limit_exceeded_details import LimitExceededDetails
@@ -77,11 +76,11 @@ from e2a.v1.generated.models.page_api_key_view import PageAPIKeyView
 from e2a.v1.generated.models.page_agent_view import PageAgentView
 from e2a.v1.generated.models.page_conversation_summary_view import PageConversationSummaryView
 from e2a.v1.generated.models.page_domain_view import PageDomainView
-from e2a.v1.generated.models.page_event_json import PageEventJSON
+from e2a.v1.generated.models.page_event_view import PageEventView
 from e2a.v1.generated.models.page_message_summary_view import PageMessageSummaryView
 from e2a.v1.generated.models.page_review_view import PageReviewView
 from e2a.v1.generated.models.page_starter_template_view import PageStarterTemplateView
-from e2a.v1.generated.models.page_suppression import PageSuppression
+from e2a.v1.generated.models.page_suppression_view import PageSuppressionView
 from e2a.v1.generated.models.page_template_summary_view import PageTemplateSummaryView
 from e2a.v1.generated.models.page_webhook_delivery_view import PageWebhookDeliveryView
 from e2a.v1.generated.models.page_webhook_view import PageWebhookView
@@ -108,7 +107,6 @@ from e2a.v1.generated.models.reject_request import RejectRequest
 from e2a.v1.generated.models.reject_result_view import RejectResultView
 from e2a.v1.generated.models.rendered_template_view import RenderedTemplateView
 from e2a.v1.generated.models.reply_request import ReplyRequest
-from e2a.v1.generated.models.result import Result
 from e2a.v1.generated.models.retry_after_details import RetryAfterDetails
 from e2a.v1.generated.models.review_view import ReviewView
 from e2a.v1.generated.models.rotate_secret_response import RotateSecretResponse
@@ -117,8 +115,8 @@ from e2a.v1.generated.models.send_result_view import SendResultView
 from e2a.v1.generated.models.starter_template_detail_view import StarterTemplateDetailView
 from e2a.v1.generated.models.starter_template_variable_view import StarterTemplateVariableView
 from e2a.v1.generated.models.starter_template_view import StarterTemplateView
-from e2a.v1.generated.models.suppression import Suppression
 from e2a.v1.generated.models.suppression_export_entry import SuppressionExportEntry
+from e2a.v1.generated.models.suppression_view import SuppressionView
 from e2a.v1.generated.models.template_part_error import TemplatePartError
 from e2a.v1.generated.models.template_summary_view import TemplateSummaryView
 from e2a.v1.generated.models.template_view import TemplateView

@@ -244,8 +244,8 @@ type Deps struct {
 
 	// events (delivery log). EventQuery carries the filters + cursor
 	// position; the closures bind the events pool in main.
-	ListEvents func(ctx context.Context, q EventQuery) ([]agent.EventJSON, error)
-	GetEvent2  func(ctx context.Context, userID, eventID string) (*agent.EventJSON, error)
+	ListEvents func(ctx context.Context, q EventQuery) ([]agent.EventView, error)
+	GetEvent2  func(ctx context.Context, userID, eventID string) (*agent.EventView, error)
 	// redeliver
 	LoadReplayEvent      func(ctx context.Context, userID, eventID string) (*agent.ReplayEvent, error)
 	InsertReplayDelivery func(ctx context.Context, eventID, webhookID, eventType string, messageID *string, envelope []byte) (string, error)

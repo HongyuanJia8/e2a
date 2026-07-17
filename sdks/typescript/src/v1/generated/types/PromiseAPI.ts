@@ -10,7 +10,6 @@ import { AgentIdentity } from '../models/AgentIdentity.js';
 import { AgentView } from '../models/AgentView.js';
 import { ApproveRequest } from '../models/ApproveRequest.js';
 import { Attachment } from '../models/Attachment.js';
-import { AttachmentMeta } from '../models/AttachmentMeta.js';
 import { AttachmentMetaView } from '../models/AttachmentMetaView.js';
 import { AttachmentView } from '../models/AttachmentView.js';
 import { AuthVerdict } from '../models/AuthVerdict.js';
@@ -48,7 +47,7 @@ import { EmailSentData } from '../models/EmailSentData.js';
 import { ErrorBody } from '../models/ErrorBody.js';
 import { ErrorEnvelope } from '../models/ErrorEnvelope.js';
 import { EventEnvelope } from '../models/EventEnvelope.js';
-import { EventJSON } from '../models/EventJSON.js';
+import { EventView } from '../models/EventView.js';
 import { FieldError } from '../models/FieldError.js';
 import { ForwardRequest } from '../models/ForwardRequest.js';
 import { LimitExceededDetails } from '../models/LimitExceededDetails.js';
@@ -66,11 +65,11 @@ import { PageAPIKeyView } from '../models/PageAPIKeyView.js';
 import { PageAgentView } from '../models/PageAgentView.js';
 import { PageConversationSummaryView } from '../models/PageConversationSummaryView.js';
 import { PageDomainView } from '../models/PageDomainView.js';
-import { PageEventJSON } from '../models/PageEventJSON.js';
+import { PageEventView } from '../models/PageEventView.js';
 import { PageMessageSummaryView } from '../models/PageMessageSummaryView.js';
 import { PageReviewView } from '../models/PageReviewView.js';
 import { PageStarterTemplateView } from '../models/PageStarterTemplateView.js';
-import { PageSuppression } from '../models/PageSuppression.js';
+import { PageSuppressionView } from '../models/PageSuppressionView.js';
 import { PageTemplateSummaryView } from '../models/PageTemplateSummaryView.js';
 import { PageWebhookDeliveryView } from '../models/PageWebhookDeliveryView.js';
 import { PageWebhookView } from '../models/PageWebhookView.js';
@@ -97,7 +96,6 @@ import { RejectRequest } from '../models/RejectRequest.js';
 import { RejectResultView } from '../models/RejectResultView.js';
 import { RenderedTemplateView } from '../models/RenderedTemplateView.js';
 import { ReplyRequest } from '../models/ReplyRequest.js';
-import { Result } from '../models/Result.js';
 import { RetryAfterDetails } from '../models/RetryAfterDetails.js';
 import { ReviewView } from '../models/ReviewView.js';
 import { RotateSecretResponse } from '../models/RotateSecretResponse.js';
@@ -106,8 +104,8 @@ import { SendResultView } from '../models/SendResultView.js';
 import { StarterTemplateDetailView } from '../models/StarterTemplateDetailView.js';
 import { StarterTemplateVariableView } from '../models/StarterTemplateVariableView.js';
 import { StarterTemplateView } from '../models/StarterTemplateView.js';
-import { Suppression } from '../models/Suppression.js';
 import { SuppressionExportEntry } from '../models/SuppressionExportEntry.js';
+import { SuppressionView } from '../models/SuppressionView.js';
 import { TemplatePartError } from '../models/TemplatePartError.js';
 import { TemplateSummaryView } from '../models/TemplateSummaryView.js';
 import { TemplateView } from '../models/TemplateView.js';
@@ -308,7 +306,7 @@ export class PromiseAccountApi {
      * @param [cursor] Opaque pagination cursor from a previous response\&#39;s next_cursor. Continuation requests must not change the other filters.
      * @param [limit] Maximum number of items to return (1-100).
      */
-    public listSuppressionsWithHttpInfo(cursor?: string, limit?: number, _options?: PromiseConfigurationOptions): Promise<HttpInfo<PageSuppression>> {
+    public listSuppressionsWithHttpInfo(cursor?: string, limit?: number, _options?: PromiseConfigurationOptions): Promise<HttpInfo<PageSuppressionView>> {
         const observableOptions = wrapOptions(_options);
         const result = this.api.listSuppressionsWithHttpInfo(cursor, limit, observableOptions);
         return result.toPromise();
@@ -320,7 +318,7 @@ export class PromiseAccountApi {
      * @param [cursor] Opaque pagination cursor from a previous response\&#39;s next_cursor. Continuation requests must not change the other filters.
      * @param [limit] Maximum number of items to return (1-100).
      */
-    public listSuppressions(cursor?: string, limit?: number, _options?: PromiseConfigurationOptions): Promise<PageSuppression> {
+    public listSuppressions(cursor?: string, limit?: number, _options?: PromiseConfigurationOptions): Promise<PageSuppressionView> {
         const observableOptions = wrapOptions(_options);
         const result = this.api.listSuppressions(cursor, limit, observableOptions);
         return result.toPromise();
@@ -780,7 +778,7 @@ export class PromiseEventsApi {
      * Get an event
      * @param id
      */
-    public getEventWithHttpInfo(id: string, _options?: PromiseConfigurationOptions): Promise<HttpInfo<EventJSON>> {
+    public getEventWithHttpInfo(id: string, _options?: PromiseConfigurationOptions): Promise<HttpInfo<EventView>> {
         const observableOptions = wrapOptions(_options);
         const result = this.api.getEventWithHttpInfo(id, observableOptions);
         return result.toPromise();
@@ -790,7 +788,7 @@ export class PromiseEventsApi {
      * Get an event
      * @param id
      */
-    public getEvent(id: string, _options?: PromiseConfigurationOptions): Promise<EventJSON> {
+    public getEvent(id: string, _options?: PromiseConfigurationOptions): Promise<EventView> {
         const observableOptions = wrapOptions(_options);
         const result = this.api.getEvent(id, observableOptions);
         return result.toPromise();
@@ -808,7 +806,7 @@ export class PromiseEventsApi {
      * @param [cursor]
      * @param [limit]
      */
-    public listEventsWithHttpInfo(type?: string, agentEmail?: string, conversationId?: string, messageId?: string, since?: string, until?: string, cursor?: string, limit?: number, _options?: PromiseConfigurationOptions): Promise<HttpInfo<PageEventJSON>> {
+    public listEventsWithHttpInfo(type?: string, agentEmail?: string, conversationId?: string, messageId?: string, since?: string, until?: string, cursor?: string, limit?: number, _options?: PromiseConfigurationOptions): Promise<HttpInfo<PageEventView>> {
         const observableOptions = wrapOptions(_options);
         const result = this.api.listEventsWithHttpInfo(type, agentEmail, conversationId, messageId, since, until, cursor, limit, observableOptions);
         return result.toPromise();
@@ -826,7 +824,7 @@ export class PromiseEventsApi {
      * @param [cursor]
      * @param [limit]
      */
-    public listEvents(type?: string, agentEmail?: string, conversationId?: string, messageId?: string, since?: string, until?: string, cursor?: string, limit?: number, _options?: PromiseConfigurationOptions): Promise<PageEventJSON> {
+    public listEvents(type?: string, agentEmail?: string, conversationId?: string, messageId?: string, since?: string, until?: string, cursor?: string, limit?: number, _options?: PromiseConfigurationOptions): Promise<PageEventView> {
         const observableOptions = wrapOptions(_options);
         const result = this.api.listEvents(type, agentEmail, conversationId, messageId, since, until, cursor, limit, observableOptions);
         return result.toPromise();

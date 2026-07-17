@@ -15,6 +15,9 @@ import { HttpFile } from '../http/http.js';
 export class AttachmentMetaView {
     'contentType'?: string;
     'filename'?: string;
+    /**
+    * Stable 0-based attachment index (document order) — the fetch key for the attachment-bytes endpoint.
+    */
     'index': number;
     /**
     * DECODED attachment payload size in bytes (Content-Transfer-Encoding undone) — the size of the file a download yields, not its encoded size inside the raw MIME.

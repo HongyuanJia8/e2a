@@ -31,7 +31,7 @@ __all__ = [
     "construct_event",
     "WebhookEvent",
     # Typed per-event payloads (stable events).
-    "AttachmentMeta",
+    "AttachmentMetaView",
     "EmailReceivedData",
     "EmailSentData",
     "EmailFailedData",
@@ -135,7 +135,7 @@ def verify_webhook_signature(
 # generic dicts. Narrow with the ``is_email_*`` / ``is_domain_*`` guards.
 
 
-class AttachmentMeta(TypedDict):
+class AttachmentMetaView(TypedDict):
     """Metadata for one attachment (never the bytes). ``index`` is the stable
     0-based fetch key for ``GET …/messages/{id}/attachments/{index}``."""
 
@@ -170,7 +170,7 @@ EmailReceivedData = TypedDict(
         # Signed X-E2A-Auth-* attestation (may be empty on the WS drain path).
         "auth_headers": Mapping[str, str],
         "received_at": str,
-        "attachments": NotRequired[List[AttachmentMeta]],
+        "attachments": NotRequired[List[AttachmentMetaView]],
     },
 )
 EmailReceivedData.__doc__ = (

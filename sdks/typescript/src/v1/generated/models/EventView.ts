@@ -13,7 +13,7 @@
 import { DeliveryStatusJSON } from '../models/DeliveryStatusJSON.js';
 import { HttpFile } from '../http/http.js';
 
-export class EventJSON {
+export class EventView {
     'agentEmail'?: string;
     'conversationId'?: string;
     'createdAt': Date;
@@ -104,7 +104,7 @@ export class EventJSON {
         }    ];
 
     static getAttributeTypeMap() {
-        return EventJSON.attributeTypeMap;
+        return EventView.attributeTypeMap;
     }
 
     public constructor() {

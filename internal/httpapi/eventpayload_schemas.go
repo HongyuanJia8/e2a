@@ -33,7 +33,7 @@ type EventEnvelope struct {
 // on its own. We pull each type through the API's shared schema registry
 // (Components.Schemas.Schema, the same registry jsonResponse uses), which
 // registers it under the hinted name and hoists it into components.schemas of
-// the rendered spec. The event-type documentation (EventJSON.data and
+// the rendered spec. The event-type documentation (EventView.data and
 // docs/events.md) references the schemas DESCRIPTIVELY — there is
 // intentionally no oneOf/discriminator on the envelope.
 //
@@ -62,7 +62,7 @@ func (s *Server) registerEventPayloadSchemas() {
 	// "open every response-reachable schema" pass would never touch them —
 	// they'd ship strict and a spec-generated client would break on the first
 	// additive payload field. So this registration opens them itself, walking
-	// each component's nested object nodes and following $refs (AttachmentMeta
+	// each component's nested object nodes and following $refs (AttachmentMetaView
 	// via EmailReceivedData.attachments) exactly like a response-schema stance
 	// pass would.
 	seen := map[string]bool{}

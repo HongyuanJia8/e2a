@@ -97,7 +97,7 @@ export interface WebhookEvent {
 
 /** Metadata for one attachment (never the bytes). `index` is the stable
  *  0-based fetch key for `GET …/messages/{id}/attachments/{index}`. */
-export interface AttachmentMeta {
+export interface AttachmentMetaView {
   filename?: string;
   content_type?: string;
   size_bytes: number;
@@ -136,7 +136,7 @@ export interface EmailReceivedData {
   auth_headers: Record<string, string>;
   received_at: string;
   /** Attachment METADATA (never bytes). Omitted when the message has none. */
-  attachments?: AttachmentMeta[];
+  attachments?: AttachmentMetaView[];
 }
 
 /** Typed payload of an `email.sent` event — an outbound send reached its sent

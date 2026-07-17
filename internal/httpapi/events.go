@@ -55,11 +55,11 @@ type ListEventsInput struct {
 }
 
 type listEventsOutput struct {
-	Body Page[agent.EventJSON]
+	Body Page[agent.EventView]
 }
 
 type eventOutput struct {
-	Body agent.EventJSON
+	Body agent.EventView
 }
 
 func (s *Server) registerEvents() {

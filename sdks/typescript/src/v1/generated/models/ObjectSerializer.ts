@@ -6,7 +6,6 @@ export * from '../models/AgentIdentity.js';
 export * from '../models/AgentView.js';
 export * from '../models/ApproveRequest.js';
 export * from '../models/Attachment.js';
-export * from '../models/AttachmentMeta.js';
 export * from '../models/AttachmentMetaView.js';
 export * from '../models/AttachmentView.js';
 export * from '../models/AuthVerdict.js';
@@ -44,7 +43,7 @@ export * from '../models/EmailSentData.js';
 export * from '../models/ErrorBody.js';
 export * from '../models/ErrorEnvelope.js';
 export * from '../models/EventEnvelope.js';
-export * from '../models/EventJSON.js';
+export * from '../models/EventView.js';
 export * from '../models/FieldError.js';
 export * from '../models/ForwardRequest.js';
 export * from '../models/LimitExceededDetails.js';
@@ -62,11 +61,11 @@ export * from '../models/PageAPIKeyView.js';
 export * from '../models/PageAgentView.js';
 export * from '../models/PageConversationSummaryView.js';
 export * from '../models/PageDomainView.js';
-export * from '../models/PageEventJSON.js';
+export * from '../models/PageEventView.js';
 export * from '../models/PageMessageSummaryView.js';
 export * from '../models/PageReviewView.js';
 export * from '../models/PageStarterTemplateView.js';
-export * from '../models/PageSuppression.js';
+export * from '../models/PageSuppressionView.js';
 export * from '../models/PageTemplateSummaryView.js';
 export * from '../models/PageWebhookDeliveryView.js';
 export * from '../models/PageWebhookView.js';
@@ -93,7 +92,6 @@ export * from '../models/RejectRequest.js';
 export * from '../models/RejectResultView.js';
 export * from '../models/RenderedTemplateView.js';
 export * from '../models/ReplyRequest.js';
-export * from '../models/Result.js';
 export * from '../models/RetryAfterDetails.js';
 export * from '../models/ReviewView.js';
 export * from '../models/RotateSecretResponse.js';
@@ -102,8 +100,8 @@ export * from '../models/SendResultView.js';
 export * from '../models/StarterTemplateDetailView.js';
 export * from '../models/StarterTemplateVariableView.js';
 export * from '../models/StarterTemplateView.js';
-export * from '../models/Suppression.js';
 export * from '../models/SuppressionExportEntry.js';
+export * from '../models/SuppressionView.js';
 export * from '../models/TemplatePartError.js';
 export * from '../models/TemplateSummaryView.js';
 export * from '../models/TemplateView.js';
@@ -135,7 +133,6 @@ import { AgentIdentity } from '../models/AgentIdentity.js';
 import { AgentView } from '../models/AgentView.js';
 import { ApproveRequest } from '../models/ApproveRequest.js';
 import { Attachment } from '../models/Attachment.js';
-import { AttachmentMeta } from '../models/AttachmentMeta.js';
 import { AttachmentMetaView } from '../models/AttachmentMetaView.js';
 import { AttachmentView } from '../models/AttachmentView.js';
 import { AuthVerdict } from '../models/AuthVerdict.js';
@@ -173,7 +170,7 @@ import { EmailSentData } from '../models/EmailSentData.js';
 import { ErrorBody } from '../models/ErrorBody.js';
 import { ErrorEnvelope } from '../models/ErrorEnvelope.js';
 import { EventEnvelope } from '../models/EventEnvelope.js';
-import { EventJSON } from '../models/EventJSON.js';
+import { EventView } from '../models/EventView.js';
 import { FieldError } from '../models/FieldError.js';
 import { ForwardRequest } from '../models/ForwardRequest.js';
 import { LimitExceededDetails } from '../models/LimitExceededDetails.js';
@@ -191,11 +188,11 @@ import { PageAPIKeyView } from '../models/PageAPIKeyView.js';
 import { PageAgentView } from '../models/PageAgentView.js';
 import { PageConversationSummaryView } from '../models/PageConversationSummaryView.js';
 import { PageDomainView } from '../models/PageDomainView.js';
-import { PageEventJSON } from '../models/PageEventJSON.js';
+import { PageEventView } from '../models/PageEventView.js';
 import { PageMessageSummaryView } from '../models/PageMessageSummaryView.js';
 import { PageReviewView } from '../models/PageReviewView.js';
 import { PageStarterTemplateView } from '../models/PageStarterTemplateView.js';
-import { PageSuppression } from '../models/PageSuppression.js';
+import { PageSuppressionView } from '../models/PageSuppressionView.js';
 import { PageTemplateSummaryView } from '../models/PageTemplateSummaryView.js';
 import { PageWebhookDeliveryView } from '../models/PageWebhookDeliveryView.js';
 import { PageWebhookView } from '../models/PageWebhookView.js';
@@ -222,7 +219,6 @@ import { RejectRequest } from '../models/RejectRequest.js';
 import { RejectResultView } from '../models/RejectResultView.js';
 import { RenderedTemplateView } from '../models/RenderedTemplateView.js';
 import { ReplyRequest } from '../models/ReplyRequest.js';
-import { Result } from '../models/Result.js';
 import { RetryAfterDetails } from '../models/RetryAfterDetails.js';
 import { ReviewView   , ReviewViewDirectionEnum          } from '../models/ReviewView.js';
 import { RotateSecretResponse } from '../models/RotateSecretResponse.js';
@@ -231,8 +227,8 @@ import { SendResultView } from '../models/SendResultView.js';
 import { StarterTemplateDetailView } from '../models/StarterTemplateDetailView.js';
 import { StarterTemplateVariableView } from '../models/StarterTemplateVariableView.js';
 import { StarterTemplateView } from '../models/StarterTemplateView.js';
-import { Suppression } from '../models/Suppression.js';
 import { SuppressionExportEntry } from '../models/SuppressionExportEntry.js';
+import { SuppressionView } from '../models/SuppressionView.js';
 import { TemplatePartError } from '../models/TemplatePartError.js';
 import { TemplateSummaryView } from '../models/TemplateSummaryView.js';
 import { TemplateView } from '../models/TemplateView.js';
@@ -294,7 +290,6 @@ let typeMap: {[index: string]: any} = {
     "AgentView": AgentView,
     "ApproveRequest": ApproveRequest,
     "Attachment": Attachment,
-    "AttachmentMeta": AttachmentMeta,
     "AttachmentMetaView": AttachmentMetaView,
     "AttachmentView": AttachmentView,
     "AuthVerdict": AuthVerdict,
@@ -332,7 +327,7 @@ let typeMap: {[index: string]: any} = {
     "ErrorBody": ErrorBody,
     "ErrorEnvelope": ErrorEnvelope,
     "EventEnvelope": EventEnvelope,
-    "EventJSON": EventJSON,
+    "EventView": EventView,
     "FieldError": FieldError,
     "ForwardRequest": ForwardRequest,
     "LimitExceededDetails": LimitExceededDetails,
@@ -350,11 +345,11 @@ let typeMap: {[index: string]: any} = {
     "PageAgentView": PageAgentView,
     "PageConversationSummaryView": PageConversationSummaryView,
     "PageDomainView": PageDomainView,
-    "PageEventJSON": PageEventJSON,
+    "PageEventView": PageEventView,
     "PageMessageSummaryView": PageMessageSummaryView,
     "PageReviewView": PageReviewView,
     "PageStarterTemplateView": PageStarterTemplateView,
-    "PageSuppression": PageSuppression,
+    "PageSuppressionView": PageSuppressionView,
     "PageTemplateSummaryView": PageTemplateSummaryView,
     "PageWebhookDeliveryView": PageWebhookDeliveryView,
     "PageWebhookView": PageWebhookView,
@@ -381,7 +376,6 @@ let typeMap: {[index: string]: any} = {
     "RejectResultView": RejectResultView,
     "RenderedTemplateView": RenderedTemplateView,
     "ReplyRequest": ReplyRequest,
-    "Result": Result,
     "RetryAfterDetails": RetryAfterDetails,
     "ReviewView": ReviewView,
     "RotateSecretResponse": RotateSecretResponse,
@@ -390,8 +384,8 @@ let typeMap: {[index: string]: any} = {
     "StarterTemplateDetailView": StarterTemplateDetailView,
     "StarterTemplateVariableView": StarterTemplateVariableView,
     "StarterTemplateView": StarterTemplateView,
-    "Suppression": Suppression,
     "SuppressionExportEntry": SuppressionExportEntry,
+    "SuppressionView": SuppressionView,
     "TemplatePartError": TemplatePartError,
     "TemplateSummaryView": TemplateSummaryView,
     "TemplateView": TemplateView,

@@ -48,7 +48,7 @@ from .generated.models import (
     DeleteWebhookResult,
     DeploymentInfoView,
     DomainView,
-    EventJSON,
+    EventView,
     ForwardRequest,
     AccountView,
     AttachmentView,
@@ -66,7 +66,7 @@ from .generated.models import (
     SendResultView,
     StarterTemplateDetailView,
     StarterTemplateView,
-    Suppression,
+    SuppressionView,
     TemplateSummaryView,
     TemplateView,
     TestWebhookResponse,
@@ -645,7 +645,7 @@ class EventsResource:
         since: Optional[str] = None,
         until: Optional[str] = None,
         limit: Optional[int] = None,
-    ) -> AutoPager[EventJSON]:
+    ) -> AutoPager[EventView]:
         async def fetch(cursor: Optional[str]) -> Page:
             resp = await self._c._read(
                 lambda h: self._api.list_events(
@@ -664,7 +664,7 @@ class EventsResource:
 
         return AutoPager(fetch)
 
-    async def get(self, event_id: str) -> EventJSON:
+    async def get(self, event_id: str) -> EventView:
         return await self._c._read(lambda h: self._api.get_event(event_id, _headers=h))
 
     async def redeliver(self, event_id: str, body: Optional[Body] = None) -> RedeliverView:
@@ -771,7 +771,7 @@ class SuppressionsResource:
         self._api = api
         self._c = client
 
-    def list(self) -> AutoPager[Suppression]:
+    def list(self) -> AutoPager[SuppressionView]:
         # Cursor-paginated (A-5): walks next_cursor to completion.
         async def fetch(cursor: Optional[str]) -> Page:
             resp = await self._c._read(lambda h: self._api.list_suppressions(cursor=cursor, _headers=h))

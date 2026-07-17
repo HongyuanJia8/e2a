@@ -20,7 +20,7 @@ import json
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
-from e2a.v1.generated.models.attachment_meta import AttachmentMeta
+from e2a.v1.generated.models.attachment_meta_view import AttachmentMetaView
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -29,7 +29,7 @@ class EmailReceivedData(BaseModel):
     EmailReceivedData
     """ # noqa: E501
     agent_email: StrictStr = Field(description="The receiving agent's email — its id and address (an agent's id IS its email).")
-    attachments: Optional[List[AttachmentMeta]] = None
+    attachments: Optional[List[AttachmentMetaView]] = None
     auth_headers: Dict[str, StrictStr]
     authenticated_from: StrictStr = Field(description="The From-header identity SPF/DKIM/DMARC verified — treat THIS (not from) as the gated identity.")
     cc: Optional[List[StrictStr]] = None
@@ -111,7 +111,7 @@ class EmailReceivedData(BaseModel):
 
         _obj = cls.model_validate({
             "agent_email": obj.get("agent_email"),
-            "attachments": [AttachmentMeta.from_dict(_item) for _item in obj["attachments"]] if obj.get("attachments") is not None else None,
+            "attachments": [AttachmentMetaView.from_dict(_item) for _item in obj["attachments"]] if obj.get("attachments") is not None else None,
             "auth_headers": obj.get("auth_headers"),
             "authenticated_from": obj.get("authenticated_from"),
             "cc": obj.get("cc"),

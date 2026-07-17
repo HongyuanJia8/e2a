@@ -10,12 +10,14 @@
  * Do not edit the class manually.
  */
 
-import { Suppression } from '../models/Suppression.js';
 import { HttpFile } from '../http/http.js';
 
-export class PageSuppression {
-    'items': Array<Suppression>;
-    'nextCursor': string | null;
+export class SuppressionView {
+    'address': string;
+    'createdAt': Date;
+    'reason'?: string;
+    'source': string;
+    'sourceMessageId'?: string;
 
     static readonly discriminator: string | undefined = undefined;
 
@@ -23,20 +25,38 @@ export class PageSuppression {
 
     static readonly attributeTypeMap: Array<{name: string, baseName: string, type: string, format: string}> = [
         {
-            "name": "items",
-            "baseName": "items",
-            "type": "Array<Suppression>",
+            "name": "address",
+            "baseName": "address",
+            "type": "string",
             "format": ""
         },
         {
-            "name": "nextCursor",
-            "baseName": "next_cursor",
+            "name": "createdAt",
+            "baseName": "created_at",
+            "type": "Date",
+            "format": "date-time"
+        },
+        {
+            "name": "reason",
+            "baseName": "reason",
+            "type": "string",
+            "format": ""
+        },
+        {
+            "name": "source",
+            "baseName": "source",
+            "type": "string",
+            "format": ""
+        },
+        {
+            "name": "sourceMessageId",
+            "baseName": "source_message_id",
             "type": "string",
             "format": ""
         }    ];
 
     static getAttributeTypeMap() {
-        return PageSuppression.attributeTypeMap;
+        return SuppressionView.attributeTypeMap;
     }
 
     public constructor() {

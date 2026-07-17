@@ -471,7 +471,7 @@ func scanMessagesForUser(ctx context.Context, tx pgx.Tx, userID string) ([]Messa
 		// no raw_message yet, so the field is omitted (0/omitempty) there.
 		m.SizeBytes = len(m.RawMessage)
 		// attachments: ONE shape everywhere — the export emits the same
-		// AttachmentMeta metadata {filename, content_type, size_bytes
+		// AttachmentMetaView metadata {filename, content_type, size_bytes
 		// (DECODED), index} the live API uses, mapped at export time. For
 		// sent/inbound messages it is parsed from raw_message (whose exported
 		// bytes still contain the full attachment content); for held drafts
@@ -485,11 +485,11 @@ func scanMessagesForUser(ctx context.Context, tx pgx.Tx, userID string) ([]Messa
 	return out, rows.Err()
 }
 
-// exportAttachmentMeta maps a message's attachments to the wire AttachmentMeta
+// exportAttachmentMeta maps a message's attachments to the wire AttachmentMetaView
 // shape for the export. Precedence: raw MIME when present (the authoritative
 // copy, same extraction as the live API), else the held-draft blob. A blob
 // that fails to parse yields nil rather than failing the whole export.
-func exportAttachmentMeta(raw, draftJSON []byte) []eventpayload.AttachmentMeta {
+func exportAttachmentMeta(raw, draftJSON []byte) []eventpayload.AttachmentMetaView {
 	if len(raw) > 0 {
 		return eventpayload.AttachmentMetadata(raw)
 	}
@@ -506,9 +506,9 @@ func exportAttachmentMeta(raw, draftJSON []byte) []eventpayload.AttachmentMeta {
 	if err := json.Unmarshal(draftJSON, &drafts); err != nil {
 		return nil
 	}
-	out := make([]eventpayload.AttachmentMeta, 0, len(drafts))
+	out := make([]eventpayload.AttachmentMetaView, 0, len(drafts))
 	for i, d := range drafts {
-		out = append(out, eventpayload.AttachmentMeta{
+		out = append(out, eventpayload.AttachmentMetaView{
 			Filename:    d.Filename,
 			ContentType: d.ContentType,
 			SizeBytes:   decodedBase64Len(d.Data),

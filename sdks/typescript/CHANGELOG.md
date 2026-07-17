@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Breaking (pre-GA)
+- **Implementation-leaked schema names renamed; duplicate schemas collapsed.**
+  Generated types: `EventJSON` → `EventView`, `PageEventJSON` →
+  `PageEventView`, `Suppression` → `SuppressionView`, `PageSuppression` →
+  `PageSuppressionView`; the duplicate `Result` collapsed into the existing
+  `AuthVerdict`, and the duplicate `AttachmentMeta` collapsed into the
+  canonical `AttachmentMetaView` (one attachment-metadata shape for REST
+  responses, stable event payloads, and the account export — the hand-written
+  webhook payload interface in `webhook-signature.ts` follows the same
+  rename). The wire JSON is unchanged — field names, optionality, and values
+  are identical; only the exported type names changed. Migrate:
+  `EventJSON` → `EventView`, `Suppression` → `SuppressionView`,
+  `Result` → `AuthVerdict`, `AttachmentMeta` → `AttachmentMetaView`.
+
 ## 5.2.0
 
 ### Breaking (pre-GA)

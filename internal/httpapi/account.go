@@ -109,12 +109,34 @@ func (s *Server) registerAccount() {
 	}, s.handleDeleteSuppression)
 }
 
+// SuppressionView is the wire shape of one (user, address) entry on the
+// per-tenant suppression list — the HTTP DTO over the identity.Suppression
+// storage model. Field-for-field identical JSON; mapped via suppressionView().
+type SuppressionView struct {
+	Address         string    `json:"address"`
+	Reason          string    `json:"reason,omitempty"`
+	Source          string    `json:"source"` // bounce | complaint | manual
+	SourceMessageID string    `json:"source_message_id,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+// suppressionView maps the storage model to its wire view.
+func suppressionView(s identity.Suppression) SuppressionView {
+	return SuppressionView{
+		Address:         s.Address,
+		Reason:          s.Reason,
+		Source:          s.Source,
+		SourceMessageID: s.SourceMessageID,
+		CreatedAt:       s.CreatedAt,
+	}
+}
+
 // suppressionsOutput uses the shared Page[T] envelope (items + next_cursor);
 // next_cursor is null at launch. Suppressions auto-grow on every bounce/
 // complaint, so the pagination slot matters most here. See listAgentsOutput.
 // (GA blocker #3.)
 type suppressionsOutput struct {
-	Body Page[identity.Suppression]
+	Body Page[SuppressionView]
 }
 
 // suppressionsCursor is the opaque keyset position: the last row's
@@ -167,7 +189,11 @@ func (s *Server) handleListSuppressions(ctx context.Context, in *listSuppression
 			return nil, NewError(http.StatusInternalServerError, "internal_error", "failed to build pagination cursor")
 		}
 	}
-	return &suppressionsOutput{Body: NewPage(list, nextCursor)}, nil
+	items := make([]SuppressionView, len(list))
+	for i, sup := range list {
+		items[i] = suppressionView(sup)
+	}
+	return &suppressionsOutput{Body: NewPage(items, nextCursor)}, nil
 }
 
 type deleteSuppressionInput struct {

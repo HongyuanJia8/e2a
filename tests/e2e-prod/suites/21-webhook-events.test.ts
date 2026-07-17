@@ -25,9 +25,9 @@ import { writeReport, info } from "../harness/report.ts";
 //
 // Shapes/status verified against api/openapi.yaml (the drift-gated SSOT) AND
 // curl-probed on live staging before these assertions were written (2026-07-10):
-//   EventJSON     required {id,type,schema_version,created_at,status,data};
+//   EventView     required {id,type,schema_version,created_at,status,data};
 //                 optional agent_email, conversation_id, message_id, delivery_status.
-//   PageEventJSON {items, next_cursor:string|null}.
+//   PageEventView {items, next_cursor:string|null}.
 //   RedeliverView required {event_id,status}; single-webhook replay also carries
 //                 top-level delivery_id + webhook_id (status "pending"); bulk
 //                 fan-out carries deliveries[] (status "scheduled").
@@ -86,7 +86,7 @@ const sinceNow = () => new Date(Date.now() - 5000).toISOString();
 // mailbox), so email.sent / review_approved actually reach the "sent" state.
 const SIMULATOR = "success@simulator.amazonses.com";
 
-interface EventJSON {
+interface EventView {
   id: string;
   type: string;
   schema_version: string;
@@ -98,8 +98,8 @@ interface EventJSON {
   message_id?: string;
   delivery_status?: { matched_webhooks?: number; delivered?: number; pending?: number; failed?: number };
 }
-interface PageEventJSON {
-  items: EventJSON[];
+interface PageEventView {
+  items: EventView[];
   next_cursor: string | null;
 }
 interface WebhookDeliveryView {
@@ -179,13 +179,13 @@ async function delHook(id: string): Promise<void> {
 // matching `match` appears, or the bounded window elapses. Backoff 500ms→3s.
 async function pollEvent(
   params: { type: string; agentId: string; since: string },
-  match: (e: EventJSON) => boolean,
+  match: (e: EventView) => boolean,
   timeoutMs = 15000,
-): Promise<EventJSON | null> {
+): Promise<EventView | null> {
   const deadline = Date.now() + timeoutMs;
   let delay = 500;
   while (Date.now() < deadline) {
-    const r = await client.get<PageEventJSON>("/v1/events", {
+    const r = await client.get<PageEventView>("/v1/events", {
       query: { type: params.type, agent_email: params.agentId, since: params.since, limit: 50 },
     });
     if (r.status === 200 && r.body?.items) {
@@ -238,11 +238,11 @@ async function pollDelivery(
 async function pollEventFanout(
   eventId: string,
   timeoutMs = 15000,
-): Promise<NonNullable<EventJSON["delivery_status"]> | null> {
+): Promise<NonNullable<EventView["delivery_status"]> | null> {
   const deadline = Date.now() + timeoutMs;
   let delay = 500;
   while (Date.now() < deadline) {
-    const r = await client.get<EventJSON>(`/v1/events/${eventId}`);
+    const r = await client.get<EventView>(`/v1/events/${eventId}`);
     const ds = r.body?.delivery_status;
     if (r.status === 200 && ds && (ds.matched_webhooks ?? 0) >= 1) return ds;
     await sleep(delay);
@@ -251,8 +251,8 @@ async function pollEventFanout(
   return null;
 }
 
-function assertEventShape(e: EventJSON, expect: { type: string; agentId: string; messageId?: string }): void {
-  // EventJSON required fields (openapi): id,type,schema_version,created_at,status,data.
+function assertEventShape(e: EventView, expect: { type: string; agentId: string; messageId?: string }): void {
+  // EventView required fields (openapi): id,type,schema_version,created_at,status,data.
   assert.ok(typeof e.id === "string" && e.id.startsWith("evt_"), `event id has evt_ prefix: ${e.id}`);
   assert.equal(e.type, expect.type, "event.type matches the triggered type");
   assert.ok(typeof e.schema_version === "string" && e.schema_version.length > 0, "schema_version is a non-empty string label");
@@ -428,7 +428,7 @@ test("emit: email.review_approved — approving a hold (to the simulator) emits 
 });
 
 // ---- Events read API: listEvents envelope + filters ----
-test("events: listEvents returns PageEventJSON envelope and honors type/agent_email/since/limit filters", { skip }, async () => {
+test("events: listEvents returns PageEventView envelope and honors type/agent_email/since/limit filters", { skip }, async () => {
   const email = await createAgent("list");
   const hook = await createHook(["email.sent"]);
   const since = sinceNow();
@@ -444,8 +444,8 @@ test("events: listEvents returns PageEventJSON envelope and honors type/agent_em
     );
     assert.ok(seed, "seed email.sent event present");
 
-    // Full envelope shape (PageEventJSON: items + next_cursor:string|null, both required).
-    const page = await client.get<PageEventJSON>("/v1/events", { query: { limit: 5 } });
+    // Full envelope shape (PageEventView: items + next_cursor:string|null, both required).
+    const page = await client.get<PageEventView>("/v1/events", { query: { limit: 5 } });
     assert.equal(page.status, 200, `listEvents expected 200, got ${page.status}`);
     assert.ok(Array.isArray(page.body?.items), "items is an array");
     assert.ok(
@@ -455,7 +455,7 @@ test("events: listEvents returns PageEventJSON envelope and honors type/agent_em
     assert.ok(page.body!.items.length <= 5, "limit=5 clamps the page size");
 
     // type filter: every returned item is the requested type.
-    const typed = await client.get<PageEventJSON>("/v1/events", {
+    const typed = await client.get<PageEventView>("/v1/events", {
       query: { type: "email.sent", agent_email: email, since },
     });
     assert.equal(typed.status, 200);
@@ -466,7 +466,7 @@ test("events: listEvents returns PageEventJSON envelope and honors type/agent_em
     }
 
     // agent_email filter isolation: a bogus agent_email returns an empty page (not an error).
-    const other = await client.get<PageEventJSON>("/v1/events", {
+    const other = await client.get<PageEventView>("/v1/events", {
       query: { agent_email: `nonexistent-${Date.now()}@${client.env.sharedDomain}`, since },
     });
     assert.equal(other.status, 200, "agent_email filter with no matches returns 200");
@@ -474,7 +474,7 @@ test("events: listEvents returns PageEventJSON envelope and honors type/agent_em
 
     // since filter: a future timestamp excludes everything.
     const future = new Date(Date.now() + 3_600_000).toISOString();
-    const none = await client.get<PageEventJSON>("/v1/events", { query: { agent_email: email, since: future } });
+    const none = await client.get<PageEventView>("/v1/events", { query: { agent_email: email, since: future } });
     assert.equal(none.status, 200);
     assert.equal(none.body!.items.length, 0, "since=future excludes all events");
   } finally {
@@ -484,7 +484,7 @@ test("events: listEvents returns PageEventJSON envelope and honors type/agent_em
 });
 
 // ---- Events read API: getEvent (+ 404) ----
-test("events: getEvent returns the EventJSON by evt_ id; nonexistent → 404", { skip }, async () => {
+test("events: getEvent returns the EventView by evt_ id; nonexistent → 404", { skip }, async () => {
   const email = await createAgent("get");
   const hook = await createHook(["email.sent"]);
   const since = sinceNow();
@@ -499,7 +499,7 @@ test("events: getEvent returns the EventJSON by evt_ id; nonexistent → 404", {
     );
     assert.ok(ev, "seeded email.sent event present");
 
-    const got = await client.get<EventJSON>(`/v1/events/${ev!.id}`);
+    const got = await client.get<EventView>(`/v1/events/${ev!.id}`);
     assert.equal(got.status, 200, `getEvent expected 200, got ${got.status}: ${got.raw.slice(0, 200)}`);
     assert.equal(got.body?.id, ev!.id, "getEvent echoes the requested id");
     assertEventShape(got.body!, { type: "email.sent", agentId: email, messageId });

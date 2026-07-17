@@ -20,8 +20,8 @@ import json
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional, Union
-from e2a.v1.generated.models.attachment_meta import AttachmentMeta
-from e2a.v1.generated.models.result import Result
+from e2a.v1.generated.models.attachment_meta_view import AttachmentMetaView
+from e2a.v1.generated.models.auth_verdict import AuthVerdict
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -31,8 +31,8 @@ class Message(BaseModel):
     """ # noqa: E501
     agent_email: StrictStr
     approval_expires_at: Optional[datetime] = None
-    attachments: Optional[List[AttachmentMeta]] = None
-    auth: Optional[Result] = None
+    attachments: Optional[List[AttachmentMetaView]] = None
+    auth: Optional[AuthVerdict] = None
     auth_headers: Optional[Dict[str, StrictStr]] = None
     bcc: Optional[List[StrictStr]] = None
     cc: Optional[List[StrictStr]] = None
@@ -177,8 +177,8 @@ class Message(BaseModel):
         _obj = cls.model_validate({
             "agent_email": obj.get("agent_email"),
             "approval_expires_at": obj.get("approval_expires_at"),
-            "attachments": [AttachmentMeta.from_dict(_item) for _item in obj["attachments"]] if obj.get("attachments") is not None else None,
-            "auth": Result.from_dict(obj["auth"]) if obj.get("auth") is not None else None,
+            "attachments": [AttachmentMetaView.from_dict(_item) for _item in obj["attachments"]] if obj.get("attachments") is not None else None,
+            "auth": AuthVerdict.from_dict(obj["auth"]) if obj.get("auth") is not None else None,
             "auth_headers": obj.get("auth_headers"),
             "bcc": obj.get("bcc"),
             "cc": obj.get("cc"),

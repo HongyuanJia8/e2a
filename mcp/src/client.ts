@@ -12,7 +12,7 @@ import type {
   ConversationDetailView,
   DomainView,
   VerifyDomainView,
-  EventJSON,
+  EventView,
   RedeliverView,
   WebhookView,
   WebhookDeliveryView,
@@ -554,12 +554,12 @@ export class McpClient {
     until?: string;
     cursor?: string;
     limit?: number;
-  }): Promise<Page<EventJSON>> {
+  }): Promise<Page<EventView>> {
     const { cursor, ...rest } = params;
     return this.sdk.events.list(rest).page(cursor);
   }
 
-  getEvent(id: string): Promise<EventJSON> {
+  getEvent(id: string): Promise<EventView> {
     return this.sdk.events.get(id);
   }
 

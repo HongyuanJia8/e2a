@@ -30,14 +30,14 @@ from e2a.v1.generated.models import (
     CreateAPIKeyResponse,
     CreateWebhookResponse,
     DomainView,
-    EventJSON,
+    EventView,
     ErrorBody,
     FieldError,
     MessageSummaryView,
     MessageView,
     ReviewView,
     StarterTemplateView,
-    Suppression,
+    SuppressionView,
     TemplateSummaryView,
     TemplateView,
     WebhookDeliveryView,
@@ -593,8 +593,8 @@ async def test_conversations_list_threads_cursor(httpx_mock):
 
 @pytest.mark.anyio
 async def test_events_list_threads_cursor(httpx_mock):
-    httpx_mock.add_response(json={"items": [_valid(EventJSON, id="evt_1")], "next_cursor": "cur_2"})
-    httpx_mock.add_response(json={"items": [_valid(EventJSON, id="evt_2")], "next_cursor": None})
+    httpx_mock.add_response(json={"items": [_valid(EventView, id="evt_1")], "next_cursor": "cur_2"})
+    httpx_mock.add_response(json={"items": [_valid(EventView, id="evt_2")], "next_cursor": None})
     async with _client() as c:
         items = await c.events.list().to_list(limit=50)
     assert [e.id for e in items] == ["evt_1", "evt_2"]
@@ -605,8 +605,8 @@ async def test_events_list_threads_cursor(httpx_mock):
 
 @pytest.mark.anyio
 async def test_suppressions_list_threads_cursor(httpx_mock):
-    httpx_mock.add_response(json={"items": [_valid(Suppression, address="a@x.com")], "next_cursor": "cur_2"})
-    httpx_mock.add_response(json={"items": [_valid(Suppression, address="b@x.com")], "next_cursor": None})
+    httpx_mock.add_response(json={"items": [_valid(SuppressionView, address="a@x.com")], "next_cursor": "cur_2"})
+    httpx_mock.add_response(json={"items": [_valid(SuppressionView, address="b@x.com")], "next_cursor": None})
     async with _client() as c:
         items = await c.account.suppressions.list().to_list(limit=50)
     assert [s.address for s in items] == ["a@x.com", "b@x.com"]

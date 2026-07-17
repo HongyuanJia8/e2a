@@ -393,10 +393,10 @@ func testServer(t *testing.T, opts ...func(*Deps)) *httptest.Server {
 			return &identity.DeleteUserDataResult{}, nil
 		},
 		EventsEnabled: true,
-		ListEvents: func(ctx context.Context, q EventQuery) ([]agent.EventJSON, error) {
+		ListEvents: func(ctx context.Context, q EventQuery) ([]agent.EventView, error) {
 			// Two events, honoring Limit + cursor (CursorID) so the
 			// cursor round-trip is exercised.
-			all := []agent.EventJSON{
+			all := []agent.EventView{
 				{ID: "evt_b", Type: "email.received", Status: "delivered", CreatedAt: time.Unix(1700000200, 0).UTC()},
 				{ID: "evt_a", Type: "email.sent", Status: "delivered", CreatedAt: time.Unix(1700000100, 0).UTC()},
 			}
@@ -415,10 +415,10 @@ func testServer(t *testing.T, opts ...func(*Deps)) *httptest.Server {
 			}
 			return rest, nil
 		},
-		GetEvent2: func(ctx context.Context, userID, eventID string) (*agent.EventJSON, error) {
+		GetEvent2: func(ctx context.Context, userID, eventID string) (*agent.EventView, error) {
 			switch eventID {
 			case "evt_a":
-				return &agent.EventJSON{ID: "evt_a", Type: "email.sent", Status: "delivered", CreatedAt: time.Unix(1700000100, 0).UTC()}, nil
+				return &agent.EventView{ID: "evt_a", Type: "email.sent", Status: "delivered", CreatedAt: time.Unix(1700000100, 0).UTC()}, nil
 			case "evt_expired":
 				return nil, agent.ErrEventExpired
 			default:

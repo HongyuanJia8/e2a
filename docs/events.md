@@ -77,7 +77,7 @@ The review-hold + screening events (`email.flagged`, `email.blocked`, `email.rev
 Webhook deliveries and WebSocket frames use the canonical OpenAPI
 `EventEnvelope` component. Its five core fields are required, while the
 envelope and `data` objects remain open for additive fields and future event
-types. The REST event log uses `EventJSON`: it contains the same five core
+types. The REST event log uses `EventView`: it contains the same five core
 fields and payload, plus REST-only processing/routing fields such as `status`,
 `agent_email`, and `delivery_status`. Consumers should not require those
 REST-only fields on push deliveries.

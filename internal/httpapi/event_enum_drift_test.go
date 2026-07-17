@@ -18,7 +18,7 @@ import (
 // drift together).
 //
 // RESPONSE-side event fields (WebhookView.events, WebhookDeliveryView.event_type,
-// EventJSON.type) are deliberately NOT closed enums — they are open strings so the
+// EventView.type) are deliberately NOT closed enums — they are open strings so the
 // server can emit a newly-added event type without breaking strict spec-generated
 // clients (the GA stability contract; see docs/api.md "Versioning & stability").
 // So this gate governs only the REQUEST-side copies, where a closed enum is

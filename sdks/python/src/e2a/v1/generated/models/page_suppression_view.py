@@ -17,29 +17,20 @@ import pprint
 import re  # noqa: F401
 import json
 
-from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
-from e2a.v1.generated.models.delivery_status_json import DeliveryStatusJSON
+from e2a.v1.generated.models.suppression_view import SuppressionView
 from typing import Optional, Set
 from typing_extensions import Self
 
-class EventJSON(BaseModel):
+class PageSuppressionView(BaseModel):
     """
-    EventJSON
+    PageSuppressionView
     """ # noqa: E501
-    agent_email: Optional[StrictStr] = None
-    conversation_id: Optional[StrictStr] = None
-    created_at: datetime
-    data: Dict[str, Any] = Field(description="Event-specific payload. Deliberately open at the envelope level (unknown/beta event types must still parse). The STABLE event types carry frozen payload shapes, published as named component schemas: email.received → EmailReceivedData, email.sent → EmailSentData, email.failed → EmailFailedData, email.delivered → EmailDeliveredData, email.bounced → EmailBouncedData, email.complained → EmailComplainedData, domain.sending_verified → DomainSendingVerifiedData, domain.sending_failed → DomainSendingFailedData, domain.suppression_added → DomainSuppressionAddedData. The beta events (email.flagged, email.blocked, email.review_requested, email.review_approved, email.review_rejected) have open payloads that may change before they are declared stable.")
-    delivery_status: Optional[DeliveryStatusJSON] = None
-    id: StrictStr
-    message_id: Optional[StrictStr] = None
-    schema_version: StrictStr = Field(description="Envelope schema version — a semver-ish string label (currently \"1\").")
-    status: StrictStr = Field(description="Event processing state. Open set; tolerate unknown values. Known values: pending, processed, no_match.")
-    type: StrictStr = Field(description="Event type. Open set: new event types may be added over time, so treat as a string and tolerate unknown values. Known values: email.received, email.sent, email.failed, email.delivered, email.bounced, email.complained, email.flagged, email.blocked, email.review_requested, email.review_approved, email.review_rejected, domain.sending_verified, domain.sending_failed, domain.suppression_added. Stable types have frozen data schemas — see the data field.")
+    items: List[SuppressionView]
+    next_cursor: Optional[StrictStr]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["agent_email", "conversation_id", "created_at", "data", "delivery_status", "id", "message_id", "schema_version", "status", "type"]
+    __properties: ClassVar[List[str]] = ["items", "next_cursor"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -59,7 +50,7 @@ class EventJSON(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of EventJSON from a JSON string"""
+        """Create an instance of PageSuppressionView from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -82,19 +73,28 @@ class EventJSON(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of delivery_status
-        if self.delivery_status:
-            _dict['delivery_status'] = self.delivery_status.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of each item in items (list)
+        _items = []
+        if self.items:
+            for _item_items in self.items:
+                if _item_items:
+                    _items.append(_item_items.to_dict())
+            _dict['items'] = _items
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if next_cursor (nullable) is None
+        # and model_fields_set contains the field
+        if self.next_cursor is None and "next_cursor" in self.model_fields_set:
+            _dict['next_cursor'] = None
+
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of EventJSON from a dict"""
+        """Create an instance of PageSuppressionView from a dict"""
         if obj is None:
             return None
 
@@ -102,16 +102,8 @@ class EventJSON(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "agent_email": obj.get("agent_email"),
-            "conversation_id": obj.get("conversation_id"),
-            "created_at": obj.get("created_at"),
-            "data": obj.get("data"),
-            "delivery_status": DeliveryStatusJSON.from_dict(obj["delivery_status"]) if obj.get("delivery_status") is not None else None,
-            "id": obj.get("id"),
-            "message_id": obj.get("message_id"),
-            "schema_version": obj.get("schema_version"),
-            "status": obj.get("status"),
-            "type": obj.get("type")
+            "items": [SuppressionView.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None,
+            "next_cursor": obj.get("next_cursor")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

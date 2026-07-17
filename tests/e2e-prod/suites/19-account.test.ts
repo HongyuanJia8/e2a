@@ -43,15 +43,15 @@ interface PageApiKeyView {
 interface CreateApiKeyResponse extends ApiKeyView {
   key: string;
 }
-interface Suppression {
+interface SuppressionView {
   address: string;
   source: string;
   created_at: string;
   reason?: string;
   source_message_id?: string;
 }
-interface PageSuppression {
-  items: Suppression[];
+interface PageSuppressionView {
+  items: SuppressionView[];
   next_cursor: string | null;
 }
 interface ErrorEnvelope {
@@ -208,18 +208,18 @@ test("exportAccount: 200 UserExport with required sections + attachment header",
 });
 
 // ---------------------------------------------------------------------------
-// listSuppressions — PageSuppression envelope (typically empty for a fresh acct).
+// listSuppressions — PageSuppressionView envelope (typically empty for a fresh acct).
 // ---------------------------------------------------------------------------
-test("listSuppressions: PageSuppression envelope {items, next_cursor}", async () => {
-  const r = await client.get<PageSuppression>("/v1/account/suppressions", { query: { limit: 100 } });
+test("listSuppressions: PageSuppressionView envelope {items, next_cursor}", async () => {
+  const r = await client.get<PageSuppressionView>("/v1/account/suppressions", { query: { limit: 100 } });
   assert.equal(r.status, 200, `listSuppressions expected 200, got ${r.status}: ${r.raw.slice(0, 200)}`);
   assert.ok(Array.isArray(r.body?.items), "items is an array");
   assert.ok(
     r.body!.next_cursor === null || typeof r.body!.next_cursor === "string",
-    "next_cursor is string|null (required by PageSuppression)",
+    "next_cursor is string|null (required by PageSuppressionView)",
   );
   for (const s of r.body!.items) {
-    // Suppression required: address, source, created_at.
+    // SuppressionView required: address, source, created_at.
     assert.ok(s.address?.includes("@"), `suppression.address valid: ${s.address}`);
     assert.ok(s.source, "suppression.source present");
     assert.ok(s.created_at, "suppression.created_at present");

@@ -30,9 +30,9 @@ import (
 // handler signatures.
 func (a *API) SetPoolForEvents(p *pgxpool.Pool) { a.eventsPool = p }
 
-// eventJSON is the wire shape returned by GET /events and
+// eventView is the wire shape returned by GET /events and
 // GET /events/{id}. Mirrors design §4.6.
-type eventJSON struct {
+type eventView struct {
 	ID             string                 `json:"id"`
 	Type           string                 `json:"type" doc:"Event type. Open set: new event types may be added over time, so treat as a string and tolerate unknown values. Known values: email.received, email.sent, email.failed, email.delivered, email.bounced, email.complained, email.flagged, email.blocked, email.review_requested, email.review_approved, email.review_rejected, domain.sending_verified, domain.sending_failed, domain.suppression_added. Stable types have frozen data schemas — see the data field."`
 	SchemaVersion  string                 `json:"schema_version" doc:"Envelope schema version — a semver-ish string label (currently \"1\")."`
@@ -52,7 +52,7 @@ type deliveryStatusJSON struct {
 	Failed          int `json:"failed"`
 }
 
-func listEvents(ctx context.Context, pool *pgxpool.Pool, userID, eventType, agentID, conversationID, messageID string, since, until *time.Time, cursorCreatedAt time.Time, cursorID string, limit int) ([]eventJSON, error) {
+func listEvents(ctx context.Context, pool *pgxpool.Pool, userID, eventType, agentID, conversationID, messageID string, since, until *time.Time, cursorCreatedAt time.Time, cursorID string, limit int) ([]eventView, error) {
 	// Build query. user_id is always the first predicate.
 	args := []any{userID}
 	whereClauses := []string{"user_id = $1", "aud = 'webhook'"}
@@ -105,10 +105,10 @@ func listEvents(ctx context.Context, pool *pgxpool.Pool, userID, eventType, agen
 	}
 	defer rows.Close()
 
-	var out []eventJSON
+	var out []eventView
 	for rows.Next() {
 		var (
-			ej          eventJSON
+			ej          eventView
 			schemaVer   int16
 			envelopeRaw []byte
 			expiresAt   time.Time
@@ -158,9 +158,9 @@ var (
 	errEventExpired  = errors.New("event expired")
 )
 
-func getEvent(ctx context.Context, pool *pgxpool.Pool, userID, eventID string) (*eventJSON, error) {
+func getEvent(ctx context.Context, pool *pgxpool.Pool, userID, eventID string) (*eventView, error) {
 	var (
-		ej          eventJSON
+		ej          eventView
 		schemaVer   int16
 		envelopeRaw []byte
 		expiresAt   time.Time

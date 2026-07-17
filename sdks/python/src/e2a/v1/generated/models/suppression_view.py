@@ -17,21 +17,23 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
+from datetime import datetime
+from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
 
-class AttachmentMeta(BaseModel):
+class SuppressionView(BaseModel):
     """
-    AttachmentMeta
+    SuppressionView
     """ # noqa: E501
-    content_type: Optional[StrictStr] = None
-    filename: Optional[StrictStr] = None
-    index: StrictInt = Field(description="Stable 0-based attachment index (document order) — the fetch key for the attachment-bytes endpoint.")
-    size_bytes: StrictInt = Field(description="DECODED attachment payload size in bytes (Content-Transfer-Encoding undone) — the size of the file a download yields, not its encoded size inside the raw MIME.")
+    address: StrictStr
+    created_at: datetime
+    reason: Optional[StrictStr] = None
+    source: StrictStr
+    source_message_id: Optional[StrictStr] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["content_type", "filename", "index", "size_bytes"]
+    __properties: ClassVar[List[str]] = ["address", "created_at", "reason", "source", "source_message_id"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -51,7 +53,7 @@ class AttachmentMeta(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of AttachmentMeta from a JSON string"""
+        """Create an instance of SuppressionView from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -83,7 +85,7 @@ class AttachmentMeta(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of AttachmentMeta from a dict"""
+        """Create an instance of SuppressionView from a dict"""
         if obj is None:
             return None
 
@@ -91,10 +93,11 @@ class AttachmentMeta(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "content_type": obj.get("content_type"),
-            "filename": obj.get("filename"),
-            "index": obj.get("index"),
-            "size_bytes": obj.get("size_bytes")
+            "address": obj.get("address"),
+            "created_at": obj.get("created_at"),
+            "reason": obj.get("reason"),
+            "source": obj.get("source"),
+            "source_message_id": obj.get("source_message_id")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

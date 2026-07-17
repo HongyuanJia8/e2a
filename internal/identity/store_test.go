@@ -479,7 +479,7 @@ func TestInboundMessageRoundTripsAuthVerdict(t *testing.T) {
 	store.ClaimOrCreateDomain(ctx, "authverdict.example.com", user.ID)
 	a, _ := store.CreateAgent(ctx, "bot@authverdict.example.com", "authverdict.example.com", "", "https://example.com/webhook", "", user.ID)
 
-	verdict := emailauth.Result{
+	verdict := emailauth.AuthVerdict{
 		SPF:   emailauth.CheckResult{Status: emailauth.StatusPass, Detail: "spf-pass detail"},
 		DKIM:  emailauth.CheckResult{Status: emailauth.StatusFail, Detail: "dkim-fail detail"},
 		DMARC: emailauth.CheckResult{Status: emailauth.StatusNone, Detail: "no alignment"},
