@@ -28,7 +28,7 @@ type DNSRecord struct {
 	Value    string `json:"value" doc:"Record value. For MX records this is the mail-server host only; the priority is in the priority field."`
 	Priority *int   `json:"priority" doc:"MX priority. Null for non-MX records."`
 	Purpose  string `json:"purpose" doc:"What the record is for. Open set; tolerate unknown values. Known values: ownership, inbound_mx, dkim, mail_from_mx, mail_from_spf."`
-	Status   string `json:"status" doc:"Per-record verification state. Open set; tolerate unknown values. Known values: verified, pending, missing, failed. Inbound records (ownership, inbound_mx) become verified once inbound verification passes, which requires BOTH the ownership TXT and the inbound MX. Sending records reflect their own SES axis: the dkim record follows the DKIM axis, while mail_from_mx and mail_from_spf follow the custom MAIL FROM axis, so a domain with working DKIM but a broken MAIL FROM (or the reverse) shows exactly which record to fix rather than failing all three. Before SES has reported a per-axis result (pre-provision rows) the sending records fall back to the all-or-nothing sending_status rollup; consult sending_error for the failure reason. The domain-level sending_status field remains the all-or-nothing rollup summary."`
+	Status   string `json:"status" doc:"Persisted verification state of this DNS record — the stored domain state, updated when verification checks and the SES reconciler run, NOT a live DNS probe result. Open set; tolerate unknown values. Known values: verified (record confirmed), pending (not yet confirmed — awaiting publish/propagation or an SES result), missing (documented for forward compatibility; not currently emitted), failed (verification failed, or pending exceeded its TTL). Inbound records (ownership, inbound_mx) become verified once inbound verification passes, which requires BOTH the ownership TXT and the inbound MX. Sending records reflect their own SES axis: the dkim record follows the DKIM axis, while mail_from_mx and mail_from_spf follow the custom MAIL FROM axis, so a domain with working DKIM but a broken MAIL FROM (or the reverse) shows exactly which record to fix rather than failing all three. Before SES has reported a per-axis result (pre-provision rows) the sending records fall back to the all-or-nothing sending_status rollup; consult sending_error for the failure reason. The domain-level sending_status field remains the all-or-nothing rollup summary. POST /v1/domains/{domain}/verify reports the LIVE probe outcome for the same records in probe vocabulary (found/missing/deferred/mismatch) — persisted state and live probe outcome are deliberately distinct axes; do not map one vocabulary onto the other."`
 }
 
 type DomainView struct {
@@ -175,13 +175,21 @@ type DomainCheckResult struct {
 }
 
 // VerifyDomainView mirrors the legacy VerifyDomainResponse.
+//
+// The mx/spf/dkim fields report the LIVE DNS probe outcome of this
+// verification attempt in probe vocabulary (found/missing/deferred/mismatch).
+// This is deliberately a different axis — and a different word set — from the
+// PERSISTED per-record state in DomainView.dns_records[].status
+// (verified/pending/missing/failed): a probe answers "what did DNS return just
+// now", the persisted status answers "what has the platform recorded about
+// this record". Keep the two vocabularies distinct; see domains_vocab_test.go.
 type VerifyDomainView struct {
 	Domain     string     `json:"domain"`
 	Verified   bool       `json:"verified"`
 	VerifiedAt *time.Time `json:"verified_at,omitempty"`
-	MX         string     `json:"mx,omitempty"`
-	SPF        string     `json:"spf,omitempty"`
-	DKIM       string     `json:"dkim,omitempty" doc:"Live DKIM probe state. Known values: found, missing, deferred, mismatch. 'mismatch' means a DKIM record IS published at the selector but its key doesn't match the issued one — almost always a truncated/clipped TXT (the value is ~400 chars and must be published in full, ending in 'AQAB'). On 'mismatch', re-publish the complete DKIM record; do not just wait."`
+	MX         string     `json:"mx,omitempty" doc:"Live DNS probe outcome for the inbound MX record from THIS verification attempt — not the persisted domain state (that is dns_records[].status on GET /v1/domains/{domain}, which uses the deliberately distinct persisted vocabulary verified/pending/missing/failed). Open set; tolerate unknown values. Known values: found (an MX record on the apex domain points at the e2a relay host), missing (no apex MX points at the relay, or the DNS lookup failed). The MX probe gates verification together with the ownership TXT: verified flips true only when both are present."`
+	SPF        string     `json:"spf,omitempty" doc:"Live DNS probe outcome for the apex SPF record from THIS verification attempt — not the persisted domain state (that is dns_records[].status on GET /v1/domains/{domain}, which uses the deliberately distinct persisted vocabulary verified/pending/missing/failed). Advisory diagnostic only: SPF does not gate verified. Open set; tolerate unknown values. Known values: found (an apex TXT record starts with v=spf1 and includes the e2a relay's send domain), missing (no such TXT record, or the DNS lookup failed). This probes the APEX SPF authorizing the relay; it is not the mail_from_spf record (the custom MAIL FROM subdomain's SPF), whose persisted state is reported in dns_records[].status."`
+	DKIM       string     `json:"dkim,omitempty" doc:"Live DNS probe outcome for the domain's DKIM record ({selector}._domainkey.{domain}) from THIS verification attempt — not the persisted domain state (that is dns_records[].status on GET /v1/domains/{domain}, which uses the deliberately distinct persisted vocabulary verified/pending/missing/failed). Advisory diagnostic: DKIM does not gate verified. Open set; tolerate unknown values. Known values: found (a TXT at the selector carries a p= key equal to the issued one; a match wins over a stale key during rotation), missing (a keypair is issued but no p= payload is published at the selector, or the DNS lookup failed), deferred (the probe was skipped because no per-domain DKIM keypair is stored for this domain yet — legacy pre-keying rows; NOT a DNS-propagation wait), mismatch (a DKIM record IS published at the selector but its key doesn't match the issued one — almost always a truncated/clipped TXT: the value is ~400 chars and must be published in full, ending in 'AQAB'; re-publish the complete DKIM record, do not just wait)."`
 }
 
 // listDomainsOutput uses the shared Page[T] envelope (items + next_cursor). The
