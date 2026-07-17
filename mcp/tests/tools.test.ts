@@ -355,6 +355,22 @@ describe("e2a MCP server", () => {
     );
   });
 
+  it("documents the fail-closed configuration for reviewing every outbound message", async () => {
+    const { tools } = await client.listTools();
+    const tool = tools.find((candidate) => candidate.name === "update_protection");
+    const description = tool?.description ?? "";
+    const properties = (tool?.inputSchema as {
+      properties?: Record<string, { description?: string }>;
+    })?.properties ?? {};
+
+    expect(description).toContain("outbound_gate_policy=allowlist");
+    expect(description).toContain("outbound_gate_allowlist=[]");
+    expect(description).toContain("outbound_gate_action=review");
+    expect(description).toMatch(/open.*review.*hold nothing/i);
+    expect(properties.outbound_gate_policy?.description).toMatch(/open.*every recipient/i);
+    expect(properties.holds_on_expiry?.description).toMatch(/reject.*explicit human approval/i);
+  });
+
   // The real backend status vocabulary (internal/httpapi/outbound.go
   // SendResultView) includes "accepted" — the async-outbound success status
   // that REPLACES "sent" for queue-first delivery. A model that doesn't know
