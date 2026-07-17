@@ -225,6 +225,23 @@ func TestListMessagesConversationFilterAcceptsMaxLenUnicode(t *testing.T) {
 	}
 }
 
+// A conversation_id at the request cap is fetchable via GET
+// /conversations/{id} — the byte-counting pre-check this replaced would have
+// 400'd a schema-legal 200-code-point non-ASCII id. At-limit reaches the
+// store lookup (404 from the fixture, NOT 400); over-limit is a 400.
+func TestGetConversationAcceptsMaxLenUnicodeID(t *testing.T) {
+	srv := testServer(t)
+	enc := strings.Repeat("%E6%97%A5", maxConversationIDLen) // 200 × 日
+	code, body := getJSON(t, srv.URL+"/v1/agents/support%40acme.com/conversations/"+enc, "good")
+	if code != 404 {
+		t.Fatalf("GET conversation with 200-code-point id: want 404 (past validation, unknown id), got %d %v", code, body)
+	}
+	code, body = getJSON(t, srv.URL+"/v1/agents/support%40acme.com/conversations/"+enc+"%E6%97%A5", "good")
+	if code != 400 || errCode(body) != "invalid_request" {
+		t.Fatalf("GET conversation with 201-code-point id: want 400 invalid_request, got %d %v", code, body)
+	}
+}
+
 // reply_to: an address with a multi-byte display name at exactly 320 code
 // points passes the schema tag, the runtime rune count, and the address
 // parser; 321 is a schema 422.

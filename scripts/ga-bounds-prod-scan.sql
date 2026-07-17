@@ -22,6 +22,7 @@
 --   messages.conversation_id ........................... 200
 --   messages.rejection_reason .......................... 2000
 --   messages.to_recipients / cc / bcc (each element) ... 320
+--   messages.reply_to (each element; text[]) ........... 320
 --
 -- Read-only. Safe on prod (sequential scans on messages — run off-peak or
 -- against a replica if the messages table is large).
@@ -87,6 +88,21 @@ WITH rec AS (
 )
 SELECT id, kind, char_length(addr) AS len, left(addr, 80) AS sample
   FROM rec WHERE char_length(addr) > 320
+ ORDER BY char_length(addr) DESC LIMIT 5;
+
+-- The request-side reply_to (a single address string, now capped at 320) is
+-- persisted on messages as the text[] reply_to column — measure each element.
+\echo '=== messages.reply_to: any element > 320 chars ==='
+WITH rt AS (
+    SELECT id, r AS addr FROM messages, unnest(reply_to) AS r
+)
+SELECT count(*) AS violations, coalesce(max(char_length(addr)), 0) AS max_len
+  FROM rt WHERE char_length(addr) > 320;
+WITH rt AS (
+    SELECT id, r AS addr FROM messages, unnest(reply_to) AS r
+)
+SELECT id, char_length(addr) AS len, left(addr, 80) AS sample
+  FROM rt WHERE char_length(addr) > 320
  ORDER BY char_length(addr) DESC LIMIT 5;
 
 -- send_attempts carries its own recipient copies (approve-path WAL) — scan it

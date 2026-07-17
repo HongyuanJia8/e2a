@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tokencanopy/e2a/internal/config"
 	"github.com/tokencanopy/e2a/internal/identity"
@@ -766,6 +767,15 @@ func (ua *UserAuth) HandleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		Agent string `json:"agent,omitempty"` // agent email, required when scope=agent
 	}
 	json.NewDecoder(r.Body).Decode(&req)
+
+	// Same key-name cap as /v1 createApiKey (identity.MaxAPIKeyNameLen),
+	// counted in Unicode code points to match the OpenAPI maxLength
+	// semantics — the dashboard path must not be a bypass around the
+	// request-edge bound.
+	if n := utf8.RuneCountInString(req.Name); n > identity.MaxAPIKeyNameLen {
+		http.Error(w, fmt.Sprintf("name too long — %d characters, max %d", n, identity.MaxAPIKeyNameLen), http.StatusBadRequest)
+		return
+	}
 
 	// Parse optional expires_at. Empty string and missing field both mean
 	// "never expires" — symmetric with the NULL column default. Malformed

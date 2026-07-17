@@ -1224,6 +1224,18 @@ func (s *Store) UpdateAgentInboundPolicy(ctx context.Context, agentID, userID, p
 // rune-count semantics here, so the spec and the runtime always agree.
 const MaxAgentNameLen = 200
 
+// MaxAPIKeyNameLen bounds the API-key display name (a human label, not an
+// identifier). One source of truth for every entry path: the /v1 createApiKey
+// schema tag AND the legacy dashboard POST /api/keys handler (internal/auth).
+// Counted in Unicode code points, matching OpenAPI maxLength semantics.
+const MaxAPIKeyNameLen = 200
+
+// MaxRejectReasonLen bounds a reviewer-supplied rejection reason. One source
+// of truth for every entry path: the /v1 rejectReview schema tag AND the
+// magic-link reject form (internal/agent), which clamps rather than fails a
+// human's rejection. Counted in Unicode code points.
+const MaxRejectReasonLen = 2000
+
 // ValidateAgentName checks the display-name bound. The length is counted in
 // Unicode code points (runes), NOT bytes, to match the OpenAPI maxLength
 // semantics of the /v1 request schemas (JSON Schema counts code points).

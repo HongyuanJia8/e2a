@@ -238,6 +238,33 @@ func TestHandleCreateAPIKey_AcceptsExpiresAt(t *testing.T) {
 	}
 }
 
+// TestHandleCreateAPIKey_NameBoundRuneSemantics: the dashboard POST /api/keys
+// shares the /v1 createApiKey name cap (identity.MaxAPIKeyNameLen, counted in
+// Unicode code points). A 200-code-point CJK name (600 bytes) is accepted —
+// byte-counting would reject it — and 201 code points is a 400.
+func TestHandleCreateAPIKey_NameBoundRuneSemantics(t *testing.T) {
+	ua, _, token := setupUserAuth(t)
+
+	atLimit := strings.Repeat("日", identity.MaxAPIKeyNameLen)
+	req := authedJSON("POST", "/api/keys", token, `{"name":"`+atLimit+`"}`)
+	w := httptest.NewRecorder()
+	ua.HandleCreateAPIKey(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("name at %d code points: status = %d, want 201; body=%s", identity.MaxAPIKeyNameLen, w.Code, w.Body.String())
+	}
+
+	over := strings.Repeat("日", identity.MaxAPIKeyNameLen+1)
+	req = authedJSON("POST", "/api/keys", token, `{"name":"`+over+`"}`)
+	w = httptest.NewRecorder()
+	ua.HandleCreateAPIKey(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("name over the code-point limit: status = %d, want 400; body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "name too long") {
+		t.Errorf("expected 'name too long' error, got: %s", w.Body.String())
+	}
+}
+
 // TestHandleCreateAPIKey_RejectsPastExpiresAt: a past timestamp must
 // be a 400 — silently swallowing it would issue a key that's already
 // expired, which is worse UX than rejecting at create time.

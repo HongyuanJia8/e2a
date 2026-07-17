@@ -53,8 +53,10 @@ type listAPIKeysOutput struct{ Body Page[APIKeyView] }
 // maxAPIKeyNameLen bounds the API-key display name (a human label, not an
 // identifier) — same budget as the agent display name. Enforced declaratively
 // via the maxLength struct tag (Huma validates in Unicode code points);
-// TestGABoundTagsMatchConsts guards tag/const drift.
-const maxAPIKeyNameLen = 200
+// TestGABoundTagsMatchConsts guards tag/const drift. Aliased to the canonical
+// identity.MaxAPIKeyNameLen so this and the legacy dashboard POST /api/keys
+// handler (internal/auth) share one source of truth.
+const maxAPIKeyNameLen = identity.MaxAPIKeyNameLen
 
 // CreateAPIKeyRequest mirrors the legacy /api/keys body. scope defaults to
 // account; scope=agent requires `agent_email` (an owned inbox email).

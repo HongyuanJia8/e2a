@@ -35,8 +35,10 @@ type RejectResultView struct {
 
 // maxRejectReasonLen bounds the reviewer-supplied rejection reason. Enforced
 // declaratively via the maxLength struct tag (Huma validates in Unicode code
-// points); TestGABoundTagsMatchConsts guards tag/const drift.
-const maxRejectReasonLen = 2000
+// points); TestGABoundTagsMatchConsts guards tag/const drift. Aliased to the
+// canonical identity.MaxRejectReasonLen so this and the magic-link reject
+// form (internal/agent, which clamps) share one source of truth.
+const maxRejectReasonLen = identity.MaxRejectReasonLen
 
 // RejectRequest is the reject body (MSG-10, was the inline RejectInputBody).
 type RejectRequest struct {
