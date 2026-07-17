@@ -23,11 +23,13 @@ describe("loadConfig", () => {
     vi.mocked(readFileSync).mockReset();
     delete process.env.E2A_API_KEY;
     delete process.env.E2A_URL;
+    delete process.env.E2A_BASE_URL;
   });
 
   afterEach(() => {
     delete process.env.E2A_API_KEY;
     delete process.env.E2A_URL;
+    delete process.env.E2A_BASE_URL;
   });
 
   it("returns defaults when no config file exists", () => {
@@ -63,24 +65,73 @@ describe("loadConfig", () => {
     expect(config.api_url).toBe("https://custom.dev");
   });
 
-  it("honors the tether env names: E2A_BASE_URL alias and E2A_AGENT_EMAIL", () => {
+  it("honors the tether env name E2A_AGENT_EMAIL", () => {
     vi.mocked(readFileSync).mockImplementation(() => {
       throw new Error("ENOENT");
     });
-    process.env.E2A_BASE_URL = "https://api.selfhost.dev";
     process.env.E2A_AGENT_EMAIL = "tether@agents.e2a.dev";
     try {
-      const config = loadConfig();
-      expect(config.api_url).toBe("https://api.selfhost.dev");
-      expect(config.agent_email).toBe("tether@agents.e2a.dev");
+      expect(loadConfig().agent_email).toBe("tether@agents.e2a.dev");
+    } finally {
+      delete process.env.E2A_AGENT_EMAIL;
+    }
+  });
 
-      // Canonical E2A_URL wins over the alias.
-      process.env.E2A_URL = "https://canonical.dev";
-      expect(loadConfig().api_url).toBe("https://canonical.dev");
+  // api_url is the deployment root: `login` opens a browser against it and
+  // points at /get-started, both served by the web front (which proxies /v1).
+  // E2A_BASE_URL names the API host alone, so honouring it here silently
+  // repointed the CLI at the API host and broke `e2a login`.
+  it("ignores E2A_BASE_URL and warns that it is not the CLI's var", () => {
+    vi.mocked(readFileSync).mockImplementation(() => {
+      throw new Error("ENOENT");
+    });
+    const warn = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    process.env.E2A_BASE_URL = "https://api.selfhost.dev";
+    try {
+      expect(loadConfig().api_url).toBe("https://e2a.dev");
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("E2A_BASE_URL is set"));
     } finally {
       delete process.env.E2A_BASE_URL;
-      delete process.env.E2A_AGENT_EMAIL;
+      warn.mockRestore();
+    }
+  });
+
+  it("stays quiet about E2A_BASE_URL when the CLI is pointed somewhere explicitly", () => {
+    vi.mocked(readFileSync).mockImplementation(() => {
+      throw new Error("ENOENT");
+    });
+    const warn = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    process.env.E2A_BASE_URL = "https://api.selfhost.dev";
+    process.env.E2A_URL = "https://canonical.dev";
+    try {
+      expect(loadConfig().api_url).toBe("https://canonical.dev");
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.E2A_BASE_URL;
       delete process.env.E2A_URL;
+      warn.mockRestore();
+    }
+  });
+
+  // Regression: E2A_BASE_URL used to override ~/.e2a/config.json. A user with a
+  // stored host (from `e2a login`) and a legacy env override now silently keeps
+  // the stored host. The warning must still fire — gating it on "resolved ==
+  // default" would miss exactly this case — and must name the host in use.
+  it("warns about ignored E2A_BASE_URL even when a non-default api_url is stored", () => {
+    vi.mocked(readFileSync).mockReturnValue(
+      JSON.stringify({ api_key: "e2a_stored", api_url: "https://stored.selfhost.dev" }),
+    );
+    const warn = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    process.env.E2A_BASE_URL = "https://other.selfhost.dev";
+    try {
+      // Stored host wins (env E2A_BASE_URL is not an alias) — the silent part.
+      expect(loadConfig().api_url).toBe("https://stored.selfhost.dev");
+      // …but it is no longer silent, and the message names the host actually used.
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("E2A_BASE_URL is set"));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("https://stored.selfhost.dev"));
+    } finally {
+      delete process.env.E2A_BASE_URL;
+      warn.mockRestore();
     }
   });
 });

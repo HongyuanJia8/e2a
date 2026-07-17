@@ -287,7 +287,7 @@ WebSocket (no public URL needed):
 from e2a.v1 import AsyncE2AClient
 
 async with AsyncE2AClient(api_key="e2a_…") as client:
-    async for notif in client.listen("bot@your-domain.com"):  # falls back to E2A_AGENT_EMAIL
+    async for notif in client.listen("bot@your-domain.com"):
         # notif is lightweight metadata — fetch the body when you want it
         email = await client.messages.get(notif.recipient, notif.message_id)
         await client.messages.reply(notif.recipient, notif.message_id, {"body": "Got it!"})
@@ -310,7 +310,8 @@ Three audiences each configure a different surface:
 | Audience | What they configure | Where |
 |---|---|---|
 | **Server operator** — runs the Go backend | DB, signing key, SMTP, OAuth, optional shared domain | `config.yaml` + `E2A_*` env |
-| **CLI / SDK user** — calls the API from their machine | Just the deployment URL (and login) | `E2A_URL` + `e2a login` |
+| **CLI user** — drives an inbox from a terminal | Deployment URL + login | `E2A_URL` + `e2a login` |
+| **SDK / MCP user** — calls `/v1` from code | API host + key | `E2A_API_URL` + `E2A_API_KEY` |
 | **Web dashboard deployer** — hosts the Next.js dashboard | Public site URL + branding | `NEXT_PUBLIC_*` build-time env |
 
 The Go binary runs on any container host; storage is plain Postgres 14+; outbound mail goes through standard SMTP. Most workers coordinate via `SELECT … FOR UPDATE SKIP LOCKED`, so multi-replica is safe — the two real horizontal-scaling caveats are in-memory WebSocket fan-out and per-process rate limits.

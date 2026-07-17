@@ -52,15 +52,35 @@ export function loadConfig(): Config {
     // No config file yet
   }
 
-  // Env vars override file. E2A_BASE_URL is accepted as an alias for E2A_URL
-  // and E2A_AGENT_EMAIL selects the inbox — these are the exact names the
-  // tether harness trains users to export, so ignoring them is a silent trap
-  // for the CLI's primary scripting consumer. E2A_URL wins over the alias.
+  // Env vars override file. E2A_AGENT_EMAIL selects the inbox — the exact name
+  // the tether harness trains users to export, so ignoring it is a silent trap
+  // for the CLI's primary scripting consumer.
+  //
+  // E2A_BASE_URL is deliberately NOT read here. api_url is the deployment root
+  // (login opens a browser against it and points at /get-started, both served
+  // by the web front, which proxies /v1 through), whereas E2A_BASE_URL/
+  // E2A_API_URL name the API host alone. Accepting it as an alias meant that
+  // exporting E2A_BASE_URL=https://api.e2a.dev to configure an SDK silently
+  // repointed the CLI at the API host and broke `e2a login`.
   if (process.env.E2A_API_KEY) config.api_key = process.env.E2A_API_KEY;
   if (process.env.E2A_URL) config.api_url = process.env.E2A_URL;
-  else if (process.env.E2A_BASE_URL) config.api_url = process.env.E2A_BASE_URL;
   if (process.env.E2A_AGENT_EMAIL) config.agent_email = process.env.E2A_AGENT_EMAIL;
   if (process.env.E2A_SHARED_DOMAIN) config.shared_domain = process.env.E2A_SHARED_DOMAIN;
+
+  // Someone who set E2A_BASE_URL expecting it to steer the CLI (it used to)
+  // would otherwise be ignored silently. Warn whenever it's set without the
+  // canonical E2A_URL — the CLI then resolves to either its default OR a host
+  // stored by `e2a login`, and neither is what E2A_BASE_URL asked for. It used
+  // to override the stored config, so a user with stored host A and legacy
+  // env host B now silently gets A. Show the host actually in use so that
+  // mismatch is visible rather than hidden.
+  if (!process.env.E2A_URL && process.env.E2A_BASE_URL) {
+    process.stderr.write(
+      `e2a: E2A_BASE_URL is set but the CLI does not read it — that name configures the SDKs.\n` +
+        `     The CLI uses E2A_URL for the deployment root and is talking to ${config.api_url}.\n` +
+        `     Set E2A_URL to point it at a self-hosted deployment.\n`,
+    );
+  }
 
   return config;
 }
