@@ -1,14 +1,16 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
 	"time"
 
-	"github.com/tokencanopy/e2a/internal/agent"
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/tokencanopy/e2a/internal/agent"
 )
 
 // EventQuery is the resolved filter + cursor position passed to the events
@@ -106,6 +108,25 @@ type RedeliverDelivery struct {
 // RedeliverEventRequest is the redeliver body (WH-6 naming).
 type RedeliverEventRequest struct {
 	WebhookID string `json:"webhook_id,omitempty"`
+}
+
+// UnmarshalJSON preserves the contract distinction between an omitted optional
+// webhook_id (bulk fan-out) and an explicitly null, non-nullable webhook_id.
+func (r *RedeliverEventRequest) UnmarshalJSON(data []byte) error {
+	type plain RedeliverEventRequest
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if raw, ok := fields["webhook_id"]; ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return errors.New("webhook_id must be a string")
+	}
+	*r = RedeliverEventRequest(decoded)
+	return nil
 }
 
 type RedeliverEventInput struct {
