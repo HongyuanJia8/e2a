@@ -17,10 +17,15 @@ type fakeStore struct {
 	loadErr     error
 	markSentErr error
 	releaseErr  error
+	// suppressed / suppressedErr drive the pre-provider suppression guard.
+	suppressed    []string
+	suppressedErr error
 
 	sent     []sentCall
 	failed   []failedCall
 	released []string
+	// suppressionUserID records the tenant the guard was scoped to.
+	suppressionUserID string
 }
 
 type sentCall struct{ id, provider, sentAs string }
@@ -45,6 +50,10 @@ func (f *fakeStore) ReleaseSend(_ context.Context, id string, _ int64) error {
 	f.released = append(f.released, id)
 	return f.releaseErr
 }
+func (f *fakeStore) SuppressedRecipients(_ context.Context, userID string, _ []string) ([]string, error) {
+	f.suppressionUserID = userID
+	return f.suppressed, f.suppressedErr
+}
 
 type fakeDeliverer struct{ out outboundsend.DeliverOutcome }
 
@@ -60,7 +69,7 @@ func job(id string, attempt int) *river.Job[outboundsend.OutboundSendArgs] {
 }
 
 func acceptedJob(id string) *outboundsend.SendJob {
-	return &outboundsend.SendJob{MessageID: id, Status: "accepted", EnvelopeFrom: "a@x.com", Recipients: []string{"b@y.com"}, RawMessage: []byte("raw")}
+	return &outboundsend.SendJob{MessageID: id, UserID: "user_owner", Status: "accepted", EnvelopeFrom: "a@x.com", Recipients: []string{"b@y.com"}, RawMessage: []byte("raw")}
 }
 
 func TestSendWorker_Success(t *testing.T) {

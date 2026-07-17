@@ -119,6 +119,21 @@ func (a *API) ApprovePendingCore(ctx context.Context, userID, messageID, expecte
 		}}
 	}
 
+	// Suppression enforcement on the approval path. The reviewer's overrides
+	// are already merged into mergedReq, so this checks the FINAL To/CC/BCC
+	// set — a reviewer-added recipient can't bypass the accept-time check, and
+	// an address suppressed while the draft was held is refused here. Scoped
+	// to the message's owning account (agent.UserID == the userID that proved
+	// ownership above). On refusal NOTHING below has run: the hold stays
+	// pending_review and the 422 is returned strictly before any side effect,
+	// so runIdempotent releases (never caches) the caller's Idempotency-Key —
+	// same semantics as send's accept-time 422 — and the identical approve
+	// succeeds once the suppression is removed. Fails CLOSED on a store error
+	// (retryable 500, hold untouched) — see checkSuppressionCore.
+	if supErr := a.checkSuppressionStrict(ctx, agent.UserID, mergedReq); supErr != nil {
+		return nil, supErr
+	}
+
 	// Transition the hold to review_approved + delivery_status='accepted'
 	// and enqueue an outbound_send job; the SendWorker performs the SMTP submit +
 	// email.sent/failed + metering. The reviewer gets "accepted" back (the send is
