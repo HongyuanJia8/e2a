@@ -3,9 +3,9 @@
 // Mail clients embed pasted images as a MIME part referenced from the HTML by a
 // Content-ID URL — `<img src="cid:ii_abc@mail.gmail.com">` (or `url(cid:…)` in a
 // CSS background). The browser can't resolve `cid:` in a web document, so these
-// must be rewritten to a real URL (a data: or blob: URL of the fetched bytes)
-// before the HTML is rendered. These helpers are the pure string half of that;
-// the byte-fetching + React wiring lives in EmailHtmlBody.
+// must be rewritten to a real URL (a data: URL of the fetched bytes) before the
+// HTML is rendered. These helpers are the pure string half of that; the
+// byte-fetching + React wiring lives in EmailHtmlBody.
 
 // Matches a `cid:` reference and captures the Content-ID token — the part after
 // `cid:` up to the closing quote, whitespace, `)` (CSS url()), or `>`. Covers

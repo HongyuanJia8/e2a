@@ -70,6 +70,33 @@ func TestAttachments_ContentID(t *testing.T) {
 	}
 }
 
+// An inline image with a Content-ID but NO filename and no attachment
+// disposition is still included (it's a fetchable cid: resource), while a
+// text/html body part carrying a Content-ID (a multipart/related root) stays a
+// body and is NOT treated as an attachment.
+func TestAttachments_CidOnlyInlineIncludedButBodyExcluded(t *testing.T) {
+	png := b64("\x89PNG cid-only")
+	raw := []byte("MIME-Version: 1.0\r\n" +
+		"Content-Type: multipart/related; boundary=R\r\n\r\n" +
+		"--R\r\n" +
+		"Content-Type: text/html\r\n" +
+		"Content-ID: <root.html>\r\n" +
+		"\r\n<p><img src=\"cid:logo\"></p>\r\n" +
+		"--R\r\n" +
+		"Content-Type: image/png\r\n" +
+		"Content-ID: <logo>\r\n" +
+		"Content-Transfer-Encoding: base64\r\n" +
+		"\r\n" + png + "\r\n" +
+		"--R--\r\n")
+	atts := Attachments(raw)
+	if len(atts) != 1 {
+		t.Fatalf("want 1 attachment (the cid-only image; the html body excluded), got %d: %+v", len(atts), atts)
+	}
+	if atts[0].ContentID != "logo" || atts[0].ContentType != "image/png" || atts[0].Filename != "" {
+		t.Errorf("cid-only inline image meta wrong: %+v", atts[0])
+	}
+}
+
 func TestTrimContentID(t *testing.T) {
 	cases := map[string]string{
 		"<ii_abc@mail.gmail.com>": "ii_abc@mail.gmail.com",

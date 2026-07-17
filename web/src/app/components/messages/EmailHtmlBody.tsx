@@ -148,9 +148,10 @@ export function EmailHtmlBody({
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   // Resolve inline (cid:) images: match each `cid:` reference in the body to an
-  // attachment by content_id, fetch its bytes, and build a cid→URL map. Runs
-  // whenever the body or its attachment set changes; object URLs are revoked on
-  // cleanup. No-op when we lack the message coordinates needed to fetch bytes.
+  // attachment by content_id, fetch its bytes as a data: URL, and build a
+  // cid→URL map. Runs whenever the body or its attachment set changes; a
+  // cancelled flag drops results from a superseded run. No-op when we lack the
+  // message coordinates needed to fetch bytes.
   useEffect(() => {
     if (!email || !messageId) return;
     const refs = findCidRefs(html);

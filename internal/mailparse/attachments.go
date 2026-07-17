@@ -115,14 +115,23 @@ func collectAttachments(contentType, cte, disposition, contentID, partFilename s
 		}
 	}
 	isAttachmentDisp := strings.HasPrefix(strings.ToLower(strings.TrimSpace(disposition)), "attachment")
-	if filename == "" && !isAttachmentDisp {
+	cid := trimContentID(contentID)
+	// A part with a Content-ID but no filename is still a fetchable inline
+	// resource an HTML `cid:` reference resolves to (some clients embed images
+	// this way) — include it so the renderer can resolve it. Guard against the
+	// message's own body parts: a text/plain or text/html part can carry a
+	// Content-ID (a multipart/related root) and must stay a body, never an
+	// attachment.
+	isTextBody := mediaType == "text/plain" || mediaType == "text/html"
+	isNamedInline := cid != "" && !isTextBody
+	if filename == "" && !isAttachmentDisp && !isNamedInline {
 		return // body text / unnamed inline part — not a fetchable attachment
 	}
 
 	*out = append(*out, Attachment{
 		Filename:    filename,
 		ContentType: mediaType,
-		ContentID:   trimContentID(contentID),
+		ContentID:   cid,
 		Data:        decodeBytes(body, cte),
 	})
 }
