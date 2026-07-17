@@ -21,6 +21,9 @@ export class UpdateWebhookRequest {
     */
     'events'?: Array<UpdateWebhookRequestEventsEnum>;
     'filters'?: WebhookFiltersRequest;
+    /**
+    * When present, must be a non-empty webhook delivery URL; omit to leave the URL unchanged.
+    */
     'url'?: string;
 
     static readonly discriminator: string | undefined = undefined;

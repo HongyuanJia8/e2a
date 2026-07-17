@@ -30,7 +30,7 @@ class CreateWebhookRequest(BaseModel):
     description: Optional[StrictStr] = None
     events: List[StrictStr] = Field(description="Beta: the screening + review-hold events (email.flagged, email.blocked, email.review_requested, email.review_approved, email.review_rejected) are unstable — their payload may change before they are declared stable. All other events are stable.")
     filters: Optional[WebhookFiltersRequest] = None
-    url: StrictStr
+    url: StrictStr = Field(description="Required, non-empty webhook delivery URL.")
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["description", "events", "filters", "url"]
 

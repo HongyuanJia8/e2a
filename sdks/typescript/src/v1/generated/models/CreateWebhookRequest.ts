@@ -20,6 +20,9 @@ export class CreateWebhookRequest {
     */
     'events': Array<CreateWebhookRequestEventsEnum>;
     'filters'?: WebhookFiltersRequest;
+    /**
+    * Required, non-empty webhook delivery URL.
+    */
     'url': string;
 
     static readonly discriminator: string | undefined = undefined;
