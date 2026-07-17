@@ -133,7 +133,7 @@ export function registerAgentTools(server: McpServer, client: McpClient): void {
       title: "Update an agent's protection config (beta)",
       annotations: { idempotentHint: true, destructiveHint: false },
       description:
-        "Set an agent's protection posture. Read-modify-write: only the fields you pass change; the rest keep their current value. The gate decides who may send and what a non-match does (flag/review/block); the scan sensitivity (off|low|medium|high) tunes content screening; holds govern the review queue. BETA. Account scope only.",
+        "Set an agent's protection posture. Read-modify-write: only the fields you pass change; the rest keep their current value. Outbound policy semantics: open matches every recipient; allowlist matches exact addresses in outbound_gate_allowlist; domain matches recipients on the agent's own domain. The outbound gate action applies when any recipient does not match. To require human review for every outbound message, set outbound_gate_policy=allowlist, outbound_gate_allowlist=[], outbound_gate_action=review, and holds_on_expiry=reject. Using open with review will hold nothing because every recipient matches. The scan sensitivity (off|low|medium|high) tunes content screening; holds govern the review queue. BETA. Account scope only.",
       inputSchema: strictInputSchema({
         email: z
           .string()
@@ -159,15 +159,21 @@ export function registerAgentTools(server: McpServer, client: McpClient): void {
         outbound_gate_policy: z
           .enum(["open", "allowlist", "domain"])
           .optional()
-          .describe("Outbound recipient gate."),
+          .describe(
+            "Outbound recipient gate: open matches every recipient; allowlist matches exact addresses in outbound_gate_allowlist; domain matches recipients on the agent's own domain. The gate action applies when any recipient does not match.",
+          ),
         outbound_gate_allowlist: z
           .array(z.string())
           .optional()
-          .describe("Outbound allowed recipient addresses or domains."),
+          .describe(
+            "Exact recipient addresses matched when outbound_gate_policy is allowlist. An empty list makes every recipient a non-match; combine it with outbound_gate_action=review to review every outbound message.",
+          ),
         outbound_gate_action: z
           .enum(["flag", "review", "block"])
           .optional()
-          .describe("What an outbound gate non-match does."),
+          .describe(
+            "What an outbound gate non-match does: flag (send + annotate), review (hold as pending_review for human approval), or block. With policy=open there are no non-matches, so this action never fires.",
+          ),
         outbound_scan_sensitivity: z
           .enum(["off", "low", "medium", "high"])
           .optional()
@@ -181,7 +187,9 @@ export function registerAgentTools(server: McpServer, client: McpClient): void {
         holds_on_expiry: z
           .enum(["approve", "reject"])
           .optional()
-          .describe("What happens to a held item at TTL expiry."),
+          .describe(
+            "What happens to a held item at TTL expiry. Use reject when outbound mail must never be sent without explicit human approval.",
+          ),
         holds_suppress_notifications: z
           .boolean()
           .optional()
