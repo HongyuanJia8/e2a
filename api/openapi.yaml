@@ -608,6 +608,7 @@ components:
         filters:
           $ref: "#/components/schemas/WebhookFiltersRequest"
         url:
+          description: Required, non-empty webhook delivery URL.
           type: string
       required:
         - url
@@ -3230,6 +3231,7 @@ components:
         filters:
           $ref: "#/components/schemas/WebhookFiltersRequest"
         url:
+          description: When present, must be a non-empty webhook delivery URL; omit to leave the URL unchanged.
           type: string
       type: object
     UsageEventEntry:

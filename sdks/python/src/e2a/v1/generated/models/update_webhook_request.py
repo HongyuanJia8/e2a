@@ -31,7 +31,7 @@ class UpdateWebhookRequest(BaseModel):
     enabled: Optional[StrictBool] = None
     events: Optional[List[StrictStr]] = Field(default=None, description="Beta: the screening + review-hold events (email.flagged, email.blocked, email.review_requested, email.review_approved, email.review_rejected) are unstable — their payload may change before they are declared stable. All other events are stable.")
     filters: Optional[WebhookFiltersRequest] = None
-    url: Optional[StrictStr] = None
+    url: Optional[StrictStr] = Field(default=None, description="When present, must be a non-empty webhook delivery URL; omit to leave the URL unchanged.")
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["description", "enabled", "events", "filters", "url"]
 

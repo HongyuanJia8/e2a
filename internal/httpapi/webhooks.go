@@ -94,13 +94,14 @@ func webhookView(wh *identity.Webhook) WebhookView {
 // agent.ValidateWebhookURL, event allowlist via webhookpub.IsValidEventType)
 // so they can't drift; the charset/length/ownership checks are explicit.
 func (s *Server) validateWebhookFields(ctx context.Context, userID, url string, events []string, f WebhookFiltersView, description string) *ErrorEnvelope {
-	if url != "" {
-		if err := agent.ValidateWebhookURL(url); err != nil {
-			return NewError(http.StatusBadRequest, "invalid_webhook_url", "invalid url: "+err.Error())
-		}
-		if len(url) > webhookMaxURLLen {
-			return NewError(http.StatusBadRequest, "invalid_request", "url too long (max 2048 chars)")
-		}
+	if url == "" {
+		return NewError(http.StatusBadRequest, "invalid_webhook_url", "url must not be empty")
+	}
+	if err := agent.ValidateWebhookURL(url); err != nil {
+		return NewError(http.StatusBadRequest, "invalid_webhook_url", "invalid url: "+err.Error())
+	}
+	if len(url) > webhookMaxURLLen {
+		return NewError(http.StatusBadRequest, "invalid_request", "url too long (max 2048 chars)")
 	}
 	if len(events) == 0 {
 		return NewError(http.StatusBadRequest, "invalid_request", "events must be a non-empty array")
@@ -196,7 +197,7 @@ type listWebhooksOutput struct {
 // constrained to the canonical vocabulary (WH-2; keep in sync with
 // webhookpub.AllEventTypes).
 type CreateWebhookRequest struct {
-	URL         string                 `json:"url"`
+	URL         string                 `json:"url" doc:"Required, non-empty webhook delivery URL."`
 	Events      []string               `json:"events" nullable:"false" enum:"email.received,email.sent,email.failed,email.review_approved,email.review_rejected,domain.sending_verified,domain.sending_failed,email.delivered,email.bounced,email.complained,domain.suppression_added,email.flagged,email.blocked,email.review_requested" doc:"Beta: the screening + review-hold events (email.flagged, email.blocked, email.review_requested, email.review_approved, email.review_rejected) are unstable — their payload may change before they are declared stable. All other events are stable."`
 	Filters     *WebhookFiltersRequest `json:"filters,omitempty"`
 	Description string                 `json:"description,omitempty"`
@@ -446,7 +447,7 @@ func (s *Server) handleListWebhookDeliveries(ctx context.Context, in *ListDelive
 // UpdateWebhookRequest mirrors the legacy PATCH body — pointer fields so
 // absent != zero; url/events/filters are full-replace when present.
 type UpdateWebhookRequest struct {
-	URL         *string                `json:"url,omitempty"`
+	URL         *string                `json:"url,omitempty" doc:"When present, must be a non-empty webhook delivery URL; omit to leave the URL unchanged."`
 	Events      *[]string              `json:"events,omitempty" enum:"email.received,email.sent,email.failed,email.review_approved,email.review_rejected,domain.sending_verified,domain.sending_failed,email.delivered,email.bounced,email.complained,domain.suppression_added,email.flagged,email.blocked,email.review_requested" doc:"Beta: the screening + review-hold events (email.flagged, email.blocked, email.review_requested, email.review_approved, email.review_rejected) are unstable — their payload may change before they are declared stable. All other events are stable."`
 	Filters     *WebhookFiltersRequest `json:"filters,omitempty"`
 	Description *string                `json:"description,omitempty"`
@@ -467,9 +468,6 @@ func (s *Server) handleUpdateWebhook(ctx context.Context, in *updateWebhookInput
 	// clearing patch (DELETE the webhook to remove it).
 	if req.Events != nil && len(*req.Events) == 0 {
 		return nil, NewError(http.StatusBadRequest, "invalid_request", "events must not be empty (DELETE the webhook to remove it)")
-	}
-	if req.URL != nil && *req.URL == "" {
-		return nil, NewError(http.StatusBadRequest, "invalid_request", "url must not be empty")
 	}
 	// Validate the effective post-patch state against the create-time rules.
 	current, err := s.deps.GetWebhook(ctx, in.ID, user.ID)
