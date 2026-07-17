@@ -95,6 +95,12 @@ def verify_webhook_signature(
     # silently disable the replay guard for a t=nan delivery.
     if not math.isfinite(ts):
         return False
+    # float() accepts non-ASCII Unicode digits (e.g. fullwidth "１７５０"), which
+    # clear the checks above but blow up on t.encode("ascii") below. A legitimate
+    # signed timestamp is always ASCII, so a non-ASCII t can never match — reject
+    # it cleanly rather than raising (WH-SIG "never raises" contract).
+    if not t.isascii():
+        return False
     if now is None:
         now = time.time()
     if abs(now - ts) > tolerance_seconds:
@@ -108,6 +114,11 @@ def verify_webhook_signature(
         expected = hmac.new(sec.encode("utf-8"), signed_payload, hashlib.sha256).hexdigest()
         for candidate in v1s:
             if len(candidate) != len(expected):
+                continue
+            # hmac.compare_digest raises TypeError on non-ASCII str; a real
+            # signature is lowercase hex, so a non-ASCII candidate can never
+            # match — skip it instead of raising (never-raises contract).
+            if not candidate.isascii():
                 continue
             if hmac.compare_digest(candidate, expected):
                 return True

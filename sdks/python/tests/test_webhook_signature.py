@@ -118,6 +118,29 @@ def test_rejects_malformed_header() -> None:
     assert not verify_webhook_signature("{}", "v1=abc", SECRET)
 
 
+def test_rejects_non_ascii_signature_without_raising() -> None:
+    # Regression: a v1= of exactly 64 non-ASCII chars passes the length gate and
+    # reaches hmac.compare_digest, which raises TypeError on non-ASCII str
+    # ("comparing strings with non-ASCII characters is not supported"). The
+    # documented contract is "never raises" — a malformed signature must be a
+    # clean False, not an unhandled 500 in the caller's webhook handler.
+    body = "{}"
+    t = str(int(time.time()))
+    header = f"t={t},v1={'é' * 64}"  # 64 chars, same length as a real hexdigest
+    assert verify_webhook_signature(body, header, SECRET) is False
+
+
+def test_rejects_unicode_digit_timestamp_without_raising() -> None:
+    # Regression: float() accepts Unicode digits (e.g. fullwidth "１７５０"), so a
+    # non-ASCII t within tolerance cleared the isfinite/replay checks and hit
+    # t.encode("ascii"), raising UnicodeEncodeError. Must be a clean False.
+    now = 1_700_000_000.0
+    fullwidth_t = "".join(chr(ord(c) + 0xFEE0) for c in str(int(now)))
+    assert not fullwidth_t.isascii()  # sanity: the input really is non-ASCII
+    header = f"t={fullwidth_t},v1={_sign(SECRET, fullwidth_t, body='{}')}"
+    assert verify_webhook_signature("{}", header, SECRET, now=now) is False
+
+
 def test_accepts_any_secret_in_a_list() -> None:
     body = "{}"
     t = str(int(time.time()))
