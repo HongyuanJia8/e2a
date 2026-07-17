@@ -16,18 +16,18 @@ import { HttpFile } from '../http/http.js';
 export class ApproveRequest {
     'attachments'?: Array<Attachment>;
     /**
-    * Override Bcc recipients. The message is limited to 50 recipients across to, cc, and bcc combined.
+    * Override Bcc recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.
     */
     'bcc'?: Array<string>;
     /**
-    * Override Cc recipients. The message is limited to 50 recipients across to, cc, and bcc combined.
+    * Override Cc recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.
     */
     'cc'?: Array<string>;
     'html'?: string;
     'subject'?: string;
     'text'?: string;
     /**
-    * Override primary recipients. The message is limited to 50 recipients across to, cc, and bcc combined.
+    * Override primary recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.
     */
     'to'?: Array<string>;
 

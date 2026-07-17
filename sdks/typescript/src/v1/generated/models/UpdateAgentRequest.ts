@@ -14,7 +14,7 @@ import { HttpFile } from '../http/http.js';
 
 export class UpdateAgentRequest {
     /**
-    * New display name for the agent (a UI label; the agent\'s identity is its email).
+    * New display name for the agent (a UI label; the agent\'s identity is its email). At most 200 characters (Unicode code points) — the same cap as createAgent.
     */
     'name'?: string;
 

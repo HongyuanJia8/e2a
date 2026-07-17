@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
 from e2a.v1.generated.models.attachment import Attachment
@@ -29,13 +29,13 @@ class ForwardRequest(BaseModel):
     ForwardRequest
     """ # noqa: E501
     attachments: Optional[List[Attachment]] = Field(default=None, description="Additional attachments to include alongside the forwarded message's original attachments, which are carried over automatically. Limits apply to the combined set (originals + these): at most 10 attachments, each ≤ 10 MB decoded, and ≤ 25 MB decoded combined. Exceeding the count → 400 invalid_request; exceeding a size → 413 payload_too_large.")
-    bcc: Optional[List[StrictStr]] = Field(default=None, description="Bcc recipients. The message is limited to 50 recipients across to, cc, and bcc combined.")
-    cc: Optional[List[StrictStr]] = Field(default=None, description="Cc recipients. The message is limited to 50 recipients across to, cc, and bcc combined.")
-    conversation_id: Optional[StrictStr] = None
+    bcc: Optional[List[Annotated[str, Field(strict=True, max_length=320)]]] = Field(default=None, description="Bcc recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.")
+    cc: Optional[List[Annotated[str, Field(strict=True, max_length=320)]]] = Field(default=None, description="Cc recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.")
+    conversation_id: Optional[Annotated[str, Field(strict=True, max_length=200)]] = Field(default=None, description="Caller-assigned conversation (thread) id override. At most 200 characters — deliberately the same cap as the webhook conversation_ids filter-value limit and the message-list conversation_id filter limit (both 200), so an accepted conversation_id is never too long to filter by. Must not contain CR or LF.")
     html: Optional[Annotated[str, Field(strict=True, max_length=1048576)]] = None
-    reply_to: Optional[StrictStr] = Field(default=None, description="Sets the Reply-To header — where replies to this message are directed. A single RFC 5322 address, optionally with a display name. Defaults to the sending agent's own address.")
+    reply_to: Optional[Annotated[str, Field(strict=True, max_length=320)]] = Field(default=None, description="Sets the Reply-To header — where replies to this message are directed. A single RFC 5322 address, optionally with a display name. At most 320 characters (display name + address combined). Defaults to the sending agent's own address.")
     text: Annotated[str, Field(strict=True, max_length=1048576)]
-    to: List[StrictStr] = Field(description="Primary recipients. The message is limited to 50 recipients across to, cc, and bcc combined.")
+    to: List[Annotated[str, Field(strict=True, max_length=320)]] = Field(description="Primary recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.")
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["attachments", "bcc", "cc", "conversation_id", "html", "reply_to", "text", "to"]
 

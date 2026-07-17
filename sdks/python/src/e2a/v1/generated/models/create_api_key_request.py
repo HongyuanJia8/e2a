@@ -20,6 +20,7 @@ import json
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
+from typing_extensions import Annotated
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -29,7 +30,7 @@ class CreateAPIKeyRequest(BaseModel):
     """ # noqa: E501
     agent_email: Optional[StrictStr] = Field(default=None, description="Inbox email to bind the key to; required when scope=agent.")
     expires_at: Optional[datetime] = Field(default=None, description="Optional hard expiry (RFC 3339, must be in the future). Omit for a never-expiring key.")
-    name: Optional[StrictStr] = Field(default=None, description="Human label for the key.")
+    name: Optional[Annotated[str, Field(strict=True, max_length=200)]] = Field(default=None, description="Human label for the key. At most 200 characters (Unicode code points).")
     scope: Optional[StrictStr] = Field(default=None, description="account = workspace admin (default); agent = bound to a single inbox.")
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["agent_email", "expires_at", "name", "scope"]

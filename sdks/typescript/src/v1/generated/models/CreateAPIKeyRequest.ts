@@ -22,7 +22,7 @@ export class CreateAPIKeyRequest {
     */
     'expiresAt'?: Date;
     /**
-    * Human label for the key.
+    * Human label for the key. At most 200 characters (Unicode code points).
     */
     'name'?: string;
     /**

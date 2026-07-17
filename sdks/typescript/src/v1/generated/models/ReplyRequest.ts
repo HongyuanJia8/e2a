@@ -19,18 +19,21 @@ export class ReplyRequest {
     */
     'attachments'?: Array<Attachment>;
     /**
-    * Additional Bcc recipients. The final message is limited to 50 recipients across to, cc, and bcc combined.
+    * Additional Bcc recipients. The final message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.
     */
     'bcc'?: Array<string>;
     /**
-    * Additional Cc recipients. The final message is limited to 50 recipients across to, cc, and bcc combined.
+    * Additional Cc recipients. The final message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.
     */
     'cc'?: Array<string>;
+    /**
+    * Caller-assigned conversation (thread) id override. At most 200 characters — deliberately the same cap as the webhook conversation_ids filter-value limit and the message-list conversation_id filter limit (both 200), so an accepted conversation_id is never too long to filter by. Must not contain CR or LF.
+    */
     'conversationId'?: string;
     'html'?: string;
     'replyAll'?: boolean;
     /**
-    * Sets the Reply-To header — where replies to this message are directed. A single RFC 5322 address, optionally with a display name. Defaults to the sending agent\'s own address.
+    * Sets the Reply-To header — where replies to this message are directed. A single RFC 5322 address, optionally with a display name. At most 320 characters (display name + address combined). Defaults to the sending agent\'s own address.
     */
     'replyTo'?: string;
     'text': string;

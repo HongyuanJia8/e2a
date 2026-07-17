@@ -23,9 +23,9 @@ type approveRequest struct {
 	Subject     *string                `json:"subject,omitempty" maxLength:"2000"`
 	BodyText    *string                `json:"text,omitempty" maxLength:"1048576"`
 	BodyHTML    *string                `json:"html,omitempty" maxLength:"1048576"`
-	To          *[]string              `json:"to,omitempty" nullable:"false" doc:"Override primary recipients. The message is limited to 50 recipients across to, cc, and bcc combined."`
-	CC          *[]string              `json:"cc,omitempty" nullable:"false" doc:"Override Cc recipients. The message is limited to 50 recipients across to, cc, and bcc combined."`
-	BCC         *[]string              `json:"bcc,omitempty" nullable:"false" doc:"Override Bcc recipients. The message is limited to 50 recipients across to, cc, and bcc combined."`
+	To          *[]string              `json:"to,omitempty" nullable:"false" maxLength:"320" doc:"Override primary recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters."`
+	CC          *[]string              `json:"cc,omitempty" nullable:"false" maxLength:"320" doc:"Override Cc recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters."`
+	BCC         *[]string              `json:"bcc,omitempty" nullable:"false" maxLength:"320" doc:"Override Bcc recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters."`
 	Attachments *[]outbound.Attachment `json:"attachments,omitempty"`
 }
 

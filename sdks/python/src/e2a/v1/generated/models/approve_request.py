@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
 from e2a.v1.generated.models.attachment import Attachment
@@ -29,12 +29,12 @@ class ApproveRequest(BaseModel):
     ApproveRequest
     """ # noqa: E501
     attachments: Optional[List[Attachment]] = None
-    bcc: Optional[List[StrictStr]] = Field(default=None, description="Override Bcc recipients. The message is limited to 50 recipients across to, cc, and bcc combined.")
-    cc: Optional[List[StrictStr]] = Field(default=None, description="Override Cc recipients. The message is limited to 50 recipients across to, cc, and bcc combined.")
+    bcc: Optional[List[Annotated[str, Field(strict=True, max_length=320)]]] = Field(default=None, description="Override Bcc recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.")
+    cc: Optional[List[Annotated[str, Field(strict=True, max_length=320)]]] = Field(default=None, description="Override Cc recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.")
     html: Optional[Annotated[str, Field(strict=True, max_length=1048576)]] = None
     subject: Optional[Annotated[str, Field(strict=True, max_length=2000)]] = None
     text: Optional[Annotated[str, Field(strict=True, max_length=1048576)]] = None
-    to: Optional[List[StrictStr]] = Field(default=None, description="Override primary recipients. The message is limited to 50 recipients across to, cc, and bcc combined.")
+    to: Optional[List[Annotated[str, Field(strict=True, max_length=320)]]] = Field(default=None, description="Override primary recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.")
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["attachments", "bcc", "cc", "html", "subject", "text", "to"]
 

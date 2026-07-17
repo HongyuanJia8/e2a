@@ -13,6 +13,9 @@
 import { HttpFile } from '../http/http.js';
 
 export class RejectRequest {
+    /**
+    * Optional reviewer note explaining the rejection — echoed back as the held message\'s rejection_reason. At most 2000 characters (Unicode code points).
+    */
     'reason'?: string;
 
     static readonly discriminator: string | undefined = undefined;

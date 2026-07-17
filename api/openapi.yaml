@@ -263,13 +263,15 @@ components:
             $ref: "#/components/schemas/Attachment"
           type: array
         bcc:
-          description: Override Bcc recipients. The message is limited to 50 recipients across to, cc, and bcc combined.
+          description: Override Bcc recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.
           items:
+            maxLength: 320
             type: string
           type: array
         cc:
-          description: Override Cc recipients. The message is limited to 50 recipients across to, cc, and bcc combined.
+          description: Override Cc recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.
           items:
+            maxLength: 320
             type: string
           type: array
         html:
@@ -282,8 +284,9 @@ components:
           maxLength: 1048576
           type: string
         to:
-          description: Override primary recipients. The message is limited to 50 recipients across to, cc, and bcc combined.
+          description: Override primary recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.
           items:
+            maxLength: 320
             type: string
           type: array
       type: object
@@ -496,7 +499,8 @@ components:
           format: date-time
           type: string
         name:
-          description: Human label for the key.
+          description: Human label for the key. At most 200 characters (Unicode code points).
+          maxLength: 200
           type: string
         scope:
           description: account = workspace admin (default); agent = bound to a single inbox.
@@ -548,8 +552,12 @@ components:
       additionalProperties: false
       properties:
         email:
+          description: The agent's full email address — its identity. At most 320 characters (Unicode code points).
+          maxLength: 320
           type: string
         name:
+          description: Display name for the agent (a UI label; the agent's identity is its email). At most 200 characters (Unicode code points) — the same cap as updateAgent.
+          maxLength: 200
           type: string
       required:
         - email
@@ -1658,29 +1666,35 @@ components:
             $ref: "#/components/schemas/Attachment"
           type: array
         bcc:
-          description: Bcc recipients. The message is limited to 50 recipients across to, cc, and bcc combined.
+          description: Bcc recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.
           items:
+            maxLength: 320
             type: string
           type: array
         cc:
-          description: Cc recipients. The message is limited to 50 recipients across to, cc, and bcc combined.
+          description: Cc recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.
           items:
+            maxLength: 320
             type: string
           type: array
         conversation_id:
+          description: Caller-assigned conversation (thread) id override. At most 200 characters — deliberately the same cap as the webhook conversation_ids filter-value limit and the message-list conversation_id filter limit (both 200), so an accepted conversation_id is never too long to filter by. Must not contain CR or LF.
+          maxLength: 200
           type: string
         html:
           maxLength: 1048576
           type: string
         reply_to:
-          description: Sets the Reply-To header — where replies to this message are directed. A single RFC 5322 address, optionally with a display name. Defaults to the sending agent's own address.
+          description: Sets the Reply-To header — where replies to this message are directed. A single RFC 5322 address, optionally with a display name. At most 320 characters (display name + address combined). Defaults to the sending agent's own address.
+          maxLength: 320
           type: string
         text:
           maxLength: 1048576
           type: string
         to:
-          description: Primary recipients. The message is limited to 50 recipients across to, cc, and bcc combined.
+          description: Primary recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.
           items:
+            maxLength: 320
             type: string
           type: array
       required:
@@ -2681,6 +2695,8 @@ components:
       additionalProperties: false
       properties:
         reason:
+          description: Optional reviewer note explaining the rejection — echoed back as the held message's rejection_reason. At most 2000 characters (Unicode code points).
+          maxLength: 2000
           type: string
       type: object
     RejectResultView:
@@ -2719,16 +2735,20 @@ components:
             $ref: "#/components/schemas/Attachment"
           type: array
         bcc:
-          description: Additional Bcc recipients. The final message is limited to 50 recipients across to, cc, and bcc combined.
+          description: Additional Bcc recipients. The final message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.
           items:
+            maxLength: 320
             type: string
           type: array
         cc:
-          description: Additional Cc recipients. The final message is limited to 50 recipients across to, cc, and bcc combined.
+          description: Additional Cc recipients. The final message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.
           items:
+            maxLength: 320
             type: string
           type: array
         conversation_id:
+          description: Caller-assigned conversation (thread) id override. At most 200 characters — deliberately the same cap as the webhook conversation_ids filter-value limit and the message-list conversation_id filter limit (both 200), so an accepted conversation_id is never too long to filter by. Must not contain CR or LF.
+          maxLength: 200
           type: string
         html:
           maxLength: 1048576
@@ -2736,7 +2756,8 @@ components:
         reply_all:
           type: boolean
         reply_to:
-          description: Sets the Reply-To header — where replies to this message are directed. A single RFC 5322 address, optionally with a display name. Defaults to the sending agent's own address.
+          description: Sets the Reply-To header — where replies to this message are directed. A single RFC 5322 address, optionally with a display name. At most 320 characters (display name + address combined). Defaults to the sending agent's own address.
+          maxLength: 320
           type: string
         text:
           maxLength: 1048576
@@ -2834,23 +2855,28 @@ components:
             $ref: "#/components/schemas/Attachment"
           type: array
         bcc:
-          description: Bcc recipients. The message is limited to 50 recipients across to, cc, and bcc combined.
+          description: Bcc recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.
           items:
+            maxLength: 320
             type: string
           type: array
         cc:
-          description: Cc recipients. The message is limited to 50 recipients across to, cc, and bcc combined.
+          description: Cc recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.
           items:
+            maxLength: 320
             type: string
           type: array
         conversation_id:
+          description: Caller-assigned conversation (thread) id. At most 200 characters — deliberately the same cap as the webhook conversation_ids filter-value limit and the message-list conversation_id filter limit (both 200), so an accepted conversation_id is never too long to filter by. Must not contain CR or LF.
+          maxLength: 200
           type: string
         html:
           description: Literal HTML body. Mutually exclusive with template_id/template_alias.
           maxLength: 1048576
           type: string
         reply_to:
-          description: Sets the Reply-To header — where replies to this message are directed. A single RFC 5322 address, optionally with a display name (e.g. "Support <support@acme.com>"). Defaults to the sending agent's own address.
+          description: Sets the Reply-To header — where replies to this message are directed. A single RFC 5322 address, optionally with a display name (e.g. "Support <support@acme.com>"). At most 320 characters (display name + address combined). Defaults to the sending agent's own address.
+          maxLength: 320
           type: string
         subject:
           description: Literal subject. Required unless a template reference is used (mutually exclusive with template_id/template_alias).
@@ -2874,8 +2900,9 @@ components:
           maxLength: 1048576
           type: string
         to:
-          description: Primary recipients. The message is limited to 50 recipients across to, cc, and bcc combined.
+          description: Primary recipients. The message is limited to 50 recipients across to, cc, and bcc combined. Each recipient string (display name + address combined) is limited to 320 characters.
           items:
+            maxLength: 320
             type: string
           type: array
       required:
@@ -3160,7 +3187,7 @@ components:
       additionalProperties: false
       properties:
         name:
-          description: New display name for the agent (a UI label; the agent's identity is its email).
+          description: New display name for the agent (a UI label; the agent's identity is its email). At most 200 characters (Unicode code points) — the same cap as createAgent.
           maxLength: 200
           type: string
       type: object

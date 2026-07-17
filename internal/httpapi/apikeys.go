@@ -50,10 +50,16 @@ func apiKeyView(k identity.APIKey) APIKeyView {
 
 type listAPIKeysOutput struct{ Body Page[APIKeyView] }
 
+// maxAPIKeyNameLen bounds the API-key display name (a human label, not an
+// identifier) — same budget as the agent display name. Enforced declaratively
+// via the maxLength struct tag (Huma validates in Unicode code points);
+// TestGABoundTagsMatchConsts guards tag/const drift.
+const maxAPIKeyNameLen = 200
+
 // CreateAPIKeyRequest mirrors the legacy /api/keys body. scope defaults to
 // account; scope=agent requires `agent_email` (an owned inbox email).
 type CreateAPIKeyRequest struct {
-	Name      string `json:"name,omitempty" doc:"Human label for the key."`
+	Name      string `json:"name,omitempty" maxLength:"200" doc:"Human label for the key. At most 200 characters (Unicode code points)."`
 	ExpiresAt string `json:"expires_at,omitempty" format:"date-time" doc:"Optional hard expiry (RFC 3339, must be in the future). Omit for a never-expiring key."`
 	Scope     string `json:"scope,omitempty" enum:"account,agent" doc:"account = workspace admin (default); agent = bound to a single inbox."`
 	Agent     string `json:"agent_email,omitempty" doc:"Inbox email to bind the key to; required when scope=agent."`
