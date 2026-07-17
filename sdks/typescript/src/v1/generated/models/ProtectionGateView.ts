@@ -14,17 +14,17 @@ import { HttpFile } from '../http/http.js';
 
 export class ProtectionGateView {
     /**
-    * What a gate non-match does: flag (deliver + annotate), review (hold), block. Open set: new values may be added over time, so treat these as strings and tolerate unknown values. Known values: flag, review, block.
+    * What a gate non-match does: flag (deliver + annotate), review (hold), block.
     */
-    'action'?: string;
+    'action'?: ProtectionGateViewActionEnum;
     /**
-    * Addresses (allowlist) or domains (domain) the gate trusts; ignored for open. Inbound: matched against the message From AS PRESENTED — a match does not by itself prove the sender is authentic (a forged From that fails SPF/DKIM/DMARC can still match). For spoofing-sensitive trust, also check the message authentication result.
+    * Addresses (allowlist) or, inbound only, domains (domain) the gate trusts; ignored for open and for the outbound domain policy (which matches the agent\'s own domain, not this list). Inbound: matched against the message From AS PRESENTED — a match does not by itself prove the sender is authentic (a forged From that fails SPF/DKIM/DMARC can still match). For spoofing-sensitive trust, also check the message authentication result.
     */
     'allowlist'?: Array<string>;
     /**
-    * Trust gate: open (all), domain (listed domains), allowlist (listed addresses). Open set: new values may be added over time, so treat these as strings and tolerate unknown values. Known values: open, allowlist, domain.
+    * Trust gate: open (all), domain (inbound: senders on the listed domains; outbound: recipients on the agent\'s own domain), allowlist (listed addresses).
     */
-    'policy'?: string;
+    'policy'?: ProtectionGateViewPolicyEnum;
 
     static readonly discriminator: string | undefined = undefined;
 
@@ -34,7 +34,7 @@ export class ProtectionGateView {
         {
             "name": "action",
             "baseName": "action",
-            "type": "string",
+            "type": "ProtectionGateViewActionEnum",
             "format": ""
         },
         {
@@ -46,7 +46,7 @@ export class ProtectionGateView {
         {
             "name": "policy",
             "baseName": "policy",
-            "type": "string",
+            "type": "ProtectionGateViewPolicyEnum",
             "format": ""
         }    ];
 
@@ -57,3 +57,15 @@ export class ProtectionGateView {
     public constructor() {
     }
 }
+
+export enum ProtectionGateViewActionEnum {
+    Flag = 'flag',
+    Review = 'review',
+    Block = 'block'
+}
+export enum ProtectionGateViewPolicyEnum {
+    Open = 'open',
+    Allowlist = 'allowlist',
+    Domain = 'domain'
+}
+
