@@ -1,0 +1,57 @@
+openapi: 3.1.0
+info:
+  title: Compatibility fixture (account-export versioned interior)
+  version: "1"
+paths:
+  /v1/account/export:
+    get:
+      operationId: exportAccount
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserExport"
+  /v1/things:
+    get:
+      operationId: listThings
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shared"
+components:
+  schemas:
+    UserExport:
+      type: object
+      additionalProperties: true
+      required: [schema_version, agents]
+      properties:
+        schema_version:
+          type: string
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentIdentity"
+        shared:
+          $ref: "#/components/schemas/Shared"
+    AgentIdentity:
+      type: object
+      additionalProperties: true
+      required: [email, internal_detail]
+      properties:
+        email:
+          type: string
+        internal_detail:
+          type: string
+      x-stability-level: beta
+    Shared:
+      type: object
+      additionalProperties: true
+      required: [name]
+      properties:
+        name:
+          type: string

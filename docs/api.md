@@ -230,7 +230,11 @@ every `/v1` operation not listed here is covered by the GA freeze.
   `email.review_requested`, `email.review_approved`, `email.review_rejected`),
   the field carries `x-experimental-values` listing exactly those values —
   their payloads may still change; all other event types are stable. Anything
-  not marked experimental is stable surface.
+  not marked experimental is stable surface. One deliberate schema-level use
+  of the beta marker under a **stable** operation: the account export's
+  interior record schemas (`GET /v1/account/export`) are beta-marked because
+  they are versioned by the export's stable `schema_version` envelope field
+  rather than by the v1 freeze — see the account section below.
 - **Enums in responses are open.** Treat any `type` / `*_status` / `event_type`
   value as an open string set: we may introduce new values (e.g. a new event
   type or delivery state) without a major bump, so a client **must not crash on
@@ -275,6 +279,11 @@ Workspace identity, plan limits, keys, suppressions, and data rights.
   all owned data; returns per-table row counts (GDPR Art. 17). Irreversible.
 - `GET /v1/account/export` — JSON dump of every record the account owns (GDPR
   Art. 15). Omits internal identifiers; see [data-handling.md](data-handling.md).
+  The export **envelope** (the top-level keys and `schema_version`) is stable;
+  the **interior** record shapes are versioned by `schema_version` and may
+  evolve — branch on `schema_version` before interpreting interior records.
+  Interior schemas carry `x-stability-level: beta` in the OpenAPI document to
+  mark that exemption machine-readably; the operation itself is stable.
   Each exported message carries `attachments` as the same typed
   `AttachmentMeta` metadata (`{filename, content_type, size_bytes, index}`,
   `size_bytes` = decoded payload) the live API uses; the attachment **bytes**

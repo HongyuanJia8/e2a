@@ -46,6 +46,7 @@ components:
         - key_prefix
         - created_at
       type: object
+      x-stability-level: beta
     APIKeyView:
       additionalProperties: true
       properties:
@@ -225,6 +226,7 @@ components:
         - inbound_scan_sensitivity
         - outbound_scan_sensitivity
       type: object
+      x-stability-level: beta
     AgentView:
       additionalProperties: true
       properties:
@@ -915,6 +917,7 @@ components:
         - agent_count
         - sending_status
       type: object
+      x-stability-level: beta
     DomainSendingFailedData:
       additionalProperties: true
       properties:
@@ -1908,6 +1911,7 @@ components:
         - created_at
         - expires_at
       type: object
+      x-stability-level: beta
     MessageBodyView:
       additionalProperties: true
       properties:
@@ -2141,6 +2145,7 @@ components:
         - scope
         - issued_at
       type: object
+      x-stability-level: beta
     PageAPIKeyView:
       additionalProperties: true
       properties:
@@ -2438,6 +2443,7 @@ components:
         - action
         - created_at
       type: object
+      x-stability-level: beta
     ProtectionGateRequest:
       additionalProperties: false
       properties:
@@ -2717,6 +2723,7 @@ components:
         - dkim
         - dmarc
       type: object
+      x-stability-level: beta
     RetryAfterDetails:
       additionalProperties: true
       properties:
@@ -2988,6 +2995,7 @@ components:
         - source
         - created_at
       type: object
+      x-stability-level: beta
     TemplatePartError:
       additionalProperties: true
       properties:
@@ -3228,6 +3236,7 @@ components:
         - type
         - created_at
       type: object
+      x-stability-level: beta
     UserExport:
       additionalProperties: true
       properties:
@@ -3259,6 +3268,7 @@ components:
             $ref: "#/components/schemas/ProtectionEventExportEntry"
           type: array
         schema_version:
+          description: Version of the interior record shapes in this export. The export envelope (the top-level keys and schema_version) is stable; interior record shapes are versioned by schema_version and may evolve — branch on schema_version before interpreting interior records. The current server emits "2".
           type: string
         suppressions:
           items:
@@ -3299,6 +3309,7 @@ components:
         - name
         - created_at
       type: object
+      x-stability-level: beta
     ValidateTemplateRequest:
       additionalProperties: false
       properties:
@@ -3725,7 +3736,7 @@ paths:
         - account
   /v1/account/export:
     get:
-      description: A JSON dump of every record the authenticated account owns.
+      description: "A JSON dump of every record the authenticated account owns. Contract: the export envelope (the top-level keys and schema_version) is stable; the interior record shapes are versioned by schema_version and may evolve — branch on schema_version before interpreting interior records. Interior schemas carry `x-stability-level: beta` in this document to mark that exemption machine-readably; the operation itself is stable GA surface."
       operationId: exportAccount
       responses:
         "200":

@@ -38,6 +38,23 @@ const (
 	extExperimentalValues = "x-experimental-values"
 )
 
+// The account export's versioned-interior exemption (GA decision).
+//
+// GET /v1/account/export is a STABLE operation and its top-level UserExport
+// envelope (the top-level keys and schema_version) is frozen with the rest of
+// the GA surface. Its INTERIOR record shapes, however, are snapshots of
+// internal storage models (identity.AgentIdentity, identity.Message, …);
+// freezing them would freeze the storage layer itself. They are therefore
+// versioned by UserExport.schema_version instead of the v1 freeze: consumers
+// MUST branch on schema_version, and every component schema reachable from
+// UserExport — except the envelope itself and any schema the stable surface
+// reaches on its own — carries `x-stability-level: beta` so automated
+// compatibility tooling excludes interior evolution from the stable gate.
+const (
+	exportOperationID    = "exportAccount"
+	exportEnvelopeSchema = "UserExport"
+)
+
 // beta is the operation extension marking a surface as exempt from the
 // v1 freeze (may change without a major version). Returns a fresh map so no
 // two operations share mutable state.
@@ -61,6 +78,7 @@ func (s *Server) applyEvolutionStance() {
 	responseRoots := map[string]bool{} // referenced from a response body
 	betaRoots := map[string]bool{}
 	stableRoots := map[string]bool{}
+	exportOpRoots := map[string]bool{} // the export operation's own roots
 
 	// Inline (non-$ref) object schemas embedded directly in a response body
 	// also need opening; collect them while walking.
@@ -92,8 +110,15 @@ func (s *Server) applyEvolutionStance() {
 			}
 		}
 		dst := stableRoots
-		if isBeta {
+		switch {
+		case isBeta:
 			dst = betaRoots
+		case op.OperationID == exportOperationID:
+			// The export is stable, but routing its response tree into
+			// stableRoots would veto the versioned-interior markers below.
+			// Its non-envelope roots (error responses) rejoin stableRoots
+			// after the export closure is known.
+			dst = exportOpRoots
 		}
 		for name := range opRoots {
 			dst[name] = true
@@ -102,6 +127,19 @@ func (s *Server) applyEvolutionStance() {
 
 	requestSet := refClosure(schemas, requestRoots)
 	responseSet := refClosure(schemas, responseRoots)
+
+	// Versioned-interior exemption (see the constant block above): the export
+	// envelope's closure, computed before stableSet so only the envelope's own
+	// subtree is withheld from the stable-surface veto.
+	if _, ok := schemas[exportEnvelopeSchema]; !ok {
+		panic(fmt.Sprintf("httpapi: export envelope schema %q missing from the registry — re-target the versioned-interior exemption", exportEnvelopeSchema))
+	}
+	exportSet := refClosure(schemas, map[string]bool{exportEnvelopeSchema: true})
+	for name := range exportOpRoots {
+		if !exportSet[name] {
+			stableRoots[name] = true // e.g. error envelopes on the export op stay stable
+		}
+	}
 
 	// The invariant that makes the request/response split total: no schema may
 	// serve both masters. If this fires, split the Go type (input *Request vs
@@ -130,6 +168,44 @@ func (s *Server) applyEvolutionStance() {
 	stableSet := refClosure(schemas, stableRoots)
 	for name := range betaSet {
 		if stableSet[name] {
+			continue
+		}
+		sc := schemas[name]
+		if sc.Extensions == nil {
+			sc.Extensions = map[string]any{}
+		}
+		sc.Extensions[extStabilityLevel] = stabilityBeta
+	}
+
+	// Versioned-interior exemption for the account export (see the constant
+	// block above). Every schema reachable from the UserExport envelope gets
+	// the beta marker, EXCEPT:
+	//   - the envelope itself (top-level keys + schema_version stay frozen);
+	//   - any schema the stable surface reaches on its own — via another
+	//     stable operation (CheckResult, through the message endpoints'
+	//     AuthVerdict) or via a stable operation-unreachable documentation
+	//     component (AttachmentMeta, through the email.received event payload
+	//     EmailReceivedData). Marking those would silently degrade stable
+	//     endpoints/event payloads to beta.
+	// The set is computed, not enumerated, so a new export entry type can't
+	// leave an invisible hole in the freeze (same rationale as the beta-op
+	// inheritance above).
+	stableDocRoots := map[string]bool{}
+	for name, sc := range schemas {
+		if requestSet[name] || responseSet[name] || exportSet[name] {
+			continue
+		}
+		if sc.Extensions[extStabilityLevel] == stabilityBeta {
+			continue
+		}
+		stableDocRoots[name] = true
+	}
+	stableSurface := refClosure(schemas, stableDocRoots)
+	for name := range stableSet {
+		stableSurface[name] = true
+	}
+	for name := range exportSet {
+		if name == exportEnvelopeSchema || stableSurface[name] {
 			continue
 		}
 		sc := schemas[name]
