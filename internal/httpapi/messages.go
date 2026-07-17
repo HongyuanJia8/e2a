@@ -514,12 +514,14 @@ func (s *Server) handleUpdateMessage(ctx context.Context, in *updateMessageInput
 // deleteMessageInput is the DELETE …/messages/{id} input. The default delete
 // is SOFT (trash, reversible) so it needs no confirmation; the trash-only
 // permanent purge requires both permanent=true and the uniform confirm=DELETE
-// literal (validated in the handler — confirm can't be schema-required here
-// because the default path doesn't take it).
+// literal. Confirm is conditionally required — the default path doesn't take
+// it, so it can't be schema-required like DeleteConfirm — but the handler
+// enforces the identical contract: a missing/wrong confirm when
+// permanent=true is a 422 invalid_request, same as the declarative guard.
 type deleteMessageInput struct {
 	MessageIDParam
 	Permanent bool   `query:"permanent" doc:"Permanently delete a message that is already in the trash (irreversible). Requires confirm=DELETE and an account-scoped credential."`
-	Confirm   string `query:"confirm" doc:"Must be the literal DELETE when permanent=true."`
+	Confirm   string `query:"confirm" doc:"Must be the literal string DELETE when permanent=true; ignored otherwise."`
 }
 
 type deleteMessageOutput struct {
@@ -563,8 +565,15 @@ func (s *Server) handleDeleteMessage(ctx context.Context, in *deleteMessageInput
 	}
 	if in.Permanent {
 		if in.Confirm != "DELETE" {
-			return nil, NewError(http.StatusBadRequest, "confirmation_required",
-				"permanent deletion is irreversible — pass confirm=DELETE")
+			// Same error contract as the declarative DeleteConfirm guard (which
+			// Huma enforces on the schema-required delete ops): the identical
+			// caller mistake gets the identical 422 invalid_request envelope.
+			return nil, NewError(http.StatusUnprocessableEntity, "invalid_request",
+				"permanent deletion is irreversible — query parameter confirm must be the literal string DELETE when permanent=true").
+				WithDetails(ValidationErrorDetails{Fields: []FieldError{{
+					Location: "query.confirm",
+					Message:  "must be the literal string DELETE when permanent=true",
+				}}})
 		}
 		if s.deps.PurgeMessage == nil {
 			return nil, NewError(http.StatusInternalServerError, "internal_error", "delete unavailable")

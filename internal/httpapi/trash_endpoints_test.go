@@ -111,14 +111,24 @@ func TestDeleteMessageNotFound(t *testing.T) {
 }
 
 func TestDeleteMessagePermanentRequiresConfirm(t *testing.T) {
-	var c trashCalls
-	srv := testServer(t, withTrashDeps(&c))
-	code, body := sendJSON(t, "DELETE", srv.URL+"/v1/agents/support%40acme.com/messages/msg_1?permanent=true", "good", nil)
-	if code != 400 || errCode(body) != "confirmation_required" {
-		t.Fatalf("want 400 confirmation_required, got %d %v", code, body)
-	}
-	if c.purgeMsg != 0 && c.softMsg != 0 {
-		t.Fatal("no dep should be reached without confirm")
+	// Missing/wrong confirm with permanent=true is the same caller mistake the
+	// declarative DeleteConfirm guard rejects on the schema-required delete
+	// ops, so it must carry the identical error contract: 422 invalid_request.
+	for name, query := range map[string]string{
+		"missing":    "?permanent=true",
+		"wrong case": "?permanent=true&confirm=delete",
+	} {
+		t.Run(name, func(t *testing.T) {
+			var c trashCalls
+			srv := testServer(t, withTrashDeps(&c))
+			code, body := sendJSON(t, "DELETE", srv.URL+"/v1/agents/support%40acme.com/messages/msg_1"+query, "good", nil)
+			if code != 422 || errCode(body) != "invalid_request" {
+				t.Fatalf("want 422 invalid_request, got %d %v", code, body)
+			}
+			if c.purgeMsg != 0 || c.softMsg != 0 {
+				t.Fatal("no dep should be reached without confirm=DELETE")
+			}
+		})
 	}
 }
 
