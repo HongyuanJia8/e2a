@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from e2a.v1.generated.models.agent_identity import AgentIdentity
 from e2a.v1.generated.models.api_key_export_entry import APIKeyExportEntry
@@ -43,7 +43,7 @@ class UserExport(BaseModel):
     messages: List[Message]
     oauth_connections: Optional[List[OAuthConnectionEntry]] = None
     protection_events: List[ProtectionEventExportEntry]
-    schema_version: StrictStr
+    schema_version: StrictStr = Field(description="Version of the interior record shapes in this export. The export envelope (the top-level keys and schema_version) is stable; interior record shapes are versioned by schema_version and may evolve — branch on schema_version before interpreting interior records. The current server emits \"2\".")
     suppressions: List[SuppressionExportEntry]
     usage_events: Optional[List[UsageEventEntry]] = None
     user: UserExportUser

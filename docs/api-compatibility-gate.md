@@ -39,6 +39,25 @@ even when an entire path disappears. Removing the canonical marker promotes an
 operation into the stable gate; adding it to a stable operation is a blocked
 stability decrease.
 
+### The account export's versioned interior
+
+`GET /v1/account/export` (`exportAccount`) is a stable operation whose
+top-level `UserExport` envelope (the top-level keys and `schema_version`) is
+frozen, but whose interior record schemas are snapshots of internal storage
+models, versioned by `schema_version` instead of the v1 freeze (they carry
+`x-stability-level: beta` in the emitted spec). oasdiff only honors stability
+levels per operation, so the normalization step additionally collapses those
+interior schemas — computed by reachability from `UserExport`, excluding the
+envelope itself and any schema the stable surface reaches on its own — to
+open objects on **both** sides of the comparison
+(`openapicompat.PruneExportInterior`). Interior evolution is therefore
+invisible to the gate, while the envelope, the operation, and every shared
+schema (e.g. `CheckResult`, `AttachmentMeta`) remain fully gated. Because the
+boundary is computed, not read from the markers, hand-marking a stable schema
+beta cannot widen the exemption. `TestExportEnvelopeStableInteriorVersioned`
+(internal/httpapi) pins the marker boundary in the emitted spec, and the
+`export-*` fixtures in `make openapi-compat-test` pin the gate behavior.
+
 ## Running locally
 
 The default compares the current contract with `origin/main`:

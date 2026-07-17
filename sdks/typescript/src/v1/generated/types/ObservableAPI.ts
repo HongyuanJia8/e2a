@@ -291,7 +291,7 @@ export class ObservableAccountApi {
     }
 
     /**
-     * A JSON dump of every record the authenticated account owns.
+     * A JSON dump of every record the authenticated account owns. Contract: the export envelope (the top-level keys and schema_version) is stable; the interior record shapes are versioned by schema_version and may evolve — branch on schema_version before interpreting interior records. Interior schemas carry `x-stability-level: beta` in this document to mark that exemption machine-readably; the operation itself is stable GA surface.
      * Export your data (GDPR right-of-access)
      */
     public exportAccountWithHttpInfo(_options?: ConfigurationOptions): Observable<HttpInfo<UserExport>> {
@@ -315,7 +315,7 @@ export class ObservableAccountApi {
     }
 
     /**
-     * A JSON dump of every record the authenticated account owns.
+     * A JSON dump of every record the authenticated account owns. Contract: the export envelope (the top-level keys and schema_version) is stable; the interior record shapes are versioned by schema_version and may evolve — branch on schema_version before interpreting interior records. Interior schemas carry `x-stability-level: beta` in this document to mark that exemption machine-readably; the operation itself is stable GA surface.
      * Export your data (GDPR right-of-access)
      */
     public exportAccount(_options?: ConfigurationOptions): Observable<UserExport> {

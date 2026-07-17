@@ -76,7 +76,12 @@ func (s *Server) registerAccount() {
 	huma.Register(s.API, huma.Operation{
 		OperationID: "exportAccount", Method: http.MethodGet, Path: "/v1/account/export",
 		Summary: "Export your data (GDPR right-of-access)", Tags: []string{"account"},
-		Description: "A JSON dump of every record the authenticated account owns.",
+		Description: "A JSON dump of every record the authenticated account owns. " +
+			"Contract: the export envelope (the top-level keys and schema_version) is stable; " +
+			"the interior record shapes are versioned by schema_version and may evolve — " +
+			"branch on schema_version before interpreting interior records. " +
+			"Interior schemas carry `x-stability-level: beta` in this document to mark that " +
+			"exemption machine-readably; the operation itself is stable GA surface.",
 		Security:    []map[string][]string{{"bearer": {}}},
 	}, s.handleExportUserData)
 

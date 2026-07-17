@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 
@@ -25,9 +26,17 @@ func main() {
 		fmt.Fprintf(os.Stderr, "create output: %v\n", err)
 		os.Exit(1)
 	}
-	if err := openapicompat.NormalizeStability(in, out); err != nil {
+	var normalized bytes.Buffer
+	if err := openapicompat.NormalizeStability(in, &normalized); err != nil {
 		out.Close()
 		fmt.Fprintf(os.Stderr, "normalize OpenAPI: %v\n", err)
+		os.Exit(1)
+	}
+	// Collapse the account export's versioned-interior schemas so oasdiff
+	// gates only the stable envelope (see openapicompat.PruneExportInterior).
+	if err := openapicompat.PruneExportInterior(&normalized, out); err != nil {
+		out.Close()
+		fmt.Fprintf(os.Stderr, "prune export interior: %v\n", err)
 		os.Exit(1)
 	}
 	if err := out.Close(); err != nil {

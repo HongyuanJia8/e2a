@@ -1179,7 +1179,7 @@ class AccountApi:
     ) -> UserExport:
         """Export your data (GDPR right-of-access)
 
-        A JSON dump of every record the authenticated account owns.
+        A JSON dump of every record the authenticated account owns. Contract: the export envelope (the top-level keys and schema_version) is stable; the interior record shapes are versioned by schema_version and may evolve — branch on schema_version before interpreting interior records. Interior schemas carry `x-stability-level: beta` in this document to mark that exemption machine-readably; the operation itself is stable GA surface.
 
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -1242,7 +1242,7 @@ class AccountApi:
     ) -> ApiResponse[UserExport]:
         """Export your data (GDPR right-of-access)
 
-        A JSON dump of every record the authenticated account owns.
+        A JSON dump of every record the authenticated account owns. Contract: the export envelope (the top-level keys and schema_version) is stable; the interior record shapes are versioned by schema_version and may evolve — branch on schema_version before interpreting interior records. Interior schemas carry `x-stability-level: beta` in this document to mark that exemption machine-readably; the operation itself is stable GA surface.
 
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -1305,7 +1305,7 @@ class AccountApi:
     ) -> RESTResponseType:
         """Export your data (GDPR right-of-access)
 
-        A JSON dump of every record the authenticated account owns.
+        A JSON dump of every record the authenticated account owns. Contract: the export envelope (the top-level keys and schema_version) is stable; the interior record shapes are versioned by schema_version and may evolve — branch on schema_version before interpreting interior records. Interior schemas carry `x-stability-level: beta` in this document to mark that exemption machine-readably; the operation itself is stable GA surface.
 
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
