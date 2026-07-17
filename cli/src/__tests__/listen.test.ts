@@ -228,6 +228,41 @@ describe("listen notification handling", () => {
     );
   });
 
+  it("forwards AND prints JSON when --forward and --json are both set (regression: silent forward drop)", async () => {
+    const full = {
+      id: "msg_123",
+      from_: "alice@example.com",
+      delivered_to: "bot@agents.e2a.dev",
+      subject: "Hello",
+      rawMessage: "U3ViamVjdDogSGVsbG8NCg0KSGkgdGhlcmUh",
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve("ok"),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = {
+      messages: { get: vi.fn().mockResolvedValue(full), reply: vi.fn() },
+    } as any;
+
+    await handleNotification(client, "bot@agents.e2a.dev", makeNotification(), {
+      json: true,
+      forward: "https://example.com/webhook",
+      forwardToken: "secret",
+    });
+
+    // The forward is a side channel: it MUST fire even though --json is also
+    // set (before the fix, --json short-circuited and the forward was dropped).
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://example.com/webhook",
+      expect.objectContaining({ method: "POST", body: JSON.stringify(full) }),
+    );
+    // ...and the JSON rendering still reaches stdout.
+    expect(mockStdout).toHaveBeenCalledWith(`${JSON.stringify(full)}\n`);
+  });
+
   it("forwards to OpenClaw and auto-replies when text is returned", async () => {
     // No parsed/body text — exercise the rawMessage decode fallback.
     const raw = "Subject: Hello\r\n\r\nHi there!";

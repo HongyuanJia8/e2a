@@ -139,10 +139,18 @@ export async function listen(opts: ListenOptions): Promise<void> {
         if (!ok) continue;
       }
       if (opts.once) {
-        // --forward still delivers under --once; the blocking wait must not
-        // silently drop the webhook side channel.
+        // --forward still delivers under --once (a side channel that must not
+        // be silently dropped). Call forwardMessage directly — NOT
+        // handleNotification, which also renders stdout and would double-print
+        // under --json, since the --once block renders below.
         if (opts.forward) {
-          await handleNotification(client, agentEmail, notification, opts);
+          await forwardMessage(
+            client,
+            agentEmail,
+            notification,
+            opts.forward,
+            opts.forwardToken,
+          );
         }
         if (opts.text) {
           const full = await client.messages.get(agentEmail, notification.message_id);
@@ -208,12 +216,11 @@ export async function handleNotification(
   notification: EmailReceivedData,
   opts: Pick<ListenOptions, "json" | "forward" | "forwardToken">,
 ): Promise<void> {
-  if (opts.json) {
-    const full = await client.messages.get(agentEmail, notification.message_id);
-    process.stdout.write(JSON.stringify(full) + "\n");
-    return;
-  }
-
+  // Forward is an independent SIDE CHANNEL: it must fire whenever --forward is
+  // set, regardless of how (or whether) the message is also rendered to stdout.
+  // Gating it behind an `else` after --json silently dropped the forward when
+  // both flags were passed — the exact silent side-channel drop the CLI's
+  // exit-code contract exists to prevent.
   if (opts.forward) {
     await forwardMessage(
       client,
@@ -222,8 +229,17 @@ export async function handleNotification(
       opts.forward,
       opts.forwardToken,
     );
+  }
+
+  if (opts.json) {
+    const full = await client.messages.get(agentEmail, notification.message_id);
+    process.stdout.write(JSON.stringify(full) + "\n");
     return;
   }
+
+  // Forward-only mode keeps stdout clean (forwardMessage logs to stderr); the
+  // human summary is only for the plain (non-json, non-forward) default.
+  if (opts.forward) return;
 
   const time = new Date(notification.received_at).toLocaleTimeString();
   process.stdout.write(
