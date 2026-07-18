@@ -52,6 +52,7 @@ expect_pass "export interior schema change" "$fixtures/export-base.yaml" "$fixtu
 expect_fail "stable operation removal" "$fixtures/base.yaml" "$fixtures/stable-removed.yaml" "api-path-removed-without-deprecation"
 expect_fail "operationId rename" "$fixtures/base.yaml" "$fixtures/operation-id-renamed.yaml" "api-operation-id-removed"
 expect_fail "new required request field" "$fixtures/base.yaml" "$fixtures/required-request-field.yaml" "new-required-request-property"
+expect_fail "new request maxLength" "$fixtures/base.yaml" "$fixtures/request-property-max-length-set.yaml" "request-property-max-length-set"
 expect_fail "warning-level request removal" "$fixtures/base.yaml" "$fixtures/request-property-removed.yaml" "request-property-removed"
 expect_fail "stable operation marked beta" "$fixtures/base.yaml" "$fixtures/stability-decreased.yaml" "api-stability-decreased"
 expect_fail "export envelope key removal" "$fixtures/export-base.yaml" "$fixtures/export-envelope-key-removed.yaml" "response-required-property-removed"
