@@ -61,6 +61,7 @@ expect_fail "schema shared between export and stable surface" "$fixtures/export-
 expect_fail "bearer mechanism changed" "$fixtures/security-base.yaml" "$fixtures/security-scheme-changed.yaml" "security-schemes-changed"
 expect_fail "stable SDK schema rename" "$fixtures/sdk-base.yaml" "$fixtures/sdk-stable-schema-renamed.yaml" "stable-sdk-schema-removed"
 expect_fail "stable operation tag change" "$fixtures/sdk-base.yaml" "$fixtures/sdk-operation-tag-changed.yaml" "stable-sdk-operation-tags-changed"
+expect_fail "stable operation tag change through path item ref" "$fixtures/sdk-base.yaml" "$fixtures/sdk-operation-tag-changed-via-pathitem-ref.yaml" "stable-sdk-operation-tags-changed"
 
 set +e
 version_output="$(OASDIFF_BIN=/usr/bin/true "$checker" "$fixtures/base.yaml" "$fixtures/base.yaml" 2>&1)"

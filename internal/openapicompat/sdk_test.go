@@ -65,6 +65,38 @@ func TestCheckStableSDKSurfaceRejectsStableOperationTagChange(t *testing.T) {
 	}
 }
 
+func TestCheckStableSDKSurfaceRejectsTagChangeThroughPathItemRef(t *testing.T) {
+	revision := `
+openapi: 3.1.0
+paths:
+  /stable:
+    $ref: "#/components/pathItems/Stable"
+  /beta:
+    get:
+      operationId: getBeta
+      tags: [beta]
+      x-stability-level: beta
+      responses: {}
+components:
+  pathItems:
+    Stable:
+      get:
+        operationId: getStable
+        tags: [renamed]
+        responses: {}
+  schemas:
+    StableView:
+      type: object
+    BetaView:
+      type: object
+      x-stability-level: beta
+`
+	err := CheckStableSDKSurface(strings.NewReader(sdkSurfaceBase), strings.NewReader(revision))
+	if err == nil || !strings.Contains(err.Error(), "stable-sdk-operation-tags-changed") {
+		t.Fatalf("error = %v, want stable-sdk-operation-tags-changed", err)
+	}
+}
+
 func TestCheckStableSDKSurfaceAllowsBetaOperationTagChange(t *testing.T) {
 	revision := strings.Replace(sdkSurfaceBase, "tags: [beta]", "tags: [experimental]", 1)
 	if err := CheckStableSDKSurface(strings.NewReader(sdkSurfaceBase), strings.NewReader(revision)); err != nil {

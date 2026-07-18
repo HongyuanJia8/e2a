@@ -103,13 +103,17 @@ func readSDKSurface(r io.Reader) (sdkSurface, error) {
 	}
 	components, _ := doc["components"].(map[string]any)
 	schemas, _ := components["schemas"].(map[string]any)
+	pathItems, _ := components["pathItems"].(map[string]any)
 	for name, rawSchema := range schemas {
 		surface.schemas[name] = nodeIsBeta(rawSchema)
 	}
 
 	paths, _ := doc["paths"].(map[string]any)
 	for path, rawItem := range paths {
-		item, _ := rawItem.(map[string]any)
+		item, err := resolvePathItem(rawItem, pathItems, nil)
+		if err != nil {
+			return sdkSurface{}, fmt.Errorf("path %s: %w", path, err)
+		}
 		for method, rawOperation := range item {
 			if !openAPIMethods[method] {
 				continue
@@ -133,6 +137,62 @@ func readSDKSurface(r io.Reader) (sdkSurface, error) {
 		}
 	}
 	return surface, nil
+}
+
+func resolvePathItem(raw any, pathItems map[string]any, resolving map[string]bool) (map[string]any, error) {
+	item, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("path item is not an object")
+	}
+	ref, _ := item["$ref"].(string)
+	if ref == "" {
+		return item, nil
+	}
+
+	const prefix = "#/components/pathItems/"
+	if !strings.HasPrefix(ref, prefix) {
+		return nil, fmt.Errorf("unsupported path item reference %q", ref)
+	}
+	name, err := decodeJSONPointerToken(strings.TrimPrefix(ref, prefix))
+	if err != nil {
+		return nil, fmt.Errorf("invalid path item reference %q: %w", ref, err)
+	}
+	if resolving[name] {
+		return nil, fmt.Errorf("cyclic path item reference %q", ref)
+	}
+	referenced, ok := pathItems[name]
+	if !ok {
+		return nil, fmt.Errorf("path item reference %q is not defined", ref)
+	}
+	if resolving == nil {
+		resolving = map[string]bool{}
+	}
+	resolving[name] = true
+	defer delete(resolving, name)
+	return resolvePathItem(referenced, pathItems, resolving)
+}
+
+func decodeJSONPointerToken(token string) (string, error) {
+	if token == "" || strings.Contains(token, "/") {
+		return "", fmt.Errorf("expected one non-empty JSON Pointer token")
+	}
+	var decoded strings.Builder
+	for i := 0; i < len(token); i++ {
+		if token[i] != '~' {
+			decoded.WriteByte(token[i])
+			continue
+		}
+		if i+1 >= len(token) || (token[i+1] != '0' && token[i+1] != '1') {
+			return "", fmt.Errorf("invalid JSON Pointer escape")
+		}
+		i++
+		if token[i] == '0' {
+			decoded.WriteByte('~')
+		} else {
+			decoded.WriteByte('/')
+		}
+	}
+	return decoded.String(), nil
 }
 
 var openAPIMethods = map[string]bool{
