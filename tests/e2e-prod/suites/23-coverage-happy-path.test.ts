@@ -36,16 +36,20 @@ async function freshAgent(label: string, hold = false): Promise<string> {
 
 // Self-send loopback → poll the inbox for the inbound copy (with its conversation id).
 async function loopbackMessage(email: string, subject: string): Promise<{ id: string; conversationId: string }> {
+  // A self-send may complete synchronously through the local loopback path →
+  // 200 sent, or be durably accepted for asynchronous delivery → 202 accepted.
+  // Tolerate both; completion is verified by polling for the inbound copy below.
   await client.post(`/v1/agents/${encodeURIComponent(email)}/messages`, {
     body: { to: [email], subject, text: "coverage happy-path body" },
-    expect: 200,
+    expect: [200, 202],
   });
   for (let i = 0; i < 12; i++) {
     const list = await client.get<{
-      items: Array<{ message_id: string; subject: string; conversation_id: string }>;
+      items: Array<{ id: string; subject: string; conversation_id: string }>;
     }>(`/v1/agents/${encodeURIComponent(email)}/messages`, { query: { direction: "inbound", limit: 20 } });
     const m = list.body?.items?.find((x) => x.subject === subject);
-    if (m) return { id: m.message_id, conversationId: m.conversation_id };
+    // MessageSummaryView's id field is `id` (not `message_id`).
+    if (m) return { id: m.id, conversationId: m.conversation_id };
     await sleep(1500);
   }
   throw new Error(`loopback message "${subject}" never appeared for ${email}`);

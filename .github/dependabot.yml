@@ -59,7 +59,11 @@ updates:
       npm-minor-patch:
         update-types: ["minor", "patch"]
 
-  - package-ecosystem: "pip"
+  # The Python SDK resolves through uv.lock, so use the native `uv`
+  # ecosystem — the `pip` ecosystem reads pyproject.toml but does NOT
+  # update uv.lock, which is why the lockfile's CVEs never got an
+  # auto-PR and had to be refreshed by hand.
+  - package-ecosystem: "uv"
     directory: "/sdks/python"
     schedule:
       interval: "weekly"
@@ -67,7 +71,7 @@ updates:
     commit-message:
       prefix: "deps(python)"
     groups:
-      pip-minor-patch:
+      uv-minor-patch:
         update-types: ["minor", "patch"]
 
   - package-ecosystem: "github-actions"
